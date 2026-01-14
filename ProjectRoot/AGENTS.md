@@ -16,7 +16,9 @@
   - 영향이 큰 변경은 사전 설명과 동의 후 진행
 
 
-## 명명 규칙
-
-- 파일명은 CamelCase로 통일합니다.
-- python으로 이루어진 서버나 fastapi 등은 snakeCase로 통일합니다.
+## 코딩 컨벤션
+- Kotlin 클래스/파일: PascalCase
+- 함수/변수: camelCase
+- 패키지: 소문자
+- 리소스: snake_case
+- 도구: ktlint + detekt + EditorConfig
