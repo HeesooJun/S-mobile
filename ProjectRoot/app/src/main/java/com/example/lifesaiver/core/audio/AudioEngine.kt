@@ -1,4 +1,4 @@
-package com.example.lifesaiver
+package com.example.lifesaiver.core.audio
 
 import android.annotation.SuppressLint
 import android.media.AudioAttributes
