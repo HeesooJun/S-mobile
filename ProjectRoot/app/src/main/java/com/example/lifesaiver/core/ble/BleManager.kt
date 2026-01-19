@@ -1,4 +1,4 @@
-package com.example.lifesaiver
+package com.example.lifesaiver.core.ble
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
@@ -41,7 +41,8 @@ class BleManager(
     private val context: Context,
     private val logCallback: (String) -> Unit,
     private val audioCallback: (ByteArray) -> Unit,
-    private val textCallback: (String) -> Unit
+    private val textCallback: (String) -> Unit,
+    private val connectionCallback: (Boolean) -> Unit
 ) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
     private val adapter = bluetoothManager?.adapter
@@ -80,6 +81,7 @@ class BleManager(
 
         disconnect()
         isConnected = false
+        connectionCallback(false)
         isHost = false
 
         logCallback("Auto connect start.")
@@ -257,6 +259,7 @@ class BleManager(
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 logCallback("Connected. Requesting MTU...")
                 isConnected = true
+                connectionCallback(true)
                 isHost = false
                 handler.removeCallbacksAndMessages(null)
 
@@ -264,6 +267,7 @@ class BleManager(
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 logCallback("Disconnected.")
                 isConnected = false
+                connectionCallback(false)
                 hostGatt?.close()
                 hostGatt = null
                 startAutoConnect()
@@ -331,7 +335,12 @@ class BleManager(
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 logCallback("Peer joined (${device.address}).")
                 isConnected = true
+                connectionCallback(true)
                 handler.removeCallbacksAndMessages(null)
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                isConnected = false
+                connectionCallback(false)
+                startAutoConnect()
             }
         }
 
@@ -453,5 +462,6 @@ class BleManager(
         gattServer?.close()
         gattServer = null
         isConnected = false
+        connectionCallback(false)
     }
 }
