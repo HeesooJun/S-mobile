@@ -47,11 +47,7 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 onYes = {
                     onStartAutoConnect()
-                    navController.navigate(AppRoute.StandbyStatus.route)
-                },
-                onNo = {
-                    onStartAutoConnect()
-                    navController.navigate(AppRoute.StandbyStatus.route)
+                    navController.navigate(AppRoute.EmergencyBeacon.route)
                 },
                 onRescuerMode = {
                     onStartAutoConnect()
