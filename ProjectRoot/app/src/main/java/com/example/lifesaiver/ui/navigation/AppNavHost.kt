@@ -84,6 +84,7 @@ fun AppNavHost(
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onToggleMic = onToggleMic,
+                onBack = { navController.popBackStack() },
                 onDisconnect = {
                     onDisconnect()
                     navController.navigate(AppRoute.ModeGate.route) {
