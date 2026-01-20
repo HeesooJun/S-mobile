@@ -24,8 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.core.model.ChatMessage
-import com.example.lifesaiver.ui.components.RecordButton
-import com.example.lifesaiver.ui.components.RecordState
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -127,8 +125,6 @@ fun RescueChatScreen(
                         unfocusedTextColor = AppColors.White
                     )
                 )
-
-                RecordButton(state = RecordState.Idle)
 
                 Box(
                     modifier = Modifier
