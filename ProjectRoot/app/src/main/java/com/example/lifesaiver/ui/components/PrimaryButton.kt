@@ -8,9 +8,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 enum class PrimaryButtonVariant {
     Gray,
@@ -25,6 +26,7 @@ fun PrimaryButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val scale = LocalAppScale.current
     val colors = when (variant) {
         PrimaryButtonVariant.Gray -> ButtonDefaults.buttonColors(
             containerColor = AppColors.Gray800,
@@ -43,10 +45,13 @@ fun PrimaryButton(
     Button(
         onClick = onClick,
         colors = colors,
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
-        shape = RoundedCornerShape(18.dp),
+        contentPadding = PaddingValues(
+            horizontal = scaledDp(20, scale),
+            vertical = scaledDp(14, scale)
+        ),
+        shape = RoundedCornerShape(scaledDp(18, scale)),
         modifier = modifier
     ) {
-        Text(text = label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = label, fontSize = scaledSp(16, scale), fontWeight = FontWeight.SemiBold)
     }
 }
