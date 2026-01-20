@@ -9,8 +9,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 enum class ChipVariant {
     Green,
@@ -23,6 +25,7 @@ fun Chip(
     variant: ChipVariant,
     modifier: Modifier = Modifier
 ) {
+    val scale = LocalAppScale.current
     val background = when (variant) {
         ChipVariant.Green -> AppColors.GreenSoft
         ChipVariant.Gray -> AppColors.Gray700
@@ -45,9 +48,12 @@ fun Chip(
         Text(
             text = label,
             color = textColor,
-            fontSize = 11.sp,
+            fontSize = scaledSp(11, scale),
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier.padding(
+                horizontal = scaledDp(10, scale),
+                vertical = scaledDp(6, scale)
+            )
         )
     }
 }
