@@ -13,7 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -33,7 +39,27 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import com.example.lifesaiver.R
+import com.example.lifesaiver.ui.screen.standby.rememberCurrentTimeText
+import kotlinx.coroutines.delay
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
+@Composable
+fun rememberCurrentTimeText(
+    pattern: String = "HH:mm",
+    updateIntervalMillis: Long = 60_000L // 1분마다 갱신
+): State<String> {
+    val formatter = remember(pattern) { DateTimeFormatter.ofPattern(pattern) }
+    val timeState = remember { mutableStateOf(LocalTime.now().format(formatter)) }
+
+    LaunchedEffect(pattern, updateIntervalMillis) {
+        while (true) {
+            timeState.value = LocalTime.now().format(formatter)
+            delay(updateIntervalMillis)
+        }
+    }
+    return timeState
+}
 @Composable
 fun PTTLinkScreen(
     batteryLevel: Int,
@@ -45,6 +71,9 @@ fun PTTLinkScreen(
     onChat: () -> Unit
 ) {
     val scale = LocalAppScale.current
+
+    val currentTime by rememberCurrentTimeText(pattern = "HH:mm", updateIntervalMillis = 60_000L)
+
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
@@ -60,7 +89,7 @@ fun PTTLinkScreen(
                 color = AppColors.Gray500,
                 fontSize = scaledSp(12, scale)
             )
-            Text(text = "12:00", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+            Text(text = currentTime, color = AppColors.Gray500, fontSize = scaledSp(12, scale)) // ✅ 여기
         }
 
         Row(
