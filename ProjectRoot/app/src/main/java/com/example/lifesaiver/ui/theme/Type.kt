@@ -1,34 +1,36 @@
 package com.example.lifesaiver.ui.theme
 
 import androidx.compose.material3.Typography
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import com.example.lifesaiver.R
 
-// Set of Material typography styles to start with
+val Pretendard = FontFamily(
+    Font(R.font.pretendard_regular, FontWeight.Normal),
+    Font(R.font.pretendard_medium, FontWeight.Medium),
+    Font(R.font.pretendard_semibold, FontWeight.SemiBold),
+    Font(R.font.pretendard_bold, FontWeight.Bold),
+    Font(R.font.pretendard_extrabold, FontWeight.ExtraBold),
+    Font(R.font.pretendard_black, FontWeight.Black)
+)
+
+private val BaseTypography = Typography()
+
 val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
+    displayLarge = BaseTypography.displayLarge.copy(fontFamily = Pretendard),
+    displayMedium = BaseTypography.displayMedium.copy(fontFamily = Pretendard),
+    displaySmall = BaseTypography.displaySmall.copy(fontFamily = Pretendard),
+    headlineLarge = BaseTypography.headlineLarge.copy(fontFamily = Pretendard),
+    headlineMedium = BaseTypography.headlineMedium.copy(fontFamily = Pretendard),
+    headlineSmall = BaseTypography.headlineSmall.copy(fontFamily = Pretendard),
+    titleLarge = BaseTypography.titleLarge.copy(fontFamily = Pretendard),
+    titleMedium = BaseTypography.titleMedium.copy(fontFamily = Pretendard),
+    titleSmall = BaseTypography.titleSmall.copy(fontFamily = Pretendard),
+    bodyLarge = BaseTypography.bodyLarge.copy(fontFamily = Pretendard),
+    bodyMedium = BaseTypography.bodyMedium.copy(fontFamily = Pretendard),
+    bodySmall = BaseTypography.bodySmall.copy(fontFamily = Pretendard),
+    labelLarge = BaseTypography.labelLarge.copy(fontFamily = Pretendard),
+    labelMedium = BaseTypography.labelMedium.copy(fontFamily = Pretendard),
+    labelSmall = BaseTypography.labelSmall.copy(fontFamily = Pretendard)
 )
