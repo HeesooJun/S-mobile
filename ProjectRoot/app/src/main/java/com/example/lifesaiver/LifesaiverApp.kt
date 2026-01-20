@@ -8,14 +8,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.rememberAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 @Composable
 fun LifesaiverApp(
@@ -30,44 +33,49 @@ fun LifesaiverApp(
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit
 ) {
-    if (!hasPermissions) {
-        PermissionRequiredScreen(onRequestPermissions = onRequestPermissions)
-        return
-    }
+    val scale = rememberAppScale()
 
-    AppNavHost(
-        batteryLevel = batteryLevel,
-        isConnected = isConnected,
-        isMicOn = isMicOn,
-        messages = messages,
-        onStartAutoConnect = onStartAutoConnect,
-        onToggleMic = onToggleMic,
-        onSendMessage = onSendMessage,
-        onDisconnect = onDisconnect
-    )
+    CompositionLocalProvider(LocalAppScale provides scale) {
+        if (!hasPermissions) {
+            PermissionRequiredScreen(onRequestPermissions = onRequestPermissions)
+            return@CompositionLocalProvider
+        }
+
+        AppNavHost(
+            batteryLevel = batteryLevel,
+            isConnected = isConnected,
+            isMicOn = isMicOn,
+            messages = messages,
+            onStartAutoConnect = onStartAutoConnect,
+            onToggleMic = onToggleMic,
+            onSendMessage = onSendMessage,
+            onDisconnect = onDisconnect
+        )
+    }
 }
 
 @Composable
 private fun PermissionRequiredScreen(onRequestPermissions: () -> Unit) {
+    val scale = LocalAppScale.current
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColors.Black)
-            .padding(24.dp),
+            .padding(scaledDp(24, scale)),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "권한이 필요합니다",
             color = AppColors.White,
-            fontSize = 20.sp,
+            fontSize = scaledSp(20, scale),
             fontWeight = FontWeight.Bold
         )
         Text(
             text = "BLE 및 마이크 권한을 허용해주세요.",
             color = AppColors.Gray500,
-            fontSize = 14.sp,
-            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp)
+            fontSize = scaledSp(14, scale),
+            modifier = Modifier.padding(top = scaledDp(8, scale), bottom = scaledDp(16, scale))
         )
         Button(onClick = onRequestPermissions) {
             Text(text = "권한 요청")
