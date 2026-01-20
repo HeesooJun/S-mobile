@@ -25,8 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.core.model.ChatMessage
-import com.example.lifesaiver.ui.components.RecordButton
-import com.example.lifesaiver.ui.components.RecordState
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -111,18 +109,24 @@ fun RescueChatScreen(
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = scaledDp(20, scale), vertical = scaledDp(16, scale))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = AppColors.Gray800,
-                        shape = RoundedCornerShape(scaledDp(28, scale))
-                    )
-                    .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = scaledDp(20, scale),
+                                vertical = scaledDp(16, scale)
+                            )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    color = AppColors.Gray800,
+                                    shape = RoundedCornerShape(scaledDp(28, scale))
+                                )
+                                .padding(
+                                    horizontal = scaledDp(16, scale),
+                                    vertical = scaledDp(10, scale)
+                                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
             ) {
@@ -149,11 +153,13 @@ fun RescueChatScreen(
                     )
                 )
 
-                RecordButton(state = RecordState.Idle)
 
                 Box(
                     modifier = Modifier
-                        .background(AppColors.GreenSoft, shape = RoundedCornerShape(scaledDp(20, scale)))
+                        .background(
+                            AppColors.GreenSoft,
+                            shape = RoundedCornerShape(scaledDp(20, scale))
+                        )
                         .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale))
                         .then(
                             if (inputValue.isNotBlank()) {
