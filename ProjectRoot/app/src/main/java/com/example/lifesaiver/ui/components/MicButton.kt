@@ -1,19 +1,24 @@
 package com.example.lifesaiver.ui.components
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 @Composable
 fun MicButton(
@@ -21,25 +26,28 @@ fun MicButton(
     modifier: Modifier = Modifier,
     onToggle: () -> Unit
 ) {
-    val borderColor = if (isActive) AppColors.Red else AppColors.Green
-    val contentColor = if (isActive) AppColors.Red else AppColors.Green
-    val background = if (isActive) AppColors.RedSoft else AppColors.GreenSoft
+    val scale = LocalAppScale.current
+    val contentColor = if (isActive) AppColors.Green else AppColors.Red
+    val micRes = if (isActive) R.drawable.ic_mic else R.drawable.ic_mic_red
 
-    Surface(
-        shape = CircleShape,
-        color = background,
-        border = BorderStroke(3.dp, borderColor),
-        modifier = modifier
-            .size(110.dp)
-            .clickable { onToggle() }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = if (isActive) "MIC ON" else "MIC OFF",
-                color = contentColor,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        Image(
+            painter = painterResource(id = micRes),
+            contentDescription = if (isActive) "MIC ON" else "MIC OFF",
+            contentScale = ContentScale.Fit,
+            modifier = modifier
+                .size(scaledDp(96, scale))
+                .clickable { onToggle() }
+        )
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Text(
+            text = if (isActive) "ON" else "OFF",
+            color = contentColor,
+            fontSize = scaledSp(12, scale),
+            fontWeight = FontWeight.Bold
+        )
     }
 }

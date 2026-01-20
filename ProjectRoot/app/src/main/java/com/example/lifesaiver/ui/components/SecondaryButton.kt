@@ -10,8 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 enum class SecondaryButtonVariant {
     Gray,
@@ -25,6 +27,7 @@ fun SecondaryButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val scale = LocalAppScale.current
     val borderColor = when (variant) {
         SecondaryButtonVariant.Gray -> AppColors.Gray700
         SecondaryButtonVariant.Red -> AppColors.Red
@@ -38,10 +41,13 @@ fun SecondaryButton(
         onClick = onClick,
         border = BorderStroke(1.dp, borderColor),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(18.dp),
+        contentPadding = PaddingValues(
+            horizontal = scaledDp(16, scale),
+            vertical = scaledDp(8, scale)
+        ),
+        shape = RoundedCornerShape(scaledDp(18, scale)),
         modifier = modifier
     ) {
-        Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = label, fontSize = scaledSp(13, scale), fontWeight = FontWeight.SemiBold)
     }
 }
