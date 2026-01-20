@@ -16,6 +16,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +66,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
             val errorMsg = "오류: ${throwable.message}"
             Log.e("CRASH_HANDLER", errorMsg, throwable)
@@ -100,6 +105,17 @@ class MainActivity : ComponentActivity() {
                     onDisconnect = { bleManager.disconnect() }
                 )
             }
+        }
+        hideSystemBars()
+    }
+    private fun hideSystemBars() {
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            // ✅ 상단 상태바 + 하단 네비게이션바 둘 다 숨김
+            hide(WindowInsetsCompat.Type.systemBars())
+
+            // 스와이프하면 잠깐 나타났다 다시 숨김(몰입모드 느낌)
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
     }
 
@@ -200,4 +216,10 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
         }
     }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars() // ✅ 포커스 돌아올 때 다시 숨김(중요)
+    }
+
 }
