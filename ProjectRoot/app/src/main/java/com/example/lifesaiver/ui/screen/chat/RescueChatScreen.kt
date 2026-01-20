@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,26 @@ import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import kotlinx.coroutines.delay
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+
+@Composable
+fun rememberCurrentTimeText(
+    pattern: String = "HH:mm",
+    updateIntervalMillis: Long = 60_000L // 1분마다 갱신
+): State<String> {
+    val formatter = remember(pattern) { DateTimeFormatter.ofPattern(pattern) }
+    val timeState = remember { mutableStateOf(LocalTime.now().format(formatter)) }
+
+    LaunchedEffect(pattern, updateIntervalMillis) {
+        while (true) {
+            timeState.value = LocalTime.now().format(formatter)
+            delay(updateIntervalMillis)
+        }
+    }
+    return timeState
+}
 
 @Composable
 fun RescueChatScreen(
@@ -43,6 +64,7 @@ fun RescueChatScreen(
 ) {
     val (inputValue, setInputValue) = remember { mutableStateOf("") }
     val scale = LocalAppScale.current
+    val currentTime by rememberCurrentTimeText(pattern = "HH:mm", updateIntervalMillis = 60_000L)
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -54,8 +76,8 @@ fun RescueChatScreen(
                 .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = "Connected", color = AppColors.Green, fontSize = scaledSp(12, scale))
-            Text(text = "12:05", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+            Text(text = "Offline", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+            Text(text = currentTime, color = AppColors.Gray500, fontSize = scaledSp(12, scale)) // ✅ 여기
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
