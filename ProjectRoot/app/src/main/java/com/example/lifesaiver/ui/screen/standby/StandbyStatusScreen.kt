@@ -124,7 +124,7 @@ fun StandbyStatusScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SecondaryButton(label = "이전", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
+                SecondaryButton(label = "종료", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
                 Chip(label = "센서 상태 정상 작동", variant = ChipVariant.Green)
                 SignalBars(strength = 4, variant = SignalVariant.Green)
             }
