@@ -38,7 +38,8 @@ fun ModeGateScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
+                .height(scaledDp(56, scale))
+                .padding(horizontal = scaledDp(32, scale)),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -47,11 +48,6 @@ fun ModeGateScreen(
                 color = AppColors.White,
                 fontSize = scaledSp(18, scale),
                 fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "$batteryLevel%",
-                color = AppColors.Gray400,
-                fontSize = scaledSp(12, scale)
             )
         }
 
