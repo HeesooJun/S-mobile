@@ -10,9 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 enum class RecordState {
     Idle,
@@ -24,20 +25,21 @@ fun RecordButton(
     state: RecordState,
     modifier: Modifier = Modifier
 ) {
+    val scale = LocalAppScale.current
     val borderColor = if (state == RecordState.Recording) AppColors.Red else AppColors.Green
     val label = if (state == RecordState.Recording) "REC" else "MIC"
 
     Surface(
         shape = CircleShape,
         color = AppColors.Gray800,
-        border = BorderStroke(2.dp, borderColor),
-        modifier = modifier.size(40.dp)
+        border = BorderStroke(scaledDp(2, scale), borderColor),
+        modifier = modifier.size(scaledDp(40, scale))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 color = borderColor,
-                fontSize = 10.sp,
+                fontSize = scaledSp(10, scale),
                 fontWeight = FontWeight.Bold
             )
         }
