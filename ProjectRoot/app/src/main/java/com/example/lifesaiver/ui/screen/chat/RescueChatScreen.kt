@@ -51,11 +51,12 @@ fun RescueChatScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
-            horizontalArrangement = Arrangement.SpaceBetween
+                .height(scaledDp(56, scale))
+                .padding(horizontal = scaledDp(32, scale)),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = "Connected", color = AppColors.Green, fontSize = scaledSp(12, scale))
-            Text(text = "12:05", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))

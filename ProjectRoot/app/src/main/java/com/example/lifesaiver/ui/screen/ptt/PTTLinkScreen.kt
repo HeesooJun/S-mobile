@@ -85,20 +85,16 @@ fun PTTLinkScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
+                .height(scaledDp(56, scale))
+                .padding(horizontal = scaledDp(32, scale)),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             TopIconButton(
                 iconRes = R.drawable.arrow,
                 contentDescription = "뒤로",
-                onClick = onBack
-            )
-            Text(
-                text = "$batteryLevel%",
-                color = AppColors.Gray400,
-                fontSize = scaledSp(14, scale),
-                fontWeight = FontWeight.Bold
+                onClick = onBack,
+                modifier = Modifier.offset(x = -scaledDp(6, scale))
             )
         }
 
@@ -131,7 +127,7 @@ fun PTTLinkScreen(
             )
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
-                text = if (isConnected) "구조자와 연결 확인" else "연결 대기 중",
+                text = if (isConnected) "구조자 연결됨" else "구조자 연결 대기 중",
                 color = if (isConnected) AppColors.Green else AppColors.Gray500,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.SemiBold
@@ -243,13 +239,14 @@ fun PTTLinkScreen(
 private fun TopIconButton(
     iconRes: Int,
     contentDescription: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val scale = LocalAppScale.current
     Surface(
         color = Color.Transparent,
         shape = CircleShape,
-        modifier = Modifier
+        modifier = modifier
             .size(scaledDp(36, scale))
             .clickable { onClick() }
     ) {
