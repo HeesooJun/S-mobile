@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
@@ -24,11 +25,13 @@ import com.example.lifesaiver.ui.theme.scaledSp
 fun MicButton(
     isActive: Boolean,
     modifier: Modifier = Modifier,
+    size: Dp? = null,
     onToggle: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val contentColor = if (isActive) AppColors.Green else AppColors.Red
     val micRes = if (isActive) R.drawable.ic_mic else R.drawable.ic_mic_red
+    val micSize = size ?: scaledDp(88, scale)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -39,7 +42,7 @@ fun MicButton(
             contentDescription = if (isActive) "MIC ON" else "MIC OFF",
             contentScale = ContentScale.Fit,
             modifier = modifier
-                .size(scaledDp(96, scale))
+                .size(micSize)
                 .clickable { onToggle() }
         )
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
