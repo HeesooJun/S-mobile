@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,8 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.ui.components.RecordButton
 import com.example.lifesaiver.ui.components.RecordState
@@ -31,6 +30,9 @@ import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
 import com.example.lifesaiver.ui.theme.AppColors
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
 
 @Composable
 fun RescueChatScreen(
@@ -40,6 +42,7 @@ fun RescueChatScreen(
     onSend: (String) -> Unit
 ) {
     val (inputValue, setInputValue) = remember { mutableStateOf("") }
+    val scale = LocalAppScale.current
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -48,35 +51,37 @@ fun RescueChatScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 24.dp),
+                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = "Connected", color = AppColors.Green, fontSize = 12.sp)
-            Text(text = "12:05", color = AppColors.Gray500, fontSize = 12.sp)
+            Text(text = "Connected", color = AppColors.Green, fontSize = scaledSp(12, scale))
+            Text(text = "12:05", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
         }
 
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
+                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale)),
             verticalAlignment = Alignment.CenterVertically
         ) {
             SecondaryButton(label = "이전", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(scaledDp(12, scale)))
             Text(
                 text = roomTitle,
                 color = AppColors.White,
-                fontSize = 14.sp,
+                fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.Bold
             )
         }
 
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = scaledDp(24, scale)),
+            verticalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
         ) {
             items(messages) { message ->
                 MessageBubble(message = message)
@@ -86,25 +91,30 @@ fun RescueChatScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .padding(horizontal = scaledDp(20, scale), vertical = scaledDp(16, scale))
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
                         color = AppColors.Gray800,
-                        shape = RoundedCornerShape(28.dp)
+                        shape = RoundedCornerShape(scaledDp(28, scale))
                     )
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale)),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
             ) {
                 OutlinedTextField(
                     value = inputValue,
                     onValueChange = setInputValue,
-                    placeholder = { Text("메시지 입력...", color = AppColors.Gray500, fontSize = 12.sp) },
+                    placeholder = {
+                        Text("메시지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+                    },
                     modifier = Modifier.weight(1f),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = AppColors.White, fontSize = 12.sp),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = AppColors.White,
+                        fontSize = scaledSp(12, scale)
+                    ),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = AppColors.Gray800,
                         unfocusedContainerColor = AppColors.Gray800,
@@ -121,8 +131,8 @@ fun RescueChatScreen(
 
                 Box(
                     modifier = Modifier
-                        .background(AppColors.GreenSoft, shape = RoundedCornerShape(20.dp))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .background(AppColors.GreenSoft, shape = RoundedCornerShape(scaledDp(20, scale)))
+                        .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale))
                         .then(
                             if (inputValue.isNotBlank()) {
                                 Modifier
@@ -138,7 +148,7 @@ fun RescueChatScreen(
                     Text(
                         text = "전송",
                         color = AppColors.Green,
-                        fontSize = 12.sp,
+                        fontSize = scaledSp(12, scale),
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.align(Alignment.Center)
                     )
@@ -150,6 +160,7 @@ fun RescueChatScreen(
 
 @Composable
 private fun MessageBubble(message: ChatMessage) {
+    val scale = LocalAppScale.current
     val background = if (message.isMine) AppColors.GreenSoft else AppColors.Gray800
     val textColor = if (message.isMine) AppColors.Green else AppColors.White
     Row(
@@ -158,10 +169,10 @@ private fun MessageBubble(message: ChatMessage) {
     ) {
         Box(
             modifier = Modifier
-                .background(background, shape = RoundedCornerShape(16.dp))
-                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
+                .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(8, scale))
         ) {
-            Text(text = message.text, color = textColor, fontSize = 12.sp)
+            Text(text = message.text, color = textColor, fontSize = scaledSp(12, scale))
         }
     }
 }
