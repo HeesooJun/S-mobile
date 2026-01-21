@@ -49,19 +49,16 @@ fun EmergencyBeaconScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
-            horizontalArrangement = Arrangement.SpaceBetween
+                .height(scaledDp(56, scale))
+                .padding(horizontal = scaledDp(32, scale)),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "긴급 상황",
                 color = AppColors.Red,
                 fontSize = scaledSp(14, scale),
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "$batteryLevel%",
-                color = AppColors.Red.copy(alpha = 0.8f),
-                fontSize = scaledSp(12, scale)
+                fontWeight = FontWeight.Medium
             )
         }
 
