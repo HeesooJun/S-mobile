@@ -301,7 +301,7 @@ private fun SensorStatusToggle(
         Text(
             text = label,
             color = AppColors.Gray400,
-            fontSize = scaledSp(11, scale),
+            fontSize = scaledSp(13, scale),
             fontWeight = FontWeight.Medium
         )
         Image(
