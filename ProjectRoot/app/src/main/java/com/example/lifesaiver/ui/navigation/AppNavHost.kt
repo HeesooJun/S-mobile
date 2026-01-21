@@ -1,11 +1,13 @@
 package com.example.lifesaiver.ui.navigation
 
+import android.app.Activity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -30,6 +32,7 @@ fun AppNavHost(
     val navController = rememberNavController()
     val roomTitle = remember { "김싸피의 채팅방" }
     var pendingSosNavigation by remember { mutableStateOf(false) }
+    val activity = LocalContext.current as? Activity
 
     LaunchedEffect(isConnected, pendingSosNavigation) {
         if (pendingSosNavigation && isConnected) {
@@ -47,7 +50,10 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 onYes = {
                     onStartAutoConnect()
-                    navController.navigate(AppRoute.EmergencyBeacon.route)
+                    navController.navigate(AppRoute.StandbyStatus.route)
+                },
+                onNo = {
+                    activity?.finish()
                 },
                 onRescuerMode = {
                     onStartAutoConnect()
@@ -80,6 +86,7 @@ fun AppNavHost(
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onToggleMic = onToggleMic,
+                onBack = { navController.popBackStack() },
                 onDisconnect = {
                     onDisconnect()
                     navController.navigate(AppRoute.ModeGate.route) {

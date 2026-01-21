@@ -1,6 +1,5 @@
 package com.example.lifesaiver.ui.screen.mode
 
-import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.platform.LocalContext
 import com.example.lifesaiver.ui.components.PrimaryButton
 import com.example.lifesaiver.ui.components.PrimaryButtonVariant
 import com.example.lifesaiver.ui.components.ScreenScaffold
@@ -29,11 +27,10 @@ import com.example.lifesaiver.ui.theme.scaledSp
 fun ModeGateScreen(
     batteryLevel: Int,
     onYes: () -> Unit,
+    onNo: () -> Unit,
     onRescuerMode: () -> Unit
 ) {
     val scale = LocalAppScale.current
-    val activity = LocalContext.current as? Activity
-
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
@@ -41,21 +38,11 @@ fun ModeGateScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(24, scale)),
+                .height(scaledDp(56, scale))
+                .padding(horizontal = scaledDp(32, scale)),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Saivior",
-                color = AppColors.White,
-                fontSize = scaledSp(18, scale),
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "$batteryLevel%",
-                color = AppColors.Gray400,
-                fontSize = scaledSp(12, scale)
-            )
         }
 
         Column(
@@ -85,6 +72,13 @@ fun ModeGateScreen(
             )
             Spacer(modifier = Modifier.height(scaledDp(44, scale)))
 
+            PrimaryButton(
+                label = "구조자 모드",
+                variant = PrimaryButtonVariant.Gray,
+                modifier = Modifier.fillMaxWidth(0.7f),
+                onClick = onRescuerMode
+            )
+
             Spacer(modifier = Modifier.height(scaledDp(36, scale)))
             Text(
                 text = "위급상황이신가요?",
@@ -107,7 +101,7 @@ fun ModeGateScreen(
                     label = "NO",
                     variant = PrimaryButtonVariant.Gray,
                     modifier = Modifier.weight(1f),
-                    onClick = { activity?.finish() }
+                    onClick = onNo
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
