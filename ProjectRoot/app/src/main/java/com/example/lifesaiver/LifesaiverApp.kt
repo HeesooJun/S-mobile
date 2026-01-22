@@ -9,14 +9,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.core.model.ChatMessage
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.lifesaiver.presentation.screen.PermissionViewModel
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
@@ -41,12 +37,7 @@ fun LifesaiverApp(
 
     CompositionLocalProvider(LocalAppScale provides scale) {
         if (!hasPermissions) {
-            val permissionViewModel: PermissionViewModel = viewModel()
-            val permissionState by permissionViewModel.uiState.collectAsState()
-            PermissionRequiredScreen(
-                uiState = permissionState,
-                onRequestPermissions = onRequestPermissions
-            )
+            PermissionRequiredScreen(onRequestPermissions = onRequestPermissions)
             return@CompositionLocalProvider
         }
 
@@ -64,10 +55,7 @@ fun LifesaiverApp(
 }
 
 @Composable
-private fun PermissionRequiredScreen(
-    uiState: com.example.lifesaiver.presentation.screen.PermissionUiState,
-    onRequestPermissions: () -> Unit
-) {
+private fun PermissionRequiredScreen(onRequestPermissions: () -> Unit) {
     val scale = LocalAppScale.current
     Column(
         modifier = Modifier
@@ -78,19 +66,19 @@ private fun PermissionRequiredScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = uiState.title,
+            text = "권한이 필요합니다",
             color = AppColors.White,
             fontSize = scaledSp(20, scale),
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = uiState.description,
+            text = "BLE 및 마이크 권한을 허용해주세요.",
             color = AppColors.Gray500,
             fontSize = scaledSp(14, scale),
             modifier = Modifier.padding(top = scaledDp(8, scale), bottom = scaledDp(16, scale))
         )
         Button(onClick = onRequestPermissions) {
-            Text(text = uiState.actionLabel)
+            Text(text = "권한 요청")
         }
     }
 }
