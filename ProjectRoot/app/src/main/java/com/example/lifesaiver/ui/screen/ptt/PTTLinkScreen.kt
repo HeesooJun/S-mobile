@@ -34,10 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -61,6 +58,10 @@ import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import com.example.lifesaiver.presentation.screen.ActionType
+import com.example.lifesaiver.presentation.screen.PTTLinkUiState
+import com.example.lifesaiver.presentation.sensor.SensorProbe
+import com.example.lifesaiver.presentation.sensor.SensorStatus
 import kotlinx.coroutines.delay
 
 @Composable
@@ -72,30 +73,27 @@ fun PTTLinkScreen(
     onToggleMic: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
-    onChat: () -> Unit
+    onChat: () -> Unit,
+    uiState: PTTLinkUiState,
+    sensorItems: List<SensorProbe>,
+    onSensorExpandedChange: (Boolean) -> Unit,
+    onSensorStatusChange: (Int, SensorStatus) -> Unit,
+    onPowerToggle: () -> Unit,
+    onActionSelected: (ActionType?) -> Unit
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
     val sensorManager = remember {
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     }
-    val sensorItems = remember {
-        listOf(
-            SensorProbe("가속도", Sensor.TYPE_ACCELEROMETER),
-            SensorProbe("자이로", Sensor.TYPE_GYROSCOPE),
-            SensorProbe("지자기", Sensor.TYPE_MAGNETIC_FIELD),
-            SensorProbe("조도", Sensor.TYPE_LIGHT),
-            SensorProbe("근접", Sensor.TYPE_PROXIMITY)
-        )
-    }
-    val sensorStatus = remember { mutableStateMapOf<Int, SensorStatus>() }
-    var isSensorExpanded by remember { mutableStateOf(false) }
+    val sensorStatus = uiState.sensorStatus
+    val isSensorExpanded = uiState.isSensorExpanded
     val sensorListener = remember {
         object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
                 val type = event?.sensor?.type ?: return
                 if (sensorStatus[type] != SensorStatus.Active) {
-                    sensorStatus[type] = SensorStatus.Active
+                    onSensorStatusChange(type, SensorStatus.Active)
                 }
             }
 
@@ -116,41 +114,24 @@ fun PTTLinkScreen(
             sensorManager.unregisterListener(sensorListener)
         }
     }
-    val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
-    val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
-    val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
+    val isPowerSaving = uiState.isPowerSaving
+    val expandedAction = uiState.expandedAction
+    val showDoubleTapHint = uiState.showDoubleTapHint
     val showActionLabelsAlways = true
     val displayConnectedCount = (connectedCount - 1).coerceAtLeast(0)
-
-    LaunchedEffect(expandedAction) {
-        if (
-            expandedAction == ActionType.Chat ||
-            expandedAction == ActionType.Disconnect ||
-            expandedAction == ActionType.Power
-        ) {
-            setShowDoubleTapHint(true)
-            delay(3500)
-            setShowDoubleTapHint(false)
-        } else {
-            setShowDoubleTapHint(false)
-        }
-    }
 
     LaunchedEffect(isSensorExpanded) {
         if (!isSensorExpanded) return@LaunchedEffect
         sensorItems.forEach { item ->
             val sensor = sensorManager.getDefaultSensor(item.type)
-            sensorStatus[item.type] = if (sensor == null) {
-                SensorStatus.Unsupported
-            } else {
-                SensorStatus.Checking
-            }
+            val status = if (sensor == null) SensorStatus.Unsupported else SensorStatus.Checking
+            onSensorStatusChange(item.type, status)
         }
         delay(3000)
         if (isSensorExpanded) {
             sensorItems.forEach { item ->
                 if (sensorStatus[item.type] == SensorStatus.Checking) {
-                    sensorStatus[item.type] = SensorStatus.NoData
+                    onSensorStatusChange(item.type, SensorStatus.NoData)
                 }
             }
         }
@@ -227,8 +208,7 @@ fun PTTLinkScreen(
                         isExpanded = expandedAction == ActionType.Power,
                         showLabelAlways = showActionLabelsAlways,
                         onClick = {
-                            setPowerSaving(!isPowerSaving)
-                            setExpandedAction(ActionType.Power)
+                            onPowerToggle()
                         }
                     )
                     ExpandableAction(
@@ -239,10 +219,10 @@ fun PTTLinkScreen(
                         showLabelAlways = showActionLabelsAlways,
                         onClick = {
                             if (expandedAction == ActionType.Disconnect) {
-                                setExpandedAction(null)
+                                onActionSelected(null)
                                 onDisconnect()
                             } else {
-                                setExpandedAction(ActionType.Disconnect)
+                                onActionSelected(ActionType.Disconnect)
                             }
                         }
                     )
@@ -254,10 +234,10 @@ fun PTTLinkScreen(
                         showLabelAlways = showActionLabelsAlways,
                         onClick = {
                             if (expandedAction == ActionType.Chat) {
-                                setExpandedAction(null)
+                                onActionSelected(null)
                                 onChat()
                             } else {
-                                setExpandedAction(ActionType.Chat)
+                                onActionSelected(ActionType.Chat)
                             }
                         }
                     )
@@ -268,7 +248,7 @@ fun PTTLinkScreen(
                         iconSizeOverride = scaledDp(32, scale),
                         showLabelAlways = showActionLabelsAlways,
                         onClick = {
-                            setExpandedAction(ActionType.Count)
+                            onActionSelected(ActionType.Count)
                         }
                     )
                 }
@@ -319,11 +299,11 @@ fun PTTLinkScreen(
                     SensorStatusToggle(
                         label = "센서 상태",
                         isExpanded = isSensorExpanded,
-                        onToggle = { isSensorExpanded = !isSensorExpanded }
+                        onToggle = { onSensorExpandedChange(!isSensorExpanded) }
                     )
                     DropdownMenu(
                         expanded = isSensorExpanded,
-                        onDismissRequest = { isSensorExpanded = false },
+                        onDismissRequest = { onSensorExpandedChange(false) },
                         offset = DpOffset(-scaledDp(4, scale), scaledDp(12, scale)),
                         modifier = Modifier
                             .widthIn(min = scaledDp(150, scale), max = scaledDp(190, scale))
@@ -448,25 +428,6 @@ private fun ExpandableAction(
             }
         }
     }
-}
-
-private enum class ActionType {
-    Power,
-    Disconnect,
-    Chat,
-    Count
-}
-
-private data class SensorProbe(
-    val label: String,
-    val type: Int
-)
-
-private enum class SensorStatus {
-    Unsupported,
-    Checking,
-    Active,
-    NoData
 }
 
 @Composable
