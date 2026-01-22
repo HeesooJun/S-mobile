@@ -22,5 +22,6 @@ com.example.lifesaiver
 ├─ presentation/      # ViewModel, UiState, 화면 로직
 │  ├─ screen/
 │  └─ sensor/
+├─ protocol/          # 패킷 모델, 코어, 코덱 스켈레톤
 └─ core/              # BLE, 오디오 등 핵심 기능
 ```
