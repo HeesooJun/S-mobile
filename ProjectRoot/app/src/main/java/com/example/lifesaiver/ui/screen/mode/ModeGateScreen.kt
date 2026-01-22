@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import com.example.lifesaiver.presentation.screen.ModeGateUiState
 import com.example.lifesaiver.ui.components.PrimaryButton
 import com.example.lifesaiver.ui.components.PrimaryButtonVariant
 import com.example.lifesaiver.ui.components.ScreenScaffold
@@ -26,6 +27,7 @@ import com.example.lifesaiver.ui.theme.scaledSp
 @Composable
 fun ModeGateScreen(
     batteryLevel: Int,
+    uiState: ModeGateUiState,
     onYes: () -> Unit,
     onNo: () -> Unit,
     onRescuerMode: () -> Unit
@@ -44,7 +46,7 @@ fun ModeGateScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Saivior",
+                text = uiState.appName,
                 color = AppColors.White,
                 fontSize = scaledSp(18, scale),
                 fontWeight = FontWeight.Bold
@@ -66,20 +68,20 @@ fun ModeGateScreen(
             ) {}
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
-                text = "Saivior",
+                text = uiState.appName,
                 color = AppColors.White,
                 fontSize = scaledSp(30, scale),
                 fontWeight = FontWeight.ExtraBold
             )
             Text(
-                text = "오프라인 구조 시스템",
+                text = uiState.tagline,
                 color = AppColors.Gray500,
                 fontSize = scaledSp(13, scale)
             )
             Spacer(modifier = Modifier.height(scaledDp(44, scale)))
 
             PrimaryButton(
-                label = "구조자 모드",
+                label = uiState.rescuerLabel,
                 variant = PrimaryButtonVariant.Gray,
                 modifier = Modifier.fillMaxWidth(0.7f),
                 onClick = onRescuerMode
@@ -87,7 +89,7 @@ fun ModeGateScreen(
 
             Spacer(modifier = Modifier.height(scaledDp(36, scale)))
             Text(
-                text = "위급상황이신가요?",
+                text = uiState.questionLabel,
                 color = AppColors.Red,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.Bold
@@ -98,13 +100,13 @@ fun ModeGateScreen(
                 horizontalArrangement = Arrangement.spacedBy(scaledDp(16, scale))
             ) {
                 PrimaryButton(
-                    label = "YES",
+                    label = uiState.yesLabel,
                     variant = PrimaryButtonVariant.Red,
                     modifier = Modifier.weight(1f),
                     onClick = onYes
                 )
                 PrimaryButton(
-                    label = "NO",
+                    label = uiState.noLabel,
                     variant = PrimaryButtonVariant.Gray,
                     modifier = Modifier.weight(1f),
                     onClick = onNo
