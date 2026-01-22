@@ -12,6 +12,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
+import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.PTTLinkViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.presentation.screen.StandbyStatusViewModel
@@ -48,8 +50,11 @@ fun AppNavHost(
         startDestination = AppRoute.ModeGate.route
     ) {
         composable(AppRoute.ModeGate.route) {
+            val modeGateViewModel: ModeGateViewModel = viewModel()
+            val modeGateState by modeGateViewModel.uiState.collectAsState()
             ModeGateScreen(
                 batteryLevel = batteryLevel,
+                uiState = modeGateState,
                 onYes = {
                     onStartAutoConnect()
                     navController.navigate(AppRoute.StandbyStatus.route)
@@ -84,8 +89,11 @@ fun AppNavHost(
             )
         }
         composable(AppRoute.EmergencyBeacon.route) {
+            val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
+            val emergencyState by emergencyViewModel.uiState.collectAsState()
             EmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
+                uiState = emergencyState,
                 onPrev = { navController.popBackStack() },
                 onNext = { navController.navigate(AppRoute.PTTLink.route) }
             )
