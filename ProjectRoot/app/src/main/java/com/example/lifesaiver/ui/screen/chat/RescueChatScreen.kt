@@ -18,8 +18,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -37,9 +35,10 @@ fun RescueChatScreen(
     roomTitle: String,
     messages: List<ChatMessage>,
     onPrev: () -> Unit,
-    onSend: (String) -> Unit
+    inputValue: String,
+    onInputChange: (String) -> Unit,
+    onSendClick: () -> Unit
 ) {
-    val (inputValue, setInputValue) = remember { mutableStateOf("") }
     val scale = LocalAppScale.current
 
     ScreenScaffold(
@@ -105,7 +104,7 @@ fun RescueChatScreen(
             ) {
                 OutlinedTextField(
                     value = inputValue,
-                    onValueChange = setInputValue,
+                    onValueChange = onInputChange,
                     placeholder = {
                         Text("메시지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
                     },
@@ -134,8 +133,7 @@ fun RescueChatScreen(
                             if (inputValue.isNotBlank()) {
                                 Modifier
                                     .clickable {
-                                        onSend(inputValue.trim())
-                                        setInputValue("")
+                                        onSendClick()
                                     }
                             } else {
                                 Modifier
