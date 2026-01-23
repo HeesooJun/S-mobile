@@ -14,6 +14,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.lifesaiver.core.audio.AudioEngine
 import com.example.lifesaiver.core.audio.VoiceRecorder
 import com.example.lifesaiver.core.ble.BleManager
@@ -32,6 +33,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.random.Random
 import java.io.File
 
@@ -40,6 +43,7 @@ data class AppUiState(
     val batteryLevel: Int = 100,
     val isConnected: Boolean = false,
     val isMicOn: Boolean = false,
+    val isDisconnecting: Boolean = false,
     val messages: List<ChatMessage> = emptyList()
 )
 
@@ -174,7 +178,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onDisconnect() {
-        bleManager.disconnect()
+        if (_uiState.value.isDisconnecting) return
+        _uiState.value = _uiState.value.copy(isDisconnecting = true)
+        sendLeavePacket()
+        viewModelScope.launch {
+            delay(200)
+            bleManager.disconnect()
+            _uiState.value = _uiState.value.copy(isDisconnecting = false)
+        }
     }
 
     private fun initAudio() {
@@ -260,6 +271,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             senderId = senderId
         )
         return Packet(header = header, payload = payload)
+    }
+
+    private fun sendLeavePacket() {
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.LEAVE,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = 0,
+                timestamp = System.currentTimeMillis(),
+                senderId = senderId
+            ),
+            payload = ByteArray(0)
+        )
+        protocolCore.broadcast(packet)
     }
 
     override fun onCleared() {
