@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
                     batteryLevel = uiState.batteryLevel,
                     isConnected = uiState.isConnected,
                     isMicOn = uiState.isMicOn,
+                    isDisconnecting = uiState.isDisconnecting,
                     messages = uiState.messages,
                     onRequestPermissions = { requestPermissions() },
                     onStartAutoConnect = { viewModel.onStartAutoConnect() },
