@@ -16,13 +16,21 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.example.lifesaiver.core.audio.AudioEngine
 import com.example.lifesaiver.core.ble.BleManager
+import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
+import com.example.lifesaiver.protocol.core.ProtocolConstants
+import com.example.lifesaiver.protocol.core.ProtocolCore
+import com.example.lifesaiver.protocol.model.Packet
+import com.example.lifesaiver.protocol.model.PacketHeader
+import com.example.lifesaiver.protocol.model.PacketType
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.random.Random
 
 data class AppUiState(
     val hasPermissions: Boolean = false,
@@ -66,6 +74,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var audioEngine: AudioEngine? = null
     private lateinit var bleManager: BleManager
+    private lateinit var protocolCore: ProtocolCore
+    private val senderId: ByteArray = ByteArray(8).also { Random.nextBytes(it) }
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -76,6 +86,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         initAudio()
+        initProtocol()
         initBle()
         initBatteryMonitor()
         refreshPermissions()
@@ -120,7 +131,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onSendMessage(text: String) {
         if (text.isBlank()) return
-        bleManager.sendText(text)
+        protocolCore.broadcast(buildMessagePacket(text))
         addMessage(ChatMessage(text = text, isMine = true))
     }
 
@@ -142,12 +153,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             logCallback = { msg -> Log.d("BleManager", msg) },
             audioCallback = { pcmData -> audioEngine?.playAudio(pcmData) },
             textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false)) },
+            protocolCallback = {},
             connectionCallback = { connected ->
                 mainHandler.post {
                     _uiState.value = _uiState.value.copy(isConnected = connected)
                 }
             }
         )
+        protocolCore.attachTransport(BleTransport(bleManager))
+    }
+
+    private fun initProtocol() {
+        val codec = BinaryPacketCodec()
+        protocolCore = ProtocolCore(codec, codec)
+        protocolCore.setOnPacketReceived { packet ->
+            if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
+            if (packet.header.type == PacketType.MESSAGE) {
+                val text = packet.payload.toString(Charsets.UTF_8)
+                addMessage(ChatMessage(text = text, isMine = false))
+            }
+        }
     }
 
     private fun initBatteryMonitor() {
@@ -171,6 +196,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val current = _uiState.value
             _uiState.value = current.copy(messages = current.messages + message)
         }
+    }
+
+    private fun buildMessagePacket(text: String): Packet {
+        val payload = text.toByteArray(Charsets.UTF_8)
+        val header = PacketHeader(
+            version = 2,
+            type = PacketType.MESSAGE,
+            ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+            flags = 0,
+            length = payload.size,
+            timestamp = System.currentTimeMillis(),
+            senderId = senderId
+        )
+        return Packet(header = header, payload = payload)
     }
 
     override fun onCleared() {
