@@ -3,11 +3,13 @@ package com.example.lifesaiver.protocol.core
 import com.example.lifesaiver.protocol.codec.PacketDecoder
 import com.example.lifesaiver.protocol.codec.PacketEncoder
 import com.example.lifesaiver.protocol.model.Packet
+import com.example.lifesaiver.protocol.pipeline.PacketPipeline
 import com.example.lifesaiver.protocol.transport.Transport
 
 class ProtocolCore(
     private val encoder: PacketEncoder,
-    private val decoder: PacketDecoder
+    private val decoder: PacketDecoder,
+    private val pipeline: PacketPipeline = PacketPipeline(encoder, decoder)
 ) {
     private var transport: Transport? = null
     private var onPacket: ((Packet) -> Unit)? = null
@@ -22,12 +24,12 @@ class ProtocolCore(
     }
 
     fun send(packet: Packet) {
-        val data = encoder.encode(packet)
-        transport?.send(data)
+        val packets = pipeline.prepareOutbound(packet)
+        packets.forEach { transport?.send(encoder.encode(it)) }
     }
 
     fun onBytesReceived(bytes: ByteArray) {
         val packet = decoder.decode(bytes) ?: return
-        onPacket?.invoke(packet)
+        pipeline.handleInbound(packet)?.let { onPacket?.invoke(it) }
     }
 }
