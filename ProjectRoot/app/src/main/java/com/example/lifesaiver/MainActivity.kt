@@ -44,10 +44,12 @@ class MainActivity : ComponentActivity() {
                     batteryLevel = uiState.batteryLevel,
                     isConnected = uiState.isConnected,
                     isMicOn = uiState.isMicOn,
+                    isDisconnecting = uiState.isDisconnecting,
                     messages = uiState.messages,
                     onRequestPermissions = { requestPermissions() },
                     onStartAutoConnect = { viewModel.onStartAutoConnect() },
-                    onToggleMic = { viewModel.onToggleMic() },
+                    onMicPress = { viewModel.onMicPress() },
+                    onMicRelease = { viewModel.onMicRelease() },
                     onSendMessage = { text -> viewModel.onSendMessage(text) },
                     onDisconnect = { viewModel.onDisconnect() }
                 )

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -70,7 +71,9 @@ fun PTTLinkScreen(
     connectedCount: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
-    onToggleMic: () -> Unit,
+    isDisconnecting: Boolean,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
@@ -180,15 +183,36 @@ fun PTTLinkScreen(
             MicButton(
                 isActive = isMicOn,
                 size = scaledDp(80, scale),
-                onToggle = onToggleMic
+                onPress = onMicPress,
+                onRelease = onMicRelease
             )
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
-            Text(
-                text = if (isConnected) "구조자 연결됨" else "구조자 연결 대기 중",
-                color = if (isConnected) AppColors.Green else AppColors.Gray500,
-                fontSize = scaledSp(14, scale),
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+            ) {
+                if (isDisconnecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(scaledDp(14, scale)),
+                        color = AppColors.Red,
+                        strokeWidth = scaledDp(2, scale)
+                    )
+                }
+                Text(
+                    text = when {
+                        isDisconnecting -> "연결 종료 중"
+                        isConnected -> "구조자 연결됨"
+                        else -> "구조자 연결 대기 중"
+                    },
+                    color = when {
+                        isDisconnecting -> AppColors.Red
+                        isConnected -> AppColors.Green
+                        else -> AppColors.Gray500
+                    },
+                    fontSize = scaledSp(14, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             Spacer(modifier = Modifier.height(scaledDp(18, scale)))
             Spacer(modifier = Modifier.weight(0.6f))
             Column(
@@ -218,6 +242,7 @@ fun PTTLinkScreen(
                         iconSizeOverride = scaledDp(44, scale),
                         showLabelAlways = showActionLabelsAlways,
                         onClick = {
+                            if (isDisconnecting) return@ExpandableAction
                             if (expandedAction == ActionType.Disconnect) {
                                 onActionSelected(null)
                                 onDisconnect()
