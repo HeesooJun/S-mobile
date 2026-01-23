@@ -30,10 +30,12 @@ fun LifesaiverApp(
     batteryLevel: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
+    isDisconnecting: Boolean,
     messages: List<ChatMessage>,
     onRequestPermissions: () -> Unit,
     onStartAutoConnect: () -> Unit,
-    onToggleMic: () -> Unit,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit
 ) {
@@ -54,9 +56,11 @@ fun LifesaiverApp(
             batteryLevel = batteryLevel,
             isConnected = isConnected,
             isMicOn = isMicOn,
+            isDisconnecting = isDisconnecting,
             messages = messages,
             onStartAutoConnect = onStartAutoConnect,
-            onToggleMic = onToggleMic,
+            onMicPress = onMicPress,
+            onMicRelease = onMicRelease,
             onSendMessage = onSendMessage,
             onDisconnect = onDisconnect
         )

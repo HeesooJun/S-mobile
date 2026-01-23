@@ -28,9 +28,11 @@ fun AppNavHost(
     batteryLevel: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
+    isDisconnecting: Boolean,
     messages: List<ChatMessage>,
     onStartAutoConnect: () -> Unit,
-    onToggleMic: () -> Unit,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit
 ) {
@@ -77,7 +79,6 @@ fun AppNavHost(
                 onPrev = { navController.popBackStack() },
                 onSos = {
                     pendingSosNavigation = true
-                    onStartAutoConnect()
                     navController.navigate(AppRoute.EmergencyBeacon.route)
                 },
                 uiState = standbyState,
@@ -91,6 +92,11 @@ fun AppNavHost(
         composable(AppRoute.EmergencyBeacon.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
+            LaunchedEffect(isConnected) {
+                if (!isConnected) {
+                    onStartAutoConnect()
+                }
+            }
             EmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
@@ -106,7 +112,9 @@ fun AppNavHost(
                 connectedCount = if (isConnected) 2 else 0,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
-                onToggleMic = onToggleMic,
+                isDisconnecting = isDisconnecting,
+                onMicPress = onMicPress,
+                onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
                 onDisconnect = {
                     onDisconnect()

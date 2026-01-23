@@ -43,6 +43,13 @@ android {
     }
 }
 
+tasks.withType<Test>().configureEach {
+    testLogging {
+        showStandardStreams = true
+        events("passed", "failed", "skipped", "standardOut", "standardError")
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.uwb)
