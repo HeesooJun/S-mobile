@@ -77,7 +77,6 @@ fun AppNavHost(
                 onPrev = { navController.popBackStack() },
                 onSos = {
                     pendingSosNavigation = true
-                    onStartAutoConnect()
                     navController.navigate(AppRoute.EmergencyBeacon.route)
                 },
                 uiState = standbyState,
@@ -91,6 +90,11 @@ fun AppNavHost(
         composable(AppRoute.EmergencyBeacon.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
+            LaunchedEffect(isConnected) {
+                if (!isConnected) {
+                    onStartAutoConnect()
+                }
+            }
             EmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
