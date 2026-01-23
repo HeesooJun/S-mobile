@@ -30,7 +30,8 @@ fun AppNavHost(
     isMicOn: Boolean,
     messages: List<ChatMessage>,
     onStartAutoConnect: () -> Unit,
-    onToggleMic: () -> Unit,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit
 ) {
@@ -110,7 +111,8 @@ fun AppNavHost(
                 connectedCount = if (isConnected) 2 else 0,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
-                onToggleMic = onToggleMic,
+                onMicPress = onMicPress,
+                onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
                 onDisconnect = {
                     onDisconnect()

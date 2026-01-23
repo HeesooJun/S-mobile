@@ -15,12 +15,14 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.example.lifesaiver.core.audio.AudioEngine
+import com.example.lifesaiver.core.audio.VoiceRecorder
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
+import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.random.Random
+import java.io.File
 
 data class AppUiState(
     val hasPermissions: Boolean = false,
@@ -76,6 +79,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
     private val senderId: ByteArray = ByteArray(8).also { Random.nextBytes(it) }
+    private var voiceRecorder: VoiceRecorder? = null
+    private var recordingFile: File? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -110,23 +115,56 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.startAutoConnect()
     }
 
-    fun onToggleMic() {
-        if (audioEngine == null) {
-            _uiEvents.tryEmit(UiEvent.Toast("오디오 초기화 실패"))
-            _uiState.value = _uiState.value.copy(isMicOn = false)
+    fun onMicPress() {
+        if (!_uiState.value.hasPermissions) {
+            _uiEvents.tryEmit(UiEvent.Toast("마이크 권한이 필요합니다."))
             return
         }
-        if (_uiState.value.isMicOn) {
-            _uiState.value = _uiState.value.copy(isMicOn = false)
-            audioEngine?.stopRecording()
-            _uiEvents.tryEmit(UiEvent.Toast("마이크 종료"))
-        } else {
-            _uiState.value = _uiState.value.copy(isMicOn = true)
-            _uiEvents.tryEmit(UiEvent.Toast("마이크 시작"))
-            audioEngine?.startRecording { pcmData ->
-                bleManager.sendAudio(pcmData)
-            }
+        if (_uiState.value.isMicOn) return
+
+        val outDir = File(app.filesDir, "voicenotes/outgoing")
+        val recorder = VoiceRecorder(outDir)
+        val file = recorder.start()
+        if (file == null) {
+            _uiEvents.tryEmit(UiEvent.Toast("녹음 시작 실패"))
+            return
         }
+        voiceRecorder = recorder
+        recordingFile = file
+        _uiState.value = _uiState.value.copy(isMicOn = true)
+    }
+
+    fun onMicRelease() {
+        if (!_uiState.value.isMicOn) return
+        val file = voiceRecorder?.stop() ?: recordingFile
+        voiceRecorder = null
+        recordingFile = null
+        _uiState.value = _uiState.value.copy(isMicOn = false)
+
+        if (file == null || !file.exists()) return
+
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return
+        val payload = FileTransferPayload(
+            fileName = file.name,
+            fileSize = bytes.size.toLong(),
+            mimeType = "audio/mp4",
+            content = bytes
+        ).encode()
+
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.FILE_TRANSFER,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = payload.size,
+                timestamp = System.currentTimeMillis(),
+                senderId = senderId
+            ),
+            payload = payload
+        )
+        protocolCore.broadcast(packet)
+        addMessage(ChatMessage(text = "[voice] ${file.absolutePath}", isMine = true))
     }
 
     fun onSendMessage(text: String) {
@@ -168,9 +206,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         protocolCore = ProtocolCore(codec, codec)
         protocolCore.setOnPacketReceived { packet ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
-            if (packet.header.type == PacketType.MESSAGE) {
-                val text = packet.payload.toString(Charsets.UTF_8)
-                addMessage(ChatMessage(text = text, isMine = false))
+            when (packet.header.type) {
+                PacketType.MESSAGE -> {
+                    val text = packet.payload.toString(Charsets.UTF_8)
+                    addMessage(ChatMessage(text = text, isMine = false))
+                }
+                PacketType.FILE_TRANSFER -> {
+                    val payload = FileTransferPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    val inDir = File(app.filesDir, "voicenotes/incoming")
+                    if (!inDir.exists()) inDir.mkdirs()
+                    val name = payload.fileName?.takeIf { it.isNotBlank() } ?: "voice_${packet.header.timestamp}.m4a"
+                    val file = File(inDir, name)
+                    runCatching { file.writeBytes(payload.content) }
+                    addMessage(ChatMessage(text = "[voice] ${file.absolutePath}", isMine = false))
+                }
+                else -> Unit
             }
         }
     }
@@ -214,6 +264,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         audioEngine?.stopRecording()
+        voiceRecorder?.stop()
         bleManager.disconnect()
         try {
             app.unregisterReceiver(batteryReceiver)
