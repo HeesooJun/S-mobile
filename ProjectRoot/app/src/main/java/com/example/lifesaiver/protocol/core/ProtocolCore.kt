@@ -28,6 +28,11 @@ class ProtocolCore(
         packets.forEach { transport?.send(encoder.encode(it)) }
     }
 
+    fun broadcast(packet: Packet) {
+        val packets = pipeline.prepareOutbound(packet)
+        packets.forEach { transport?.broadcast(encoder.encode(it)) }
+    }
+
     fun onBytesReceived(bytes: ByteArray) {
         val packet = decoder.decode(bytes) ?: return
         pipeline.handleInbound(packet)?.let { onPacket?.invoke(it) }
