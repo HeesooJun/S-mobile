@@ -70,6 +70,7 @@ fun PTTLinkScreen(
     connectedCount: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
+    isDisconnecting: Boolean,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
@@ -186,8 +187,16 @@ fun PTTLinkScreen(
             )
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
-                text = if (isConnected) "구조자 연결됨" else "구조자 연결 대기 중",
-                color = if (isConnected) AppColors.Green else AppColors.Gray500,
+                text = when {
+                    isDisconnecting -> "연결 종료 중"
+                    isConnected -> "구조자 연결됨"
+                    else -> "구조자 연결 대기 중"
+                },
+                color = when {
+                    isDisconnecting -> AppColors.Yellow
+                    isConnected -> AppColors.Green
+                    else -> AppColors.Gray500
+                },
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.SemiBold
             )
@@ -220,6 +229,7 @@ fun PTTLinkScreen(
                         iconSizeOverride = scaledDp(44, scale),
                         showLabelAlways = showActionLabelsAlways,
                         onClick = {
+                            if (isDisconnecting) return@ExpandableAction
                             if (expandedAction == ActionType.Disconnect) {
                                 onActionSelected(null)
                                 onDisconnect()
