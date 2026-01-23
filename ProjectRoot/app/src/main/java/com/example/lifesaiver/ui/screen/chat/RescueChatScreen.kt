@@ -211,13 +211,26 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
             }
         }
     }
+    val stopSelf = remember(mediaPlayer) {
+        {
+            try {
+                if (mediaPlayer.isPlaying) {
+                    mediaPlayer.pause()
+                }
+            } catch (_: Exception) {
+            }
+            isPlaying = false
+        }
+    }
 
     DisposableEffect(mediaPlayer) {
         mediaPlayer.setOnCompletionListener {
             isPlaying = false
             positionMs = durationMs
+            VoicePlaybackController.clear(stopSelf)
         }
         onDispose {
+            VoicePlaybackController.clear(stopSelf)
             try {
                 mediaPlayer.release()
             } catch (_: Exception) {
@@ -250,9 +263,9 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
                         .background(AppColors.Black.copy(alpha = 0.2f), shape = RoundedCornerShape(999.dp))
                         .clickable(enabled = isReady) {
                             if (isPlaying) {
-                                mediaPlayer.pause()
-                                isPlaying = false
+                                stopSelf()
                             } else {
+                                VoicePlaybackController.requestPlay(stopSelf)
                                 mediaPlayer.start()
                                 isPlaying = true
                             }
@@ -309,3 +322,20 @@ private fun formatTime(ms: Int): String {
 }
 
 private const val VOICE_PREFIX = "[voice] "
+
+private object VoicePlaybackController {
+    private var stopCurrent: (() -> Unit)? = null
+
+    fun requestPlay(onStop: () -> Unit) {
+        if (stopCurrent !== onStop) {
+            stopCurrent?.invoke()
+            stopCurrent = onStop
+        }
+    }
+
+    fun clear(onStop: () -> Unit) {
+        if (stopCurrent === onStop) {
+            stopCurrent = null
+        }
+    }
+}
