@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -53,6 +54,8 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.components.BatteryIndicator
+import com.example.lifesaiver.ui.components.MeshMap
+import com.example.lifesaiver.ui.components.MeshNode
 import com.example.lifesaiver.ui.components.MicButton
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SignalBars
@@ -121,14 +124,17 @@ fun PTTLinkScreen(
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
+    var showMeshMap by remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
     val displayConnectedCount = (connectedCount - 1).coerceAtLeast(0)
+    val meshNodes = remember(connectedCount) { buildMeshNodes(connectedCount) }
 
     LaunchedEffect(expandedAction) {
         if (
             expandedAction == ActionType.Chat ||
             expandedAction == ActionType.Disconnect ||
-            expandedAction == ActionType.Power
+            expandedAction == ActionType.Power ||
+            expandedAction == ActionType.Count
         ) {
             setShowDoubleTapHint(true)
             delay(3500)
@@ -161,200 +167,243 @@ fun PTTLinkScreen(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        PowerSavingLayer(
-            isPowerSaving = isPowerSaving,
-            // 완전 해제 개념이 없으면 아래처럼 단순 처리해도 됨
-            isForceExit = !isPowerSaving,
-            onRequestExitPowerSaving = { setPowerSaving(false) }
-        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            PowerSavingLayer(
+                isPowerSaving = isPowerSaving,
+                // 완전 해제 개념이 없으면 아래처럼 단순 처리해도 됨
+                isForceExit = !isPowerSaving,
+                onRequestExitPowerSaving = { setPowerSaving(false) }
+            )
             Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = scaledDp(32, scale)),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(modifier = Modifier.weight(0.5f))
-            BatteryIndicator(level = batteryLevel)
-            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-            Text(
-                text = "$batteryLevel%",
-                color = AppColors.White,
-                fontSize = scaledSp(54, scale),
-                fontWeight = FontWeight.ExtraBold
-            )
-            Text(
-                text = "약 36시간 대기 가능",
-                color = AppColors.Gray500,
-                fontSize = scaledSp(12, scale)
-            )
-            Spacer(modifier = Modifier.height(scaledDp(80, scale)))
-            MicButton(
-                isActive = isMicOn,
-                size = scaledDp(80, scale),
-                onPress = onMicPress,
-                onRelease = onMicRelease
-            )
-            Spacer(modifier = Modifier.height(scaledDp(20, scale)))
-            Text(
-                text = if (isConnected) "구조자 연결됨" else "구조자 연결 대기 중",
-                color = if (isConnected) AppColors.Green else AppColors.Gray500,
-                fontSize = scaledSp(14, scale),
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(scaledDp(18, scale)))
-            Spacer(modifier = Modifier.weight(0.6f))
-            Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = scaledDp(32, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Spacer(modifier = Modifier.weight(0.5f))
+                BatteryIndicator(level = batteryLevel)
+                Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                Text(
+                    text = "$batteryLevel%",
+                    color = AppColors.White,
+                    fontSize = scaledSp(54, scale),
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "약 36시간 대기 가능",
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(12, scale)
+                )
+                Spacer(modifier = Modifier.height(scaledDp(80, scale)))
+                MicButton(
+                    isActive = isMicOn,
+                    size = scaledDp(80, scale),
+                    onPress = onMicPress,
+                    onRelease = onMicRelease
+                )
+                Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                Text(
+                    text = if (isConnected) "구조자 연결됨" else "구조자 연결 대기 중",
+                    color = if (isConnected) AppColors.Green else AppColors.Gray500,
+                    fontSize = scaledSp(14, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(scaledDp(18, scale)))
+                Spacer(modifier = Modifier.weight(0.6f))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(8, scale)),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ExpandableAction(
+                            iconRes = R.drawable.ic_power_off,
+                            label = "절전 모드",
+                            isExpanded = expandedAction == ActionType.Power,
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                setPowerSaving(!isPowerSaving)
+                                setExpandedAction(ActionType.Power)
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.connection_lost,
+                            label = "연결 끊기",
+                            isExpanded = expandedAction == ActionType.Disconnect,
+                            iconSizeOverride = scaledDp(44, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                if (expandedAction == ActionType.Disconnect) {
+                                    setExpandedAction(null)
+                                    onDisconnect()
+                                } else {
+                                    setExpandedAction(ActionType.Disconnect)
+                                }
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.ic_chat,
+                            label = "채팅",
+                            isExpanded = expandedAction == ActionType.Chat,
+                            iconSizeOverride = scaledDp(38, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                if (expandedAction == ActionType.Chat) {
+                                    setExpandedAction(null)
+                                    onChat()
+                                } else {
+                                    setExpandedAction(ActionType.Chat)
+                                }
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.connection_filled,
+                            label = "사용자 $displayConnectedCount",
+                            isExpanded = expandedAction == ActionType.Count,
+                            iconSizeOverride = scaledDp(32, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                if (expandedAction == ActionType.Count) {
+                                    setExpandedAction(null)
+                                    showMeshMap = true
+                                } else {
+                                    setExpandedAction(ActionType.Count)
+                                }
+                            }
+                        )
+                    }
+                    Column(
+                        modifier = Modifier
+                            .height(scaledDp(32, scale))
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        AnimatedVisibility(
+                            visible = showDoubleTapHint,
+                            enter = fadeIn() + slideInVertically { it / 3 },
+                            exit = fadeOut() + slideOutVertically { it / 3 }
+                        ) {
+                            Text(
+                                text = "한번 더 눌러주세요",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.offset(y = scaledDp(6, scale))
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = scaledDp(8, scale)),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                        .padding(bottom = scaledDp(24, scale)),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ExpandableAction(
-                        iconRes = R.drawable.ic_power_off,
-                        label = "절전 모드",
-                        isExpanded = expandedAction == ActionType.Power,
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            setPowerSaving(!isPowerSaving)
-                            setExpandedAction(ActionType.Power)
-                        }
-                    )
-                    ExpandableAction(
-                        iconRes = R.drawable.connection_lost,
-                        label = "연결 끊기",
-                        isExpanded = expandedAction == ActionType.Disconnect,
-                        iconSizeOverride = scaledDp(44, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            if (expandedAction == ActionType.Disconnect) {
-                                setExpandedAction(null)
-                                onDisconnect()
-                            } else {
-                                setExpandedAction(ActionType.Disconnect)
-                            }
-                        }
-                    )
-                    ExpandableAction(
-                        iconRes = R.drawable.ic_chat,
-                        label = "채팅",
-                        isExpanded = expandedAction == ActionType.Chat,
-                        iconSizeOverride = scaledDp(38, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            if (expandedAction == ActionType.Chat) {
-                                setExpandedAction(null)
-                                onChat()
-                            } else {
-                                setExpandedAction(ActionType.Chat)
-                            }
-                        }
-                    )
-                    ExpandableAction(
-                        iconRes = R.drawable.connection_filled,
-                        label = "사용자 $displayConnectedCount",
-                        isExpanded = expandedAction == ActionType.Count,
-                        iconSizeOverride = scaledDp(32, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            setExpandedAction(ActionType.Count)
-                        }
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .height(scaledDp(32, scale))
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    AnimatedVisibility(
-                        visible = showDoubleTapHint,
-                        enter = fadeIn() + slideInVertically { it / 3 },
-                        exit = fadeOut() + slideOutVertically { it / 3 }
+                    Box(
+                        modifier = Modifier
+                            .height(scaledDp(36, scale))
+                            .padding(start = scaledDp(14, scale)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "한번 더 눌러주세요",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(12, scale),
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.offset(y = scaledDp(6, scale))
+                        SignalBars(
+                            strength = if (isConnected) 4 else 1,
+                            variant = SignalVariant.Green,
+                            modifier = Modifier.graphicsLayer(rotationX = 180f)
                         )
+                    }
+                    Box {
+                        SensorStatusToggle(
+                            label = "센서 상태",
+                            isExpanded = isSensorExpanded,
+                            onToggle = { isSensorExpanded = !isSensorExpanded }
+                        )
+                        DropdownMenu(
+                            expanded = isSensorExpanded,
+                            onDismissRequest = { isSensorExpanded = false },
+                            offset = DpOffset(-scaledDp(4, scale), scaledDp(12, scale)),
+                            modifier = Modifier
+                                .widthIn(min = scaledDp(150, scale), max = scaledDp(190, scale))
+                                .background(
+                                    color = AppColors.Gray800,
+                                    shape = RoundedCornerShape(scaledDp(14, scale))
+                                )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(
+                                    horizontal = scaledDp(16, scale),
+                                    vertical = scaledDp(12, scale)
+                                )
+                            ) {
+                                sensorItems.forEach { item ->
+                                    val status = sensorStatus[item.type] ?: SensorStatus.Checking
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = scaledDp(4, scale)),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = item.label,
+                                            color = AppColors.White,
+                                            fontSize = scaledSp(12, scale)
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = sensorStatusLabel(status),
+                                            color = sensorStatusColor(status),
+                                            fontSize = scaledSp(11, scale),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = scaledDp(24, scale)),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            if (showMeshMap) {
                 Box(
                     modifier = Modifier
-                        .height(scaledDp(36, scale))
-                        .padding(start = scaledDp(14, scale)),
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .background(AppColors.Black.copy(alpha = 0.9f))
                 ) {
-                    SignalBars(
-                        strength = if (isConnected) 4 else 1,
-                        variant = SignalVariant.Green,
-                        modifier = Modifier.graphicsLayer(rotationX = 180f)
-                    )
-                }
-                Box {
-                    SensorStatusToggle(
-                        label = "센서 상태",
-                        isExpanded = isSensorExpanded,
-                        onToggle = { isSensorExpanded = !isSensorExpanded }
-                    )
-                    DropdownMenu(
-                        expanded = isSensorExpanded,
-                        onDismissRequest = { isSensorExpanded = false },
-                        offset = DpOffset(-scaledDp(4, scale), scaledDp(12, scale)),
+                    MeshMap(nodes = meshNodes, modifier = Modifier.fillMaxSize())
+                    TopIconButton(
+                        iconRes = R.drawable.ic_back,
+                        contentDescription = "닫기",
+                        onClick = { showMeshMap = false },
                         modifier = Modifier
-                            .widthIn(min = scaledDp(150, scale), max = scaledDp(190, scale))
-                            .background(
-                                color = AppColors.Gray800,
-                                shape = RoundedCornerShape(scaledDp(14, scale))
-                            )
+                            .align(Alignment.TopStart)
+                            .padding(start = scaledDp(16, scale), top = scaledDp(16, scale))
+                    )
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = scaledDp(18, scale)),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(
-                            modifier = Modifier.padding(
-                                horizontal = scaledDp(16, scale),
-                                vertical = scaledDp(12, scale)
-                            )
-                        ) {
-                            sensorItems.forEach { item ->
-                                val status = sensorStatus[item.type] ?: SensorStatus.Checking
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = scaledDp(4, scale)),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = item.label,
-                                        color = AppColors.White,
-                                        fontSize = scaledSp(12, scale)
-                                    )
-                                    Spacer(modifier = Modifier.weight(1f))
-                                    Text(
-                                        text = sensorStatusLabel(status),
-                                        color = sensorStatusColor(status),
-                                        fontSize = scaledSp(11, scale),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = "메쉬 현황",
+                            color = AppColors.White,
+                            fontSize = scaledSp(16, scale),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "직접 연결 ${displayConnectedCount}명",
+                            color = AppColors.Gray400,
+                            fontSize = scaledSp(12, scale)
+                        )
                     }
                 }
             }
@@ -521,4 +570,21 @@ private fun sensorStatusColor(status: SensorStatus): Color {
         SensorStatus.Active -> AppColors.Green
         SensorStatus.NoData -> AppColors.Red
     }
+}
+
+private fun buildMeshNodes(connectedCount: Int): List<MeshNode> {
+    val directCount = (connectedCount - 1).coerceAtLeast(0)
+    val nodes = mutableListOf<MeshNode>()
+    nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true))
+    repeat(directCount) { index ->
+        val signal = 0.55f + (index % 5) * 0.1f
+        nodes.add(
+            MeshNode(
+                id = "peer-$index",
+                hop = 1,
+                signal = signal
+            )
+        )
+    }
+    return nodes
 }
