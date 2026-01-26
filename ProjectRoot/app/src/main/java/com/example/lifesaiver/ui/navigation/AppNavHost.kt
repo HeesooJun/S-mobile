@@ -32,6 +32,7 @@ import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen
 fun AppNavHost(
     batteryLevel: Int,
     isConnected: Boolean,
+    connectedCount: Int,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
@@ -125,7 +126,7 @@ fun AppNavHost(
             }
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -145,7 +146,7 @@ fun AppNavHost(
             val chatViewModel: RescueChatViewModel = viewModel()
             val chatState by chatViewModel.uiState.collectAsState()
             RescueChatScreen(
-                roomTitle = "Survivor Chat",
+                roomTitle = "전체 채팅",
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 inputValue = chatState.inputValue,
@@ -160,7 +161,7 @@ fun AppNavHost(
             RescuerStandbyScreen(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
                 onPrev = { navController.navigate(AppRoute.ModeGate.route) },
                 onGoPTT = { navController.navigate(AppRoute.RescuerPTT.route) },
                 onSos = { navController.navigate(AppRoute.RescuerEmergency.route) }
@@ -173,7 +174,7 @@ fun AppNavHost(
             }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -189,7 +190,7 @@ fun AppNavHost(
 
         composable(AppRoute.RescuerChat.route) {
             RescuerChatScreen(
-                roomTitle = "Rescuer Chat",
+                roomTitle = "전체 채팅",
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 onSend = onSendMessage

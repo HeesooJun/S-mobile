@@ -126,7 +126,7 @@ fun PTTLinkScreen(
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
-    val displayConnectedCount = (connectedCount - 1).coerceAtLeast(0)
+    val displayConnectedCount = connectedCount.coerceAtLeast(0)
     val meshNodes = remember(connectedCount) { buildMeshNodes(connectedCount) }
 
     LaunchedEffect(expandedAction) {
@@ -572,7 +572,7 @@ private fun sensorStatusColor(status: SensorStatus): Color {
 }
 
 private fun buildMeshNodes(connectedCount: Int): List<MeshNode> {
-    val directCount = (connectedCount - 1).coerceAtLeast(0)
+    val directCount = connectedCount.coerceAtLeast(0)
     val nodes = mutableListOf<MeshNode>()
     nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true))
     repeat(directCount) { index ->
