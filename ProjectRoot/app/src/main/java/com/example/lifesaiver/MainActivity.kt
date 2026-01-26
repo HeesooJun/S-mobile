@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
                     batteryLevel = uiState.batteryLevel,
                     isConnected = uiState.isConnected,
                     connectedCount = uiState.connectedCount,
+                    meshPeerCount = uiState.meshPeerCount,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
                     isRescueSignalActive = uiState.isRescueSignalActive,
