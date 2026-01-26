@@ -71,6 +71,7 @@ import kotlinx.coroutines.delay
 fun PTTLinkScreen(
     batteryLevel: Int,
     connectedCount: Int,
+    meshPeerCount: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
     onMicPress: () -> Unit,
@@ -126,8 +127,10 @@ fun PTTLinkScreen(
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
-    val displayConnectedCount = connectedCount.coerceAtLeast(0)
-    val meshNodes = remember(connectedCount) { buildMeshNodes(connectedCount) }
+    val displayConnectedCount = meshPeerCount.coerceAtLeast(0)
+    val meshNodes = remember(connectedCount, meshPeerCount) {
+        buildMeshNodes(connectedCount, meshPeerCount)
+    }
 
     LaunchedEffect(expandedAction) {
         if (
@@ -399,7 +402,7 @@ fun PTTLinkScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "직접 연결 ${displayConnectedCount}명",
+                            text = "직접 ${connectedCount}명 · 메쉬 ${displayConnectedCount}명",
                             color = AppColors.Gray400,
                             fontSize = scaledSp(12, scale)
                         )
@@ -571,8 +574,10 @@ private fun sensorStatusColor(status: SensorStatus): Color {
     }
 }
 
-private fun buildMeshNodes(connectedCount: Int): List<MeshNode> {
+private fun buildMeshNodes(connectedCount: Int, meshPeerCount: Int): List<MeshNode> {
     val directCount = connectedCount.coerceAtLeast(0)
+    val total = meshPeerCount.coerceAtLeast(directCount)
+    val indirectCount = (total - directCount).coerceAtLeast(0)
     val nodes = mutableListOf<MeshNode>()
     nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true))
     repeat(directCount) { index ->
@@ -581,6 +586,16 @@ private fun buildMeshNodes(connectedCount: Int): List<MeshNode> {
             MeshNode(
                 id = "peer-$index",
                 hop = 1,
+                signal = signal
+            )
+        )
+    }
+    repeat(indirectCount) { index ->
+        val signal = 0.35f + (index % 4) * 0.08f
+        nodes.add(
+            MeshNode(
+                id = "mesh-$index",
+                hop = 2,
                 signal = signal
             )
         )

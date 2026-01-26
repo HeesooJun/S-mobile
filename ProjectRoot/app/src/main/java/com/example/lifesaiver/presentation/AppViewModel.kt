@@ -24,6 +24,7 @@ import com.example.lifesaiver.core.service.RescueService
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
+import com.example.lifesaiver.protocol.mesh.MeshPeerRegistry
 import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
@@ -47,6 +48,7 @@ data class AppUiState(
     val batteryLevel: Int = 100,
     val isConnected: Boolean = false,
     val connectedCount: Int = 0,
+    val meshPeerCount: Int = 0,
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
@@ -110,6 +112,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
+    private val meshRegistry = MeshPeerRegistry()
+    private var announceJob: kotlinx.coroutines.Job? = null
+    private var meshCleanupJob: kotlinx.coroutines.Job? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -364,6 +369,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             when (packet.header.type) {
+                PacketType.ANNOUNCE -> {
+                    val peerHex = bytesToHex(packet.header.senderId)
+                    meshRegistry.markSeen(peerHex)
+                    updateMeshCount()
+                }
                 PacketType.MESSAGE -> {
                     val text = packet.payload.toString(Charsets.UTF_8)
                     addMessage(ChatMessage(text = text, isMine = false))
@@ -384,6 +394,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 else -> Unit
             }
         }
+        startAnnounceLoop()
+        startMeshCleanupLoop()
     }
 
     private fun initBatteryMonitor() {
@@ -404,6 +416,47 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { current ->
             current.copy(messages = current.messages + message)
         }
+    }
+
+    private fun updateMeshCount() {
+        _uiState.update { it.copy(meshPeerCount = meshRegistry.count()) }
+    }
+
+    private fun startAnnounceLoop() {
+        if (announceJob?.isActive == true) return
+        announceJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                sendAnnounce()
+                delay(ProtocolConstants.Mesh.ANNOUNCE_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun startMeshCleanupLoop() {
+        if (meshCleanupJob?.isActive == true) return
+        meshCleanupJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                meshRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
+                updateMeshCount()
+                delay(ProtocolConstants.Mesh.PEER_CLEANUP_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun sendAnnounce() {
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.ANNOUNCE,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = 0,
+                timestamp = System.currentTimeMillis(),
+                senderId = senderId
+            ),
+            payload = ByteArray(0)
+        )
+        protocolCore.broadcast(packet)
     }
 
     private fun buildMessagePacket(text: String): Packet {
@@ -450,6 +503,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
+        announceJob?.cancel()
+        meshCleanupJob?.cancel()
 
         // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {

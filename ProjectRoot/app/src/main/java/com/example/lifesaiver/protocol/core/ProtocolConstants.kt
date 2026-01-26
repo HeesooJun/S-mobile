@@ -3,6 +3,11 @@ package com.example.lifesaiver.protocol.core
 object ProtocolConstants {
     const val MESSAGE_TTL_HOPS: Int = 7
     const val SYNC_TTL_HOPS: Int = 0
+    object Mesh {
+        const val ANNOUNCE_INTERVAL_MS: Long = 30_000L
+        const val PEER_TIMEOUT_MS: Long = 180_000L
+        const val PEER_CLEANUP_INTERVAL_MS: Long = 10_000L
+    }
 
     object Fragmentation {
         const val FRAGMENT_SIZE_THRESHOLD: Int = 512

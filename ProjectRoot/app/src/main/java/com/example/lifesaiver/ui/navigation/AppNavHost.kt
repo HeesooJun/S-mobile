@@ -33,6 +33,7 @@ fun AppNavHost(
     batteryLevel: Int,
     isConnected: Boolean,
     connectedCount: Int,
+    meshPeerCount: Int,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
@@ -127,6 +128,7 @@ fun AppNavHost(
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -175,6 +177,7 @@ fun AppNavHost(
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
