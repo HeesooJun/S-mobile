@@ -1,6 +1,9 @@
 package com.example.lifesaiver.ui.screen.mode
 
+
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,8 +17,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.presentation.screen.ModeGateUiState
+import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.components.PrimaryButton
 import com.example.lifesaiver.ui.components.PrimaryButtonVariant
 import com.example.lifesaiver.ui.components.ScreenScaffold
@@ -61,11 +67,23 @@ fun ModeGateScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.weight(1f))
+
+            val circleSize = scaledDp(130, scale)
+
             Surface(
                 shape = CircleShape,
                 color = AppColors.White,
-                modifier = Modifier.size(scaledDp(130, scale))
-            ) {}
+                modifier = Modifier.size(circleSize)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Image(
+                        painter = painterResource(id = R.drawable.lifesaivior_logo),
+                        contentDescription = "LifesAIvior Logo",
+                        modifier = Modifier.size(circleSize * 0.62f),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
                 text = uiState.appName,

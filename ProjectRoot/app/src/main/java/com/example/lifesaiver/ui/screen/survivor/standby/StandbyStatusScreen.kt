@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.screen.standby
+package com.example.lifesaiver.ui.screen.survivor.standby
 
 import android.content.Context
 import android.hardware.Sensor
@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,34 +47,36 @@ import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
-import com.example.lifesaiver.presentation.screen.StandbyStatusUiState
-import com.example.lifesaiver.presentation.sensor.SensorProbe
-import com.example.lifesaiver.presentation.sensor.SensorStatus
 import kotlinx.coroutines.delay
 
 @Composable
 fun StandbyStatusScreen(
     batteryLevel: Int,
     onPrev: () -> Unit,
-    onSos: () -> Unit,
-    uiState: StandbyStatusUiState,
-    sensorItems: List<SensorProbe>,
-    onSensorExpandedChange: (Boolean) -> Unit,
-    onSensorStatusChange: (Int, SensorStatus) -> Unit
+    onSos: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
     val sensorManager = remember {
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     }
-    val sensorStatus = uiState.sensorStatus
-    val isSensorExpanded = uiState.isSensorExpanded
+    val sensorItems = remember {
+        listOf(
+            SensorProbe("가속도", Sensor.TYPE_ACCELEROMETER),
+            SensorProbe("자이로", Sensor.TYPE_GYROSCOPE),
+            SensorProbe("지자기", Sensor.TYPE_MAGNETIC_FIELD),
+            SensorProbe("조도", Sensor.TYPE_LIGHT),
+            SensorProbe("근접", Sensor.TYPE_PROXIMITY)
+        )
+    }
+    val sensorStatus = remember { mutableStateMapOf<Int, SensorStatus>() }
+    var isSensorExpanded by remember { mutableStateOf(false) }
     val sensorListener = remember {
         object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
                 val type = event?.sensor?.type ?: return
                 if (sensorStatus[type] != SensorStatus.Active) {
-                    onSensorStatusChange(type, SensorStatus.Active)
+                    sensorStatus[type] = SensorStatus.Active
                 }
             }
 
@@ -99,14 +102,17 @@ fun StandbyStatusScreen(
         if (!isSensorExpanded) return@LaunchedEffect
         sensorItems.forEach { item ->
             val sensor = sensorManager.getDefaultSensor(item.type)
-            val status = if (sensor == null) SensorStatus.Unsupported else SensorStatus.Checking
-            onSensorStatusChange(item.type, status)
+            sensorStatus[item.type] = if (sensor == null) {
+                SensorStatus.Unsupported
+            } else {
+                SensorStatus.Checking
+            }
         }
         delay(3000)
         if (isSensorExpanded) {
             sensorItems.forEach { item ->
                 if (sensorStatus[item.type] == SensorStatus.Checking) {
-                    onSensorStatusChange(item.type, SensorStatus.NoData)
+                    sensorStatus[item.type] = SensorStatus.NoData
                 }
             }
         }
@@ -156,13 +162,13 @@ fun StandbyStatusScreen(
                     )
                     Spacer(modifier = Modifier.height(scaledDp(20, scale)))
                     Text(
-                        text = "SOS 버튼을 누르면 주변 사용자에게 구조 신호를 보냅니다.",
+                        text = "SOS 버튼을 누르면",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(11, scale),
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "이 신호가 이어져 구조자가 더 빨리 찾을 수 있어요.",
+                        text = "주변 사용자에게 구조 신호를 보냅니다.",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(11, scale),
                         textAlign = TextAlign.Center
@@ -219,11 +225,11 @@ fun StandbyStatusScreen(
                     SensorStatusToggle(
                         label = "센서 상태",
                         isExpanded = isSensorExpanded,
-                        onToggle = { onSensorExpandedChange(!isSensorExpanded) }
+                        onToggle = { isSensorExpanded = !isSensorExpanded }
                     )
                     DropdownMenu(
                         expanded = isSensorExpanded,
-                        onDismissRequest = { onSensorExpandedChange(false) },
+                        onDismissRequest = { isSensorExpanded = false },
                         offset = DpOffset(-scaledDp(4, scale), scaledDp(12, scale)),
                         modifier = Modifier
                             .widthIn(min = scaledDp(150, scale), max = scaledDp(190, scale))
@@ -308,6 +314,18 @@ private fun SensorStatusToggle(
             contentScale = ContentScale.Fit
         )
     }
+}
+
+private data class SensorProbe(
+    val label: String,
+    val type: Int
+)
+
+private enum class SensorStatus {
+    Unsupported,
+    Checking,
+    Active,
+    NoData
 }
 
 private fun sensorStatusLabel(status: SensorStatus): String {
