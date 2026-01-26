@@ -176,8 +176,7 @@ fun PTTLinkScreen(
             )
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                    .fillMaxSize()
                     .padding(horizontal = scaledDp(32, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
