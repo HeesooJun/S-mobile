@@ -16,16 +16,14 @@ import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
-import com.example.lifesaiver.presentation.screen.PTTLinkViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
-import com.example.lifesaiver.presentation.screen.StandbyStatusViewModel
 import com.example.lifesaiver.ui.screen.mode.ModeGateScreen
-import com.example.lifesaiver.ui.screen.ptt.PTTLinkScreen
+import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
 import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
-import com.example.lifesaiver.ui.screen.standby.StandbyStatusScreen
+import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 
@@ -79,8 +77,6 @@ fun AppNavHost(
         }
 
         composable(AppRoute.SurvivorStandby.route) {
-            val standbyViewModel: StandbyStatusViewModel = viewModel()
-            val standbyState by standbyViewModel.uiState.collectAsState()
             StandbyStatusScreen(
                 batteryLevel = batteryLevel,
                 onPrev = { navController.popBackStack() },
@@ -89,15 +85,6 @@ fun AppNavHost(
                     pendingSosNavigation = true
                     onStartAutoConnect()
                     navController.navigate(AppRoute.SurvivorEmergency.route)
-                },
-                uiState = standbyState,
-                sensorItems = standbyViewModel.sensorItems,
-                isRescueSignalActive = isRescueSignalActive,
-                onStartRescueSignal = onStartRescueSignal,
-                onStopRescueSignal = onStopRescueSignal,
-                onSensorExpandedChange = { standbyViewModel.setSensorExpanded(it) },
-                onSensorStatusChange = { type, status ->
-                    standbyViewModel.updateSensorStatus(type, status)
                 }
             )
         }
@@ -119,14 +106,11 @@ fun AppNavHost(
         }
 
         composable(AppRoute.SurvivorPTT.route) {
-            val pttViewModel: PTTLinkViewModel = viewModel()
-            val pttState by pttViewModel.uiState.collectAsState()
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = if (isConnected) 2 else 0,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
-                isDisconnecting = isDisconnecting,
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
@@ -136,15 +120,7 @@ fun AppNavHost(
                         popUpTo(AppRoute.ModeGate.route) { inclusive = true }
                     }
                 },
-                onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
-                uiState = pttState,
-                sensorItems = pttViewModel.sensorItems,
-                onSensorExpandedChange = { pttViewModel.setSensorExpanded(it) },
-                onSensorStatusChange = { type, status ->
-                    pttViewModel.updateSensorStatus(type, status)
-                },
-                onPowerToggle = { pttViewModel.togglePowerSaving() },
-                onActionSelected = { action -> pttViewModel.onActionSelected(action) }
+                onChat = { navController.navigate(AppRoute.SurvivorChat.route) }
             )
         }
 
