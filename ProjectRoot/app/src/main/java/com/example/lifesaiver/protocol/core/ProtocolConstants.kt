@@ -5,8 +5,9 @@ object ProtocolConstants {
     const val SYNC_TTL_HOPS: Int = 0
     object Mesh {
         const val ANNOUNCE_INTERVAL_MS: Long = 30_000L
+        const val ANNOUNCE_INITIAL_DELAY_MS: Long = 200L
         const val PEER_TIMEOUT_MS: Long = 180_000L
-        const val PEER_CLEANUP_INTERVAL_MS: Long = 10_000L
+        const val PEER_CLEANUP_INTERVAL_MS: Long = 60_000L
     }
 
     object Fragmentation {

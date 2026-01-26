@@ -425,6 +425,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun startAnnounceLoop() {
         if (announceJob?.isActive == true) return
         announceJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(ProtocolConstants.Mesh.ANNOUNCE_INITIAL_DELAY_MS)
             while (true) {
                 sendAnnounce()
                 delay(ProtocolConstants.Mesh.ANNOUNCE_INTERVAL_MS)
