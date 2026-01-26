@@ -149,6 +149,7 @@ fun AppNavHost(
             val chatState by chatViewModel.uiState.collectAsState()
             RescueChatScreen(
                 roomTitle = "전체 채팅",
+                meshPeerCount = meshPeerCount,
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 inputValue = chatState.inputValue,
@@ -194,6 +195,7 @@ fun AppNavHost(
         composable(AppRoute.RescuerChat.route) {
             RescuerChatScreen(
                 roomTitle = "전체 채팅",
+                meshPeerCount = meshPeerCount,
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 onSend = onSendMessage
