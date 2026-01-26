@@ -57,8 +57,10 @@ class BleManager(
         get() = adapter?.bluetoothLeAdvertiser
 
     private val handler = Handler(Looper.getMainLooper())
-    // 72시간 모드에서는 타이머가 필요 없지만, 다른 비동기 작업을 위해 유지
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
+
+    // 코루틴 제어를 위한 Job 및 Scope
+    private val job = Job()
+    private val scope = CoroutineScope(Dispatchers.Main + job)
 
     var isHost = false
     private var isConnected = false
@@ -67,9 +69,9 @@ class BleManager(
 
     private var currentAdvertisingSet: AdvertisingSet? = null
 
-    // [추가] 구조대가 연결되었을 때 실행할 콜백 (사이렌 울리기용)
+    // 구조대가 연결되었을 때 실행할 콜백 (사이렌 울리기용)
     var onRescueConnected: (() -> Unit)? = null
-    // [추가] UI에 상태 메시지를 전달하기 위한 콜백 (토스트용)
+    // UI에 상태 메시지를 전달하기 위한 콜백 (토스트용)
     var onModeChange: ((String) -> Unit)? = null
 
     fun setProtocolCallback(listener: (ByteArray) -> Unit) {
@@ -102,8 +104,9 @@ class BleManager(
         isHost = true
         setupGattServer()
 
-        logCallback("🚨 SOS Mode: 72시간 생존 모드 가동")
-        onModeChange?.invoke("🚨 구조 신호 가동 (72시간 절전 모드)")
+        // [수정] 배터리 절약을 위해 로그 및 토스트 알림 제거
+        // logCallback("🚨 SOS Mode...")  <- 삭제됨
+        // onModeChange?.invoke("...")    <- 삭제됨
 
         // 2. 타이머 없이 바로 '절전형 고출력' 모드로 시작
         // 전략: Interval은 느리게(배터리 절약), TxPower는 강하게(장거리)
@@ -207,7 +210,6 @@ class BleManager(
                 .setConnectable(true) // 구조대가 연결할 수 있어야 함 (필수)
                 .setScannable(true)
                 // [핵심 전략] SOS 모드여도 배터리를 위해 Interval은 HIGH(느림, 약 1초) 사용
-                // 배터리 낭비를 막고 72시간 생존 확보
                 .setInterval(AdvertisingSetParameters.INTERVAL_HIGH)
                 // [핵심 전략] 신호 세기는 무조건 최대(High)로 하여 도달 거리 확보
                 .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
@@ -567,5 +569,20 @@ class BleManager(
         gattServer = null
         isConnected = false
         connectionCallback(false)
+    }
+
+    // 리소스 정리 함수 (앱 종료 시 호출)
+    fun release() {
+        try {
+            stopAdvertising()
+            stopScan()
+            gattServer?.close()
+            hostGatt?.close()
+            // 코루틴 취소 (메모리 릭 방지)
+            job.cancel()
+            logCallback("BleManager resources released.")
+        } catch (e: Exception) {
+            logCallback("Error releasing resources: ${e.message}")
+        }
     }
 }

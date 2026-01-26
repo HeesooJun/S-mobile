@@ -20,7 +20,6 @@ import com.example.lifesaiver.core.audio.VoiceRecorder
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.model.ChatMessage
-// [필수] RescueService import 확인 (패키지명에 맞게 수정)
 import com.example.lifesaiver.core.service.RescueService
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
@@ -77,7 +76,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.FOREGROUND_SERVICE // [필수] 서비스 권한
+            Manifest.permission.FOREGROUND_SERVICE
         )
     } else {
         arrayOf(
@@ -92,8 +91,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
 
-    // 사이렌 발생기
+    // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+    private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
     private val senderId: ByteArray by lazy {
@@ -127,9 +127,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // [핵심 기능] 구조 요청 신호 + 백그라운드 서비스 제어
     // ------------------------------------------------------------------------
 
-    /**
-     * SOS 버튼 클릭 시 호출
-     */
     fun startRescueSignal() {
         if (!_uiState.value.hasPermissions) {
             _uiEvents.tryEmit(UiEvent.Toast("블루투스 및 서비스 권한이 필요합니다."))
@@ -139,8 +136,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 1. BleManager: 72시간 생존 모드 신호 송출 시작
         bleManager.startEmergencyAdvertising()
 
-        // 2. [추가] RescueService: 백그라운드에서 죽지 않도록 서비스 시작
-        // (이 코드가 없으면 화면 껐을 때 신호가 멈출 수 있음)
+        // 2. RescueService: 백그라운드 서비스 시작
         try {
             val intent = Intent(app, RescueService::class.java).apply {
                 action = "START_RESCUE"
@@ -155,17 +151,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         _uiState.update { it.copy(isRescueSignalActive = true) }
-        // 메시지는 BleManager의 onModeChange 콜백을 통해 토스트로 출력됨
     }
 
-    /**
-     * 구조 요청 중단
-     */
     fun stopRescueSignal() {
         // 1. 신호 중단
         bleManager.stopAdvertising()
 
-        // 2. [추가] 백그라운드 서비스 종료
+        // 2. 백그라운드 서비스 종료
         try {
             val intent = Intent(app, RescueService::class.java).apply {
                 action = "STOP_RESCUE"
@@ -179,12 +171,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiEvents.tryEmit(UiEvent.Toast("구조 신호 중단됨"))
     }
 
-    // 사이렌 울리기 (비동기)
+    /**
+     * [수정] 사이렌 울리기 (강제 최대 볼륨 적용)
+     * 시나리오: 현재 볼륨 저장 -> 최대 볼륨 설정 -> 사이렌 발사 -> 원래 볼륨 복구
+     */
     private fun playSiren() {
         viewModelScope.launch(Dispatchers.Default) {
-            repeat(5) {
-                toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1000)
-                delay(1500)
+            // 1. 현재 알람 볼륨 저장 (나중에 복구를 위해)
+            val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+            // 2. 알람 채널의 최대 볼륨 가져오기
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+
+            try {
+                // 3. 볼륨을 강제로 최대로 설정 (플래그 0: UI 표시 안 함)
+                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVolume, 0)
+
+                // 4. 사이렌 울리기 (5회 반복)
+                repeat(5) {
+                    // TONE_CDMA_ALERT_CALL_GUARD: 매우 시끄럽고 긴급한 소리
+                    toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1000)
+                    delay(1500)
+                }
+            } catch (e: Exception) {
+                Log.e("Siren", "Error playing siren: ${e.message}")
+            } finally {
+                // 5. 사이렌이 끝나면 원래 볼륨으로 복구 (매너 모드)
+                try {
+                    audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
+                } catch (e: Exception) {
+                    Log.e("Siren", "Error restoring volume: ${e.message}")
+                }
             }
         }
     }
@@ -429,10 +445,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
-        bleManager.stopAdvertising()
-        bleManager.disconnect()
 
-        // 앱 종료 시 서비스도 같이 종료 (필요에 따라 주석 처리 가능)
+        // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
+        if (::bleManager.isInitialized) {
+            bleManager.release()
+        }
+
+        // 앱 종료 시 서비스도 같이 종료
         val intent = Intent(app, RescueService::class.java).apply {
             action = "STOP_RESCUE"
         }
