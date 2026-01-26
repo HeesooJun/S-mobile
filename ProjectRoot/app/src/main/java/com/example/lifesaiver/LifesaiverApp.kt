@@ -41,6 +41,7 @@ fun LifesaiverApp(
     hasPermissions: Boolean,
     batteryLevel: Int,
     isConnected: Boolean,
+    connectedCount: Int,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
@@ -132,6 +133,7 @@ fun LifesaiverApp(
             AppNavHost(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
+                connectedCount = connectedCount,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,

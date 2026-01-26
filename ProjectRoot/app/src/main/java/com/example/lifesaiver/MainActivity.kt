@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
                     hasPermissions = uiState.hasPermissions,
                     batteryLevel = uiState.batteryLevel,
                     isConnected = uiState.isConnected,
+                    connectedCount = uiState.connectedCount,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
                     isRescueSignalActive = uiState.isRescueSignalActive,

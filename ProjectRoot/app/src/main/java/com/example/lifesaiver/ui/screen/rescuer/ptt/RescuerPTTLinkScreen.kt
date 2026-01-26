@@ -69,7 +69,7 @@ fun RescuerPTTLinkScreen(
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
-    val displayConnectedCount = (connectedCount - 1).coerceAtLeast(0)
+    val displayConnectedCount = connectedCount.coerceAtLeast(0)
 
     LaunchedEffect(expandedAction) {
         if (
