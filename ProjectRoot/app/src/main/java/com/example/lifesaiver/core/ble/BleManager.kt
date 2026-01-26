@@ -44,7 +44,7 @@ class BleManager(
     private val logCallback: (String) -> Unit,
     private val audioCallback: (ByteArray) -> Unit,
     private val textCallback: (String) -> Unit,
-    private var protocolCallback: (ByteArray) -> Unit,
+    private var protocolCallback: (ByteArray, String?) -> Unit,
     private val connectionCallback: (Boolean) -> Unit
 ) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -74,7 +74,7 @@ class BleManager(
     // UI에 상태 메시지를 전달하기 위한 콜백 (토스트용)
     var onModeChange: ((String) -> Unit)? = null
 
-    fun setProtocolCallback(listener: (ByteArray) -> Unit) {
+    fun setProtocolCallback(listener: (ByteArray, String?) -> Unit) {
         protocolCallback = listener
     }
 
@@ -350,7 +350,7 @@ class BleManager(
             characteristic: BluetoothGattCharacteristic
         ) {
             if (characteristic.uuid == Constants.PROTOCOL_CHAR_UUID) {
-                protocolCallback(characteristic.value)
+                protocolCallback(characteristic.value, gatt.device.address)
             } else {
                 handleReceivedData(characteristic.value)
             }
@@ -444,14 +444,14 @@ class BleManager(
             value: ByteArray
         ) {
             if (characteristic.uuid == Constants.PROTOCOL_CHAR_UUID) {
-                protocolCallback(value)
+                protocolCallback(value, device.address)
             } else {
                 handleReceivedData(value)
+                relayData(device.address, value, characteristic.uuid)
             }
             if (responseNeeded) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
-            relayData(device.address, value, characteristic.uuid)
         }
     }
 
@@ -476,8 +476,23 @@ class BleManager(
         sendRaw(Constants.PROTOCOL_CHAR_UUID, data)
     }
 
-    fun broadcastProtocol(data: ByteArray) {
-        sendRaw(Constants.PROTOCOL_CHAR_UUID, data)
+    fun broadcastProtocol(data: ByteArray, excludeAddress: String? = null) {
+        sendRaw(Constants.PROTOCOL_CHAR_UUID, data, excludeAddress)
+    }
+
+    fun sendProtocolTo(address: String, data: ByteArray): Boolean {
+        if (!isConnected) return false
+        return if (isHost) {
+            hostSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)
+        } else {
+            val hostAddress = hostGatt?.device?.address
+            if (hostAddress != null && hostAddress == address) {
+                clientSend(Constants.PROTOCOL_CHAR_UUID, data)
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private fun sendPacket(type: Byte, payload: ByteArray) {
@@ -487,16 +502,20 @@ class BleManager(
         sendRaw(Constants.CHAR_UUID, packet)
     }
 
-    private fun sendRaw(characteristicUuid: UUID, data: ByteArray) {
+    private fun sendRaw(characteristicUuid: UUID, data: ByteArray, excludeAddress: String? = null) {
         if (!isConnected) return
         if (isHost) {
-            hostBroadcast(characteristicUuid, data)
+            hostBroadcast(characteristicUuid, data, excludeAddress)
         } else {
+            val hostAddress = hostGatt?.device?.address
+            if (excludeAddress != null && hostAddress != null && hostAddress == excludeAddress) {
+                return
+            }
             clientSend(characteristicUuid, data)
         }
     }
 
-    private fun hostBroadcast(characteristicUuid: UUID, data: ByteArray) {
+    private fun hostBroadcast(characteristicUuid: UUID, data: ByteArray, excludeAddress: String?) {
         val char = gattServer?.getService(Constants.SERVICE_UUID)
             ?.getCharacteristic(characteristicUuid) ?: return
         val devices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT) ?: return
@@ -506,6 +525,7 @@ class BleManager(
         }
 
         for (dev in devices) {
+            if (excludeAddress != null && dev.address == excludeAddress) continue
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     gattServer?.notifyCharacteristicChanged(dev, char, false, data)
@@ -533,6 +553,37 @@ class BleManager(
                 hostGatt?.writeCharacteristic(char)
             }
         } catch (e: Exception) {
+        }
+    }
+
+    private fun hostSendTo(address: String, characteristicUuid: UUID, data: ByteArray): Boolean {
+        val char = gattServer?.getService(Constants.SERVICE_UUID)
+            ?.getCharacteristic(characteristicUuid) ?: return false
+        val devices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT) ?: return false
+        val target = devices.firstOrNull { it.address == address } ?: return false
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            char.value = data
+        }
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gattServer?.notifyCharacteristicChanged(target, char, false, data)
+            } else {
+                gattServer?.notifyCharacteristicChanged(target, char, false)
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun getConnectedPeerCount(): Int {
+        if (!isConnected) return 0
+        return if (isHost) {
+            bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT)?.size ?: 0
+        } else {
+            if (hostGatt != null) 1 else 0
         }
     }
 
