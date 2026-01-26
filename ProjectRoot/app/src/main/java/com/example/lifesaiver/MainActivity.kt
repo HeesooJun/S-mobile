@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
                     messages = uiState.messages,
                     onRequestPermissions = { requestPermissions() },
                     onStartAutoConnect = { viewModel.onStartAutoConnect() },
+                    onStopAutoConnect = { viewModel.onStopAutoConnect() },
                     onMicPress = { viewModel.onMicPress() },
                     onMicRelease = { viewModel.onMicRelease() },
                     onSendMessage = { text -> viewModel.onSendMessage(text) },

@@ -36,6 +36,7 @@ fun AppNavHost(
     isRescueSignalActive: Boolean,
     messages: List<ChatMessage>,
     onStartAutoConnect: () -> Unit,
+    onStopAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
@@ -92,16 +93,21 @@ fun AppNavHost(
         composable(AppRoute.SurvivorEmergency.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
-            LaunchedEffect(isConnected) {
-                if (!isConnected) {
-                    onStartAutoConnect()
-                }
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
             }
             SurvivorEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
-                onPrev = { navController.popBackStack() },
-                onNext = { navController.navigate(AppRoute.SurvivorPTT.route) }
+                onPrev = {
+                    pendingSosNavigation = false
+                    onStopAutoConnect()
+                    navController.popBackStack()
+                },
+                onNext = {
+                    pendingSosNavigation = false
+                    navController.navigate(AppRoute.SurvivorPTT.route)
+                }
             )
         }
 
