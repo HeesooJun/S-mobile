@@ -14,6 +14,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.core.profile.ProfileStore
+import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
@@ -23,6 +25,7 @@ import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
 import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
+import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
 import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
@@ -44,7 +47,10 @@ fun AppNavHost(
     onStopRescueSignal: () -> Unit
 ) {
     val navController = rememberNavController()
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val profileStore = remember(context) { ProfileStore(context) }
+    val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
 
     LaunchedEffect(isConnected, pendingSosNavigation) {
@@ -65,8 +71,12 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 uiState = modeGateState,
                 onYes = {
-                    onStartAutoConnect()
-                    navController.navigate(AppRoute.SurvivorStandby.route)
+                    if (profileState.isComplete) {
+                        onStartAutoConnect()
+                        navController.navigate(AppRoute.SurvivorStandby.route)
+                    } else {
+                        navController.navigate(AppRoute.SurvivorProfile.route)
+                    }
                 },
                 onNo = { activity?.finish() },
                 onRescuerMode = {
@@ -76,10 +86,24 @@ fun AppNavHost(
             )
         }
 
+        composable(AppRoute.SurvivorProfile.route) {
+            SurvivorProfileScreen(
+                profileStore = profileStore,
+                onSaved = {
+                    onStartAutoConnect()
+                    navController.navigate(AppRoute.SurvivorStandby.route) {
+                        popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
         composable(AppRoute.SurvivorStandby.route) {
             StandbyStatusScreen(
                 batteryLevel = batteryLevel,
                 onPrev = { navController.popBackStack() },
+                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onSos = {
                     onStartRescueSignal()
                     pendingSosNavigation = true
