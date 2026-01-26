@@ -25,6 +25,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import kotlinx.coroutines.*
 import java.nio.charset.Charset
 import java.util.UUID
 import kotlin.random.Random
@@ -56,6 +57,8 @@ class BleManager(
         get() = adapter?.bluetoothLeAdvertiser
 
     private val handler = Handler(Looper.getMainLooper())
+    // 72시간 모드에서는 타이머가 필요 없지만, 다른 비동기 작업을 위해 유지
+    private val scope = CoroutineScope(Dispatchers.Main + Job())
 
     var isHost = false
     private var isConnected = false
@@ -63,6 +66,11 @@ class BleManager(
     private var hostGatt: BluetoothGatt? = null
 
     private var currentAdvertisingSet: AdvertisingSet? = null
+
+    // [추가] 구조대가 연결되었을 때 실행할 콜백 (사이렌 울리기용)
+    var onRescueConnected: (() -> Unit)? = null
+    // [추가] UI에 상태 메시지를 전달하기 위한 콜백 (토스트용)
+    var onModeChange: ((String) -> Unit)? = null
 
     fun setProtocolCallback(listener: (ByteArray) -> Unit) {
         protocolCallback = listener
@@ -78,6 +86,33 @@ class BleManager(
             false
         }
     }
+
+    // --------------------------------------------------------------------------
+    // [구조 신호] SOS 기능 (72시간 생존 모드)
+    // --------------------------------------------------------------------------
+
+    fun startEmergencyAdvertising() {
+        if (adapter == null || !adapter.isEnabled) {
+            logCallback("Bluetooth is off.")
+            return
+        }
+
+        // 1. 기존 연결 정리
+        disconnect()
+        isHost = true
+        setupGattServer()
+
+        logCallback("🚨 SOS Mode: 72시간 생존 모드 가동")
+        onModeChange?.invoke("🚨 구조 신호 가동 (72시간 절전 모드)")
+
+        // 2. 타이머 없이 바로 '절전형 고출력' 모드로 시작
+        // 전략: Interval은 느리게(배터리 절약), TxPower는 강하게(장거리)
+        startAdvertisingInternal(isEmergencyMode = true)
+    }
+
+    // --------------------------------------------------------------------------
+    // [자동 연결] Auto Connect 기능
+    // --------------------------------------------------------------------------
 
     fun startAutoConnect() {
         if (adapter == null || !adapter.isEnabled) {
@@ -97,7 +132,7 @@ class BleManager(
     private fun enterScanMode() {
         if (isConnected) return
 
-        stopAdvertise()
+        stopAdvertising()
         isHost = false
 
         val scanDuration = Random.nextLong(4000, 7000)
@@ -123,7 +158,8 @@ class BleManager(
         val advDuration = Random.nextLong(10000, 15000)
         logCallback("Advertise mode: becoming host (${advDuration / 1000.0}s).")
 
-        if (startAdvertise()) {
+        // 일반 모드 광고
+        if (startAdvertisingInternal(isEmergencyMode = false)) {
             isHost = true
             setupGattServer()
 
@@ -131,7 +167,7 @@ class BleManager(
                 val connectedDevs = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT)
                 if (!isConnected && connectedDevs.isNullOrEmpty()) {
                     logCallback("No peers -> back to scan.")
-                    stopAdvertise()
+                    stopAdvertising()
                     enterScanMode()
                 }
             }, advDuration)
@@ -139,6 +175,10 @@ class BleManager(
             enterScanMode()
         }
     }
+
+    // --------------------------------------------------------------------------
+    // [내부 로직] 광고 시작 및 중단
+    // --------------------------------------------------------------------------
 
     private val advertisingCallback = object : AdvertisingSetCallback() {
         override fun onAdvertisingSetStarted(
@@ -154,13 +194,22 @@ class BleManager(
         }
     }
 
-    private fun startAdvertise(): Boolean {
+    /**
+     * 광고 시작 내부 함수
+     * @param isEmergencyMode
+     * - true (SOS): Interval High (느림=절전), TxPower High (강함=최대거리) -> 72시간 생존
+     * - false (일반): Interval High (느림=절전), TxPower High (강함=일반)
+     */
+    private fun startAdvertisingInternal(isEmergencyMode: Boolean): Boolean {
         return try {
             val parameters = AdvertisingSetParameters.Builder()
                 .setLegacyMode(true)
-                .setConnectable(true)
+                .setConnectable(true) // 구조대가 연결할 수 있어야 함 (필수)
                 .setScannable(true)
+                // [핵심 전략] SOS 모드여도 배터리를 위해 Interval은 HIGH(느림, 약 1초) 사용
+                // 배터리 낭비를 막고 72시간 생존 확보
                 .setInterval(AdvertisingSetParameters.INTERVAL_HIGH)
+                // [핵심 전략] 신호 세기는 무조건 최대(High)로 하여 도달 거리 확보
                 .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
                 .setPrimaryPhy(BluetoothDevice.PHY_LE_1M)
                 .setSecondaryPhy(BluetoothDevice.PHY_LE_1M)
@@ -190,13 +239,17 @@ class BleManager(
         }
     }
 
-    private fun stopAdvertise() {
+    fun stopAdvertising() {
         try {
             advertiser?.stopAdvertisingSet(advertisingCallback)
             currentAdvertisingSet = null
         } catch (e: Exception) {
         }
     }
+
+    // --------------------------------------------------------------------------
+    // 스캔 및 연결 콜백
+    // --------------------------------------------------------------------------
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
@@ -208,7 +261,7 @@ class BleManager(
                 logCallback("Host found: ${device.address}")
                 handler.removeCallbacksAndMessages(null)
                 stopScan()
-                stopAdvertise()
+                stopAdvertising()
                 connectToHost(device)
             }
         }
@@ -268,7 +321,6 @@ class BleManager(
                 connectionCallback(true)
                 isHost = false
                 handler.removeCallbacksAndMessages(null)
-
                 gatt.requestMtu(512)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 logCallback("Disconnected.")
@@ -356,14 +408,22 @@ class BleManager(
             status: Int,
             newState: Int
         ) {
+            // [핵심] 구조대 접속 감지 (사이렌 발생 조건)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                logCallback("Peer joined (${device.address}).")
+                logCallback("✅ Peer joined (구조대 접속!): ${device.address}")
+
+                // 구조대가 접속하면 ViewModel에 알림 (사이렌 울리기)
+                Handler(Looper.getMainLooper()).post {
+                    onRescueConnected?.invoke()
+                }
+
                 isConnected = true
                 connectionCallback(true)
                 handler.removeCallbacksAndMessages(null)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 isConnected = false
                 connectionCallback(false)
+                // 연결 끊기면 다시 자동 연결 모드로 복귀
                 startAutoConnect()
             }
         }
@@ -500,7 +560,7 @@ class BleManager(
     fun disconnect() {
         handler.removeCallbacksAndMessages(null)
         stopScan()
-        stopAdvertise()
+        stopAdvertising()
         hostGatt?.close()
         hostGatt = null
         gattServer?.close()
