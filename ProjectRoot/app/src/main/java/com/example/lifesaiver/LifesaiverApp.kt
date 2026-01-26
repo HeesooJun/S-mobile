@@ -28,6 +28,7 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
 import com.example.lifesaiver.ui.navigation.AppNavHost
+import com.example.lifesaiver.ui.navigation.AppRoute
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.rememberAppScale
@@ -60,14 +61,23 @@ fun LifesaiverApp(
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     // [상태 2] 절전 화면 표시 여부
     var isSaverVisible by remember { mutableStateOf(false) }
+    var currentRoute by remember { mutableStateOf(AppRoute.ModeGate.route) }
+    val autoSaverTimeoutMs = if (
+        currentRoute == AppRoute.SurvivorPTT.route ||
+        currentRoute == AppRoute.RescuerPTT.route
+    ) {
+        60_000L
+    } else {
+        10_000L
+    }
 
-    // [로직 1] SOS가 켜져 있고, 화면이 켜져있다면(절전X) -> 10초 타이머 체크
-    LaunchedEffect(isRescueSignalActive, isSaverVisible) {
+    // [로직 1] SOS가 켜져 있고, 화면이 켜져있다면(절전X) -> 타이머 체크
+    LaunchedEffect(isRescueSignalActive, isSaverVisible, autoSaverTimeoutMs) {
         if (isRescueSignalActive && !isSaverVisible) {
             while (true) {
                 val currentTime = System.currentTimeMillis()
-                // 마지막 터치로부터 10초(10000ms) 지났는지 확인
-                if (currentTime - lastInteractionTime >= 10000L) {
+                // 마지막 터치로부터 일정 시간이 지났는지 확인
+                if (currentTime - lastInteractionTime >= autoSaverTimeoutMs) {
                     isSaverVisible = true // 절전 모드 진입
                 }
                 delay(1000L) // 1초마다 검사
@@ -133,7 +143,8 @@ fun LifesaiverApp(
                 onSendMessage = onSendMessage,
                 onDisconnect = onDisconnect,
                 onStartRescueSignal = onStartRescueSignal,
-                onStopRescueSignal = onStopRescueSignal
+                onStopRescueSignal = onStopRescueSignal,
+                onRouteChanged = { route -> currentRoute = route }
             )
 
             // 2. 절전 모드 오버레이 (SOS 켜짐 + 10초간 터치 없음)
