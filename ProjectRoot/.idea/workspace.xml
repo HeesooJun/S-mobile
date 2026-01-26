@@ -1,0 +1,476 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AndroidLayouts">
+    <shared>
+      <config />
+    </shared>
+  </component>
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="NONE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="21e5d071-66d1-4bf0-afb5-3ae6fd3cf24b" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/.editorconfig" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/AGENTS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/build.gradle.kts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/proguard-rules.pro" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/androidTest/java/com/example/lifesaiver/ExampleInstrumentedTest.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/AndroidManifest.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/LifesaiverApp.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/MainActivity.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/core/audio/AudioEngine.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/core/ble/BleManager.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/core/model/ChatMessage.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/BatteryIndicator.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/Chip.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/DistanceTrack.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/MicButton.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/PowerSavingLayer.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/PrimaryButton.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/RecordButton.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/ScreenScaffold.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/SecondaryButton.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/components/SignalBars.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/navigation/AppNavHost.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/navigation/AppRoute.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/mode/ModeGateScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/rescuer/chat/RescuerChatScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/rescuer/emergency/EmergencyBeaconScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/rescuer/ptt/RescuerPTTLinkScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/rescuer/standby/RescuerStandbyScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/survivor/chat/RescueChatScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/survivor/emergency/EmergencyBeaconScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/survivor/ptt/PTTLinkScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/screen/survivor/standby/StandbyStatusScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/theme/AppColors.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/theme/AppScale.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/theme/Color.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/theme/Theme.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/java/com/example/lifesaiver/ui/theme/Type.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/arrow.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/battery_segment_0.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/battery_segment_100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/battery_segment_25.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/battery_segment_50.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/battery_segment_75.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/connection.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/connection_filled.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/connection_lost.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_arrow_up.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_back.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_chat.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_data_saver.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_disconnect.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_dnd.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_launcher_background.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_launcher_foreground.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_mic.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_mic_red.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_power_off.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_siren.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/ic_sound.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/drawable/lifesaivior_logo.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/font/pretendard_black.ttf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/font/pretendard_bold.ttf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/font/pretendard_extrabold.ttf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/font/pretendard_medium.ttf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/font/pretendard_regular.ttf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/font/pretendard_semibold.ttf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/layout/activity_main.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-anydpi/ic_launcher.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-hdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-hdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-mdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-mdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-xhdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-xhdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-xxhdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/values/colors.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/values/strings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/values/themes.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/xml/backup_rules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/main/res/xml/data_extraction_rules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/app/src/test/java/com/example/lifesaiver/ExampleUnitTest.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/build.gradle.kts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/config/detekt/detekt.yml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/gradle.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/gradle/libs.versions.toml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/gradle/wrapper/gradle-wrapper.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/gradle/wrapper/gradle-wrapper.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/gradlew" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/gradlew.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/ATTRIBUTIONS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/guidelines/Guidelines.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/index.html" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/package-lock.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/package.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/postcss.config.mjs" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/App.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/BatteryIndicator.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/Chip.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/MicButton.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/PrimaryButton.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/RecordButton.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/Screen01.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/Screen02.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/Screen03.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/Screen04.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/Screen05.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/SecondaryButton.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/SignalBars.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/figma/ImageWithFallback.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/accordion.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/alert-dialog.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/alert.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/aspect-ratio.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/avatar.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/badge.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/breadcrumb.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/button.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/calendar.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/card.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/carousel.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/chart.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/checkbox.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/collapsible.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/command.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/context-menu.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/dialog.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/drawer.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/dropdown-menu.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/form.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/hover-card.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/input-otp.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/input.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/label.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/menubar.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/navigation-menu.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/pagination.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/popover.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/progress.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/radio-group.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/resizable.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/scroll-area.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/select.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/separator.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/sheet.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/sidebar.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/skeleton.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/slider.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/sonner.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/switch.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/table.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/tabs.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/textarea.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/toggle-group.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/toggle.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/tooltip.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/use-mobile.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/app/components/ui/utils.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/main.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/styles/fonts.css" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/styles/index.css" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/styles/tailwind.css" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/src/styles/theme.css" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/Mobile UI Rebuild/vite.config.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/.google/packaging.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/build.gradle.kts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/java/com/google/location/nearby/apps/walkietalkie/MainActivity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/mipmap-hdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/mipmap-mdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/mipmap-xhdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/mipmap-xxhdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/mipmap-xxxhdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/values/colors.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/automatic/res/values/strings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/AndroidManifest.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/java/com/google/location/nearby/apps/walkietalkie/AudioBuffer.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/java/com/google/location/nearby/apps/walkietalkie/AudioPlayer.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/java/com/google/location/nearby/apps/walkietalkie/AudioRecorder.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/java/com/google/location/nearby/apps/walkietalkie/ConnectionsActivity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/java/com/google/location/nearby/apps/walkietalkie/Constants.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/java/com/google/location/nearby/apps/walkietalkie/GestureDetector.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/res/layout/activity_main.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/res/values/colors.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/res/values/drawables.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/res/values/strings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/main/res/values/styles.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/java/com/google/location/nearby/apps/walkietalkie/MainActivity.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/mipmap-hdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/mipmap-mdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/mipmap-xhdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/mipmap-xxhdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/mipmap-xxxhdpi/ic_launcher.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/values/colors.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/app/src/manual/res/values/strings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/build.gradle.kts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/gradle.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/gradle/wrapper/gradle-wrapper.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/gradle/wrapper/gradle-wrapper.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/gradlew" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/gradlew.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/NearbyConnectionsWalkieTalkie/settings.gradle.kts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.google/packaging.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/.name" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/AndroidProjectSystem.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/compiler.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/deploymentTargetSelector.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/gradle.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/markdown.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/migrations.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/misc.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/runConfigurations.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/.idea/vcs.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/CONTRIBUTING.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/LICENSE" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/build.gradle" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/proguard-rules.pro" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/AndroidManifest.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/AppContainer.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/HelloUwbApplication.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/data/AppContainerImpl.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/data/SettingsStore.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/data/SettingsStoreImpl.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/data/UwbRangingControlSource.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/data/UwbRangingControlSourceImpl.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/HelloUwbApp.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/MainActivity.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/Screen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/control/ControlRoute.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/control/ControlScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/control/ControlViewModel.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/home/HomeRoute.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/home/HomeScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/home/HomeViewModel.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/nav/AppNavBar.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/nav/AppNavGraph.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/nav/AppNavigation.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/ranging/RangingControlIcon.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/ranging/RangingViewModel.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/send/SendRoute.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/send/SendScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/send/SendViewModel.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/settings/SettingsRoute.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/settings/SettingsScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/settings/SettingsViewModel.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/theme/Color.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/theme/Theme.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/java/com/google/apps/hellouwb/ui/theme/Type.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/proto/appsetttings.proto" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/drawable-v24/ic_launcher_foreground.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/drawable/ic_launcher_background.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/drawable/lock_close24px.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/drawable/lock_open24px.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/drawable/uwb.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-hdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-hdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-mdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-mdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-xhdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-xhdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-xxhdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.webp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/values/colors.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/values/strings.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/values/themes.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/xml/backup_rules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/app/src/main/res/xml/data_extraction_rules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/build.gradle" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/gradle.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/gradle/wrapper/gradle-wrapper.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/gradle/wrapper/gradle-wrapper.properties" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/gradlew" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/gradlew.bat" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/settings.gradle" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/.gitignore" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/build.gradle" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/consumer-rules.pro" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/proguard-rules.pro" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/AndroidManifest.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/EndpointEvents.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/UwbConnectionManager.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/UwbEndpoint.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/UwbSessionScope.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/NearbyConnections.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/NearbyConnector.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/NearbyControleeConnector.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/NearbyControllerConnector.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/OobConnector.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/UwbConnectionManagerImpl.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/UwbOobEvent.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/java/com/google/apps/uwbranging/impl/UwbSessionScopeImpl.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/main/proto/uwbinfo.proto" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/test/java/com/google/apps/uwbranging/impl/NearbyConnectionsTest.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/test/java/com/google/apps/uwbranging/impl/NearbyControleeConnectorTest.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/test/java/com/google/apps/uwbranging/impl/NearbyControllerConnectorTest.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/reference/UwbRanging/uwbranging/src/test/java/com/google/apps/uwbranging/impl/UwbSessionScopeImplTest.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../ProjectRoot/settings.gradle.kts" beforeDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ClangdSettings">
+    <option name="formatViaClangd" value="false" />
+  </component>
+  <component name="ExecutionTargetManager" SELECTED_TARGET="device_and_snapshot_combo_box_target[DeviceId(pluginId=LocalEmulator, isTemplate=false, identifier=path=C:\Users\SSAFY\.android\avd\Medium_Phone.avd)]" />
+  <component name="ExternalProjectsData">
+    <projectState path="$PROJECT_DIR$">
+      <ProjectState />
+    </projectState>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Kotlin Class" />
+        <option value="Kotlin File" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="GradleScriptDefinitionsStorage" workingDir="$PROJECT_DIR$" gradleHome="C:\Users\SSAFY\.gradle\wrapper\dists\gradle-8.13-bin\5xuhj0ry160q40clulazy9h7d\gradle-8.13" javaHome="C:\Program Files\Android\Android Studio\jbr" gradleVersion="8.13" />
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="CurrentFile" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 6
+}</component>
+  <component name="ProjectId" id="38Xl5KprYEQvG0FpQpnms9TFqqF" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Android App.app.executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "cf.first.check.clang-format": "false",
+    "cidr.known.project.marker": "true",
+    "com.google.services.firebase.aqiPopupShown": "true",
+    "git-widget-placeholder": "ui__Rescuer",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "C:/Users/SSAFY/Desktop/AVG180 - LifeSaiver/S14P11E203/ProjectRoot(UI)",
+    "project.structure.last.edited": "Modules",
+    "project.structure.proportion": "0.17",
+    "project.structure.side.proportion": "0.2"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\SSAFY\Desktop\AVG180 - LifeSaiver\S14P11E203\ProjectRoot\app\src\main\java\com\example\lifesaiver\ui\screen" />
+      <recent name="C:\Users\SSAFY\Desktop\AVG180 - LifeSaiver\S14P11E203\ProjectRoot\app\src\main\java\com\example\lifesaiver\ui" />
+    </key>
+  </component>
+  <component name="RunManager">
+    <configuration name="app" type="AndroidRunConfigurationType" factoryName="Android App" activateToolWindowBeforeRun="false">
+      <module name="Lifesaiver.app" />
+      <option name="ANDROID_RUN_CONFIGURATION_SCHEMA_VERSION" value="1" />
+      <option name="DEPLOY" value="true" />
+      <option name="DEPLOY_APK_FROM_BUNDLE" value="false" />
+      <option name="DEPLOY_AS_INSTANT" value="false" />
+      <option name="ARTIFACT_NAME" value="" />
+      <option name="PM_INSTALL_OPTIONS" value="" />
+      <option name="ALL_USERS" value="false" />
+      <option name="ALWAYS_INSTALL_WITH_PM" value="false" />
+      <option name="ALLOW_ASSUME_VERIFIED" value="false" />
+      <option name="CLEAR_APP_STORAGE" value="false" />
+      <option name="DYNAMIC_FEATURES_DISABLED_LIST" value="" />
+      <option name="ACTIVITY_EXTRA_FLAGS" value="" />
+      <option name="MODE" value="default_activity" />
+      <option name="RESTORE_ENABLED" value="false" />
+      <option name="RESTORE_FILE" value="" />
+      <option name="RESTORE_FRESH_INSTALL_ONLY" value="false" />
+      <option name="CLEAR_LOGCAT" value="false" />
+      <option name="SHOW_LOGCAT_AUTOMATICALLY" value="false" />
+      <option name="TARGET_SELECTION_MODE" value="DEVICE_AND_SNAPSHOT_COMBO_BOX" />
+      <option name="SELECTED_CLOUD_MATRIX_CONFIGURATION_ID" value="-1" />
+      <option name="SELECTED_CLOUD_MATRIX_PROJECT_ID" value="" />
+      <option name="DEBUGGER_TYPE" value="Auto" />
+      <Auto>
+        <option name="USE_JAVA_AWARE_DEBUGGER" value="false" />
+        <option name="SHOW_STATIC_VARS" value="true" />
+        <option name="WORKING_DIR" value="" />
+        <option name="TARGET_LOGGING_CHANNELS" value="lldb process:gdb-remote packets" />
+        <option name="SHOW_OPTIMIZED_WARNING" value="true" />
+        <option name="ATTACH_ON_WAIT_FOR_DEBUGGER" value="false" />
+        <option name="DEBUG_SANDBOX_SDK" value="false" />
+      </Auto>
+      <Hybrid>
+        <option name="USE_JAVA_AWARE_DEBUGGER" value="false" />
+        <option name="SHOW_STATIC_VARS" value="true" />
+        <option name="WORKING_DIR" value="" />
+        <option name="TARGET_LOGGING_CHANNELS" value="lldb process:gdb-remote packets" />
+        <option name="SHOW_OPTIMIZED_WARNING" value="true" />
+        <option name="ATTACH_ON_WAIT_FOR_DEBUGGER" value="false" />
+        <option name="DEBUG_SANDBOX_SDK" value="false" />
+      </Hybrid>
+      <Java>
+        <option name="ATTACH_ON_WAIT_FOR_DEBUGGER" value="false" />
+        <option name="DEBUG_SANDBOX_SDK" value="false" />
+      </Java>
+      <Native>
+        <option name="USE_JAVA_AWARE_DEBUGGER" value="false" />
+        <option name="SHOW_STATIC_VARS" value="true" />
+        <option name="WORKING_DIR" value="" />
+        <option name="TARGET_LOGGING_CHANNELS" value="lldb process:gdb-remote packets" />
+        <option name="SHOW_OPTIMIZED_WARNING" value="true" />
+        <option name="ATTACH_ON_WAIT_FOR_DEBUGGER" value="false" />
+        <option name="DEBUG_SANDBOX_SDK" value="false" />
+      </Native>
+      <Profilers>
+        <option name="ADVANCED_PROFILING_ENABLED" value="false" />
+        <option name="STARTUP_PROFILING_ENABLED" value="false" />
+        <option name="STARTUP_CPU_PROFILING_ENABLED" value="false" />
+        <option name="STARTUP_CPU_PROFILING_CONFIGURATION_NAME" value="Java/Kotlin Method Sample (legacy)" />
+        <option name="STARTUP_NATIVE_MEMORY_PROFILING_ENABLED" value="false" />
+        <option name="NATIVE_MEMORY_SAMPLE_RATE_BYTES" value="2048" />
+      </Profilers>
+      <option name="DEEP_LINK" value="" />
+      <option name="ACTIVITY" value="" />
+      <option name="ACTIVITY_CLASS" value="" />
+      <option name="SEARCH_ACTIVITY_IN_GLOBAL_SCOPE" value="false" />
+      <option name="SKIP_ACTIVITY_VALIDATION" value="false" />
+      <method v="2">
+        <option name="Android.Gradle.BeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="21e5d071-66d1-4bf0-afb5-3ae6fd3cf24b" name="Changes" comment="" />
+      <created>1768953613640</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1768953613640</updated>
+    </task>
+    <servers />
+  </component>
+</project>
