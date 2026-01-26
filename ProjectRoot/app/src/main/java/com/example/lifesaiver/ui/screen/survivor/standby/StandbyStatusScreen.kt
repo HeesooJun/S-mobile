@@ -53,6 +53,7 @@ import kotlinx.coroutines.delay
 fun StandbyStatusScreen(
     batteryLevel: Int,
     onPrev: () -> Unit,
+    onProfile: () -> Unit,
     onSos: () -> Unit
 ) {
     val scale = LocalAppScale.current
@@ -216,10 +217,13 @@ fun StandbyStatusScreen(
                         end = scaledDp(32, scale),
                         bottom = scaledDp(24, scale)
                     ),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(12, scale)),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SecondaryButton(label = "이전", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
+
+                SecondaryButton(label = "내 정보", variant = SecondaryButtonVariant.Gray, onClick = onProfile)
+                Spacer(modifier = Modifier.weight(1f))
 
                 Box {
                     SensorStatusToggle(
