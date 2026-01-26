@@ -28,7 +28,6 @@ import android.os.Looper
 import kotlinx.coroutines.*
 import java.nio.charset.Charset
 import java.util.UUID
-import kotlin.random.Random
 
 object Constants {
     val SERVICE_UUID: UUID = UUID.fromString("0000AAAA-0000-1000-8000-00805f9b34fb")
@@ -65,8 +64,9 @@ class BleManager(
     var isHost = false
     private var isConnected = false
     private val connectedPeers = mutableSetOf<String>()
+    private val clientConnections = mutableMapOf<String, BluetoothGatt>()
+    private val pendingConnections = mutableSetOf<String>()
     private var gattServer: BluetoothGattServer? = null
-    private var hostGatt: BluetoothGatt? = null
 
     private var currentAdvertisingSet: AdvertisingSet? = null
 
@@ -127,57 +127,23 @@ class BleManager(
         disconnect()
         isConnected = false
         connectionCallback(false, 0)
-        isHost = false
+        isHost = true
 
-        logCallback("Auto connect start.")
-        enterScanMode()
+        logCallback("Auto connect start (mesh mode).")
+        setupGattServer()
+        startAdvertisingInternal(isEmergencyMode = false)
+        startScan()
     }
 
     private fun enterScanMode() {
-        if (isConnected) return
-
-        stopAdvertising()
-        isHost = false
-
-        val scanDuration = Random.nextLong(4000, 7000)
-        logCallback("Scan mode: searching for host (${scanDuration / 1000.0}s).")
-
-        if (startScan()) {
-            handler.postDelayed({
-                if (!isConnected) {
-                    stopScan()
-                    enterAdvertiseMode()
-                }
-            }, scanDuration)
-        } else {
-            enterAdvertiseMode()
-        }
+        logCallback("Scan mode: searching for peers.")
+        startScan()
     }
 
     private fun enterAdvertiseMode() {
-        if (isConnected) return
-
-        stopScan()
-
-        val advDuration = Random.nextLong(10000, 15000)
-        logCallback("Advertise mode: becoming host (${advDuration / 1000.0}s).")
-
-        // 일반 모드 광고
-        if (startAdvertisingInternal(isEmergencyMode = false)) {
-            isHost = true
-            setupGattServer()
-
-            handler.postDelayed({
-                val connectedDevs = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT)
-                if (!isConnected && connectedDevs.isNullOrEmpty()) {
-                    logCallback("No peers -> back to scan.")
-                    stopAdvertising()
-                    enterScanMode()
-                }
-            }, advDuration)
-        } else {
-            enterScanMode()
-        }
+        isHost = true
+        setupGattServer()
+        startAdvertisingInternal(isEmergencyMode = false)
     }
 
     // --------------------------------------------------------------------------
@@ -257,16 +223,13 @@ class BleManager(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             val device = result?.device ?: return
+            val address = device.address
+            if (result.rssi <= -90) return
+            if (isConnectionKnown(address)) return
+            if (!markPending(address)) return
 
-            if (isConnected || hostGatt != null) return
-
-            if (result.rssi > -90) {
-                logCallback("Host found: ${device.address}")
-                handler.removeCallbacksAndMessages(null)
-                stopScan()
-                stopAdvertising()
-                connectToHost(device)
-            }
+            logCallback("Peer found: ${device.address}")
+            connectToPeer(device)
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -297,13 +260,13 @@ class BleManager(
         }
     }
 
-    private fun connectToHost(device: BluetoothDevice) {
+    private fun connectToPeer(device: BluetoothDevice) {
         try {
             val phyMask = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isLongRangeSupported()) {
                 BluetoothDevice.PHY_LE_1M_MASK or BluetoothDevice.PHY_LE_CODED_MASK
             } else BluetoothDevice.PHY_LE_1M_MASK
 
-            hostGatt = device.connectGatt(
+            device.connectGatt(
                 context,
                 false,
                 gattClientCallback,
@@ -312,26 +275,32 @@ class BleManager(
             )
         } catch (e: Exception) {
             logCallback("Connect error: ${e.message}")
-            enterScanMode()
+            clearPending(device.address)
         }
     }
 
     private val gattClientCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            val address = gatt.device.address
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 logCallback("Connected. Requesting MTU...")
-                isConnected = true
-                connectionCallback(true, 1)
-                isHost = false
-                handler.removeCallbacksAndMessages(null)
+                synchronized(clientConnections) {
+                    clientConnections[address] = gatt
+                }
+                clearPending(address)
+                notifyConnectionState()
                 gatt.requestMtu(512)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 logCallback("Disconnected.")
-                isConnected = false
-                connectionCallback(false, 0)
-                hostGatt?.close()
-                hostGatt = null
-                startAutoConnect()
+                synchronized(clientConnections) {
+                    clientConnections.remove(address)
+                }
+                clearPending(address)
+                notifyConnectionState()
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -423,16 +392,13 @@ class BleManager(
                 synchronized(connectedPeers) {
                     connectedPeers.add(device.address)
                 }
-                isConnected = true
-                connectionCallback(true, getConnectedPeerCount())
+                notifyConnectionState()
                 handler.removeCallbacksAndMessages(null)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 synchronized(connectedPeers) {
                     connectedPeers.remove(device.address)
                 }
-                val remaining = getConnectedPeerCount()
-                isConnected = remaining > 0
-                connectionCallback(isConnected, remaining)
+                notifyConnectionState()
             }
         }
 
@@ -488,17 +454,8 @@ class BleManager(
 
     fun sendProtocolTo(address: String, data: ByteArray): Boolean {
         if (!isConnected) return false
-        return if (isHost) {
-            hostSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)
-        } else {
-            val hostAddress = hostGatt?.device?.address
-            if (hostAddress != null && hostAddress == address) {
-                clientSend(Constants.PROTOCOL_CHAR_UUID, data)
-                true
-            } else {
-                false
-            }
-        }
+        if (hostSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)) return true
+        return clientSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)
     }
 
     private fun sendPacket(type: Byte, payload: ByteArray) {
@@ -510,27 +467,27 @@ class BleManager(
 
     private fun sendRaw(characteristicUuid: UUID, data: ByteArray, excludeAddress: String? = null) {
         if (!isConnected) return
-        if (isHost) {
-            hostBroadcast(characteristicUuid, data, excludeAddress)
-        } else {
-            val hostAddress = hostGatt?.device?.address
-            if (excludeAddress != null && hostAddress != null && hostAddress == excludeAddress) {
-                return
-            }
-            clientSend(characteristicUuid, data)
-        }
+        val serverAddresses = hostBroadcast(characteristicUuid, data, excludeAddress)
+        clientBroadcast(characteristicUuid, data, excludeAddress, serverAddresses)
     }
 
-    private fun hostBroadcast(characteristicUuid: UUID, data: ByteArray, excludeAddress: String?) {
+    private fun hostBroadcast(
+        characteristicUuid: UUID,
+        data: ByteArray,
+        excludeAddress: String?
+    ): Set<String> {
         val char = gattServer?.getService(Constants.SERVICE_UUID)
-            ?.getCharacteristic(characteristicUuid) ?: return
-        val devices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT) ?: return
+            ?.getCharacteristic(characteristicUuid) ?: return emptySet()
+        val addresses = synchronized(connectedPeers) { connectedPeers.toSet() }
+        if (addresses.isEmpty()) return emptySet()
+        val devices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT) ?: return addresses
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             char.value = data
         }
 
         for (dev in devices) {
+            if (!addresses.contains(dev.address)) continue
             if (excludeAddress != null && dev.address == excludeAddress) continue
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -541,14 +498,15 @@ class BleManager(
             } catch (e: Exception) {
             }
         }
+        return addresses
     }
 
-    private fun clientSend(characteristicUuid: UUID, data: ByteArray) {
-        val char = hostGatt?.getService(Constants.SERVICE_UUID)
+    private fun clientSend(gatt: BluetoothGatt, characteristicUuid: UUID, data: ByteArray) {
+        val char = gatt.getService(Constants.SERVICE_UUID)
             ?.getCharacteristic(characteristicUuid) ?: return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                hostGatt?.writeCharacteristic(
+                gatt.writeCharacteristic(
                     char,
                     data,
                     BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -556,15 +514,31 @@ class BleManager(
             } else {
                 char.value = data
                 char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                hostGatt?.writeCharacteristic(char)
+                gatt.writeCharacteristic(char)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun clientBroadcast(
+        characteristicUuid: UUID,
+        data: ByteArray,
+        excludeAddress: String?,
+        skipAddresses: Set<String>
+    ) {
+        val connections = synchronized(clientConnections) { clientConnections.toMap() }
+        connections.forEach { (address, gatt) ->
+            if (excludeAddress != null && address == excludeAddress) return@forEach
+            if (skipAddresses.contains(address)) return@forEach
+            clientSend(gatt, characteristicUuid, data)
         }
     }
 
     private fun hostSendTo(address: String, characteristicUuid: UUID, data: ByteArray): Boolean {
         val char = gattServer?.getService(Constants.SERVICE_UUID)
             ?.getCharacteristic(characteristicUuid) ?: return false
+        val serverAddresses = synchronized(connectedPeers) { connectedPeers.toSet() }
+        if (!serverAddresses.contains(address)) return false
         val devices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT) ?: return false
         val target = devices.firstOrNull { it.address == address } ?: return false
 
@@ -584,12 +558,53 @@ class BleManager(
         }
     }
 
-    fun getConnectedPeerCount(): Int {
-        return if (isHost) {
-            synchronized(connectedPeers) { connectedPeers.size }
-        } else {
-            if (hostGatt != null) 1 else 0
+    private fun clientSendTo(address: String, characteristicUuid: UUID, data: ByteArray): Boolean {
+        val gatt = synchronized(clientConnections) { clientConnections[address] } ?: return false
+        clientSend(gatt, characteristicUuid, data)
+        return true
+    }
+
+    private fun getAllConnectedAddresses(): Set<String> {
+        val serverSet = synchronized(connectedPeers) { connectedPeers.toSet() }
+        val clientSet = synchronized(clientConnections) { clientConnections.keys.toSet() }
+        return serverSet + clientSet
+    }
+
+    private fun notifyConnectionState() {
+        val count = getAllConnectedAddresses().size
+        isConnected = count > 0
+        connectionCallback(isConnected, count)
+    }
+
+    private fun isConnectionKnown(address: String): Boolean {
+        synchronized(connectedPeers) {
+            if (connectedPeers.contains(address)) return true
         }
+        synchronized(clientConnections) {
+            if (clientConnections.containsKey(address)) return true
+        }
+        synchronized(pendingConnections) {
+            if (pendingConnections.contains(address)) return true
+        }
+        return false
+    }
+
+    private fun markPending(address: String): Boolean {
+        synchronized(pendingConnections) {
+            if (pendingConnections.contains(address)) return false
+            pendingConnections.add(address)
+            return true
+        }
+    }
+
+    private fun clearPending(address: String) {
+        synchronized(pendingConnections) {
+            pendingConnections.remove(address)
+        }
+    }
+
+    fun getConnectedPeerCount(): Int {
+        return getAllConnectedAddresses().size
     }
 
     private fun relayData(sender: String, data: ByteArray, characteristicUuid: UUID) {
@@ -619,8 +634,22 @@ class BleManager(
         handler.removeCallbacksAndMessages(null)
         stopScan()
         stopAdvertising()
-        hostGatt?.close()
-        hostGatt = null
+        synchronized(clientConnections) {
+            clientConnections.values.forEach { gatt ->
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
+            }
+            clientConnections.clear()
+        }
+        synchronized(pendingConnections) {
+            pendingConnections.clear()
+        }
         gattServer?.close()
         gattServer = null
         isConnected = false
@@ -636,7 +665,19 @@ class BleManager(
             stopAdvertising()
             stopScan()
             gattServer?.close()
-            hostGatt?.close()
+            synchronized(clientConnections) {
+                clientConnections.values.forEach { gatt ->
+                    try {
+                        gatt.disconnect()
+                    } catch (_: Exception) {
+                    }
+                    try {
+                        gatt.close()
+                    } catch (_: Exception) {
+                    }
+                }
+                clientConnections.clear()
+            }
             // 코루틴 취소 (메모리 릭 방지)
             job.cancel()
             logCallback("BleManager resources released.")
