@@ -7,13 +7,16 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.UiEvent
 import com.example.lifesaiver.ui.theme.LifesaiverTheme
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -23,8 +26,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
-            val errorMsg = "오류: ${throwable.message}"
+            val errorMsg = "?ㅻ쪟: ${throwable.message}"
             Log.e("CRASH_HANDLER", errorMsg, throwable)
             runOnUiThread {
                 Toast.makeText(applicationContext, errorMsg, Toast.LENGTH_SHORT).show()
@@ -39,12 +48,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             LifesaiverTheme(darkTheme = true, dynamicColor = false) {
                 val uiState by viewModel.uiState.collectAsState()
+
                 LifesaiverApp(
                     hasPermissions = uiState.hasPermissions,
                     batteryLevel = uiState.batteryLevel,
                     isConnected = uiState.isConnected,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
+                    isRescueSignalActive = uiState.isRescueSignalActive,
                     messages = uiState.messages,
                     onRequestPermissions = { requestPermissions() },
                     onStartAutoConnect = { viewModel.onStartAutoConnect() },
@@ -52,7 +63,9 @@ class MainActivity : ComponentActivity() {
                     onMicPress = { viewModel.onMicPress() },
                     onMicRelease = { viewModel.onMicRelease() },
                     onSendMessage = { text -> viewModel.onSendMessage(text) },
-                    onDisconnect = { viewModel.onDisconnect() }
+                    onDisconnect = { viewModel.onDisconnect() },
+                    onStartRescueSignal = { viewModel.startRescueSignal() },
+                    onStopRescueSignal = { viewModel.stopRescueSignal() }
                 )
             }
         }
@@ -89,5 +102,4 @@ class MainActivity : ComponentActivity() {
         }
         viewModel.onPermissionsResult(granted)
     }
-
 }
