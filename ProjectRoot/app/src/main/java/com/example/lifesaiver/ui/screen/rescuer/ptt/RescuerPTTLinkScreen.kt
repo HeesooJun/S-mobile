@@ -72,7 +72,8 @@ fun RescuerPTTLinkScreen(
     connectedCount: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
-    onToggleMic: () -> Unit,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit
@@ -192,7 +193,8 @@ fun RescuerPTTLinkScreen(
             MicButton(
                 isActive = isMicOn,
                 size = scaledDp(80, scale),
-                onToggle = onToggleMic
+                onPress = onMicPress,
+                onRelease = onMicRelease
             )
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
