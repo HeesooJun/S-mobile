@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 fun RescuerPTTLinkScreen(
     batteryLevel: Int,
     connectedCount: Int,
+    meshPeerCount: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
     onMicPress: () -> Unit,
@@ -69,7 +70,7 @@ fun RescuerPTTLinkScreen(
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
-    val displayConnectedCount = connectedCount.coerceAtLeast(0)
+    val displayConnectedCount = meshPeerCount.coerceAtLeast(0)
 
     LaunchedEffect(expandedAction) {
         if (

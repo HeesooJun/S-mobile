@@ -42,6 +42,7 @@ fun LifesaiverApp(
     batteryLevel: Int,
     isConnected: Boolean,
     connectedCount: Int,
+    meshPeerCount: Int,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
@@ -134,6 +135,7 @@ fun LifesaiverApp(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
                 connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
