@@ -26,6 +26,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.R
+import com.example.lifesaiver.presentation.screen.EmergencyBeaconUiState
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -37,6 +38,7 @@ import com.example.lifesaiver.ui.theme.scaledSp
 @Composable
 fun EmergencyBeaconScreen(
     batteryLevel: Int,
+    uiState: EmergencyBeaconUiState,
     onPrev: () -> Unit,
     onNext: () -> Unit
 ) {
@@ -54,7 +56,7 @@ fun EmergencyBeaconScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "긴급 상황",
+                text = uiState.headerLabel,
                 color = AppColors.Red,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.Medium
@@ -107,19 +109,19 @@ fun EmergencyBeaconScreen(
             }
             Spacer(modifier = Modifier.height(scaledDp(24, scale)))
             Text(
-                text = "구조 신호 송출",
+                text = uiState.titleLabel,
                 color = AppColors.White,
                 fontSize = scaledSp(28, scale),
                 fontWeight = FontWeight.Black
             )
             Spacer(modifier = Modifier.height(scaledDp(12, scale)))
             Text(
-                text = "초절전 모드로 신호 전송 중",
+                text = uiState.subtitlePrimary,
                 color = AppColors.Gray500,
                 fontSize = scaledSp(12, scale)
             )
             Text(
-                text = "화면 밝기가 최소화됩니다",
+                text = uiState.subtitleSecondary,
                 color = AppColors.Gray500,
                 fontSize = scaledSp(12, scale)
             )
@@ -133,8 +135,8 @@ fun EmergencyBeaconScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SecondaryButton(label = "이전", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
-                SecondaryButton(label = "다음", variant = SecondaryButtonVariant.Red, onClick = onNext)
+                SecondaryButton(label = uiState.prevLabel, variant = SecondaryButtonVariant.Gray, onClick = onPrev)
+                SecondaryButton(label = uiState.nextLabel, variant = SecondaryButtonVariant.Red, onClick = onNext)
             }
         }
     }
