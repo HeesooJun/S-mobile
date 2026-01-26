@@ -43,6 +43,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun RescueChatScreen(
     roomTitle: String,
+    meshPeerCount: Int,
     messages: List<ChatMessage>,
     onPrev: () -> Unit,
     inputValue: String,
@@ -50,6 +51,7 @@ fun RescueChatScreen(
     onSendClick: () -> Unit
 ) {
     val scale = LocalAppScale.current
+    val participantCount = meshPeerCount.coerceAtLeast(0)
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -63,7 +65,11 @@ fun RescueChatScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "Connected", color = AppColors.Green, fontSize = scaledSp(12, scale))
+            Text(
+                text = "인원 ${participantCount}명",
+                color = AppColors.Green,
+                fontSize = scaledSp(12, scale)
+            )
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
@@ -89,9 +95,12 @@ fun RescueChatScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
 
-            Text(text = "Connected", color = AppColors.Green,
+            Text(
+                text = "인원 ${participantCount}명",
+                color = AppColors.Green,
                 fontSize = scaledSp(12, scale),
-                modifier = Modifier.align(Alignment.CenterEnd))
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
