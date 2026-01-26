@@ -336,7 +336,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             logCallback = { msg -> Log.d("BleManager", msg) },
             audioCallback = { pcmData -> audioEngine?.playAudio(pcmData) },
             textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false)) },
-            protocolCallback = { },
+            protocolCallback = { _, _ -> },
             connectionCallback = { connected ->
                 _uiState.update { it.copy(isConnected = connected) }
             }
