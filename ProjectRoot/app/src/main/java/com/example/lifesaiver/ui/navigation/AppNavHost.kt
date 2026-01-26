@@ -29,12 +29,17 @@ fun AppNavHost(
     isConnected: Boolean,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
+    // [추가 1] 구조 신호 활성화 상태 (LifesaiverApp 오류 해결)
+    isRescueSignalActive: Boolean,
     messages: List<ChatMessage>,
     onStartAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    // [추가 2] 구조 신호 제어 함수들 (LifesaiverApp 오류 해결)
+    onStartRescueSignal: () -> Unit,
+    onStopRescueSignal: () -> Unit
 ) {
     val navController = rememberNavController()
     val roomTitle = remember { "김싸피의 채팅방" }
@@ -78,11 +83,18 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 onPrev = { navController.popBackStack() },
                 onSos = {
+                    // [수정] SOS 버튼 누르면 구조 신호 시작 후 화면 이동
+                    onStartRescueSignal()
                     pendingSosNavigation = true
                     navController.navigate(AppRoute.EmergencyBeacon.route)
                 },
                 uiState = standbyState,
                 sensorItems = standbyViewModel.sensorItems,
+                // [추가 3] StandbyStatusScreen에도 전달 (화면 버튼 상태 반영용)
+                isRescueSignalActive = isRescueSignalActive,
+                onStartRescueSignal = onStartRescueSignal,
+                onStopRescueSignal = onStopRescueSignal,
+
                 onSensorExpandedChange = { standbyViewModel.setSensorExpanded(it) },
                 onSensorStatusChange = { type, status ->
                     standbyViewModel.updateSensorStatus(type, status)
@@ -100,7 +112,11 @@ fun AppNavHost(
             EmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
-                onPrev = { navController.popBackStack() },
+                onPrev = {
+                    // [선택] 뒤로가기 시 구조 신호를 끄고 싶다면 주석 해제
+                    // onStopRescueSignal()
+                    navController.popBackStack()
+                },
                 onNext = { navController.navigate(AppRoute.PTTLink.route) }
             )
         }
