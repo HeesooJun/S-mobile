@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
@@ -42,11 +43,18 @@ fun AppNavHost(
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
-    onStopRescueSignal: () -> Unit
+    onStopRescueSignal: () -> Unit,
+    onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
     val activity = LocalContext.current as? Activity
     var pendingSosNavigation by remember { mutableStateOf(false) }
+
+    LaunchedEffect(backStackEntry) {
+        val route = backStackEntry?.destination?.route ?: AppRoute.ModeGate.route
+        onRouteChanged(route)
+    }
 
     LaunchedEffect(isConnected, pendingSosNavigation) {
         if (pendingSosNavigation && isConnected) {
@@ -112,6 +120,9 @@ fun AppNavHost(
         }
 
         composable(AppRoute.SurvivorPTT.route) {
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = if (isConnected) 2 else 0,
@@ -157,6 +168,9 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerPTT.route) {
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = if (isConnected) 2 else 0,
