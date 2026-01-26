@@ -155,7 +155,10 @@ fun AppNavHost(
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
-                onDisconnect = { navController.navigate(AppRoute.RescuerStandby.route) },
+                onDisconnect = {
+                    onDisconnect()
+                    navController.navigate(AppRoute.RescuerStandby.route)
+                },
                 onChat = { navController.navigate(AppRoute.RescuerChat.route) }
             )
         }
