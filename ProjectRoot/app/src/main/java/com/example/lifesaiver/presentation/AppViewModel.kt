@@ -119,6 +119,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.startAutoConnect()
     }
 
+    fun onStopAutoConnect() {
+        bleManager.disconnect()
+    }
+
     fun onMicPress() {
         if (!_uiState.value.hasPermissions) {
             _uiEvents.tryEmit(UiEvent.Toast("마이크 권한이 필요합니다."))
