@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.screen.standby
+package com.example.lifesaiver.ui.screen.survivor.standby
 
 import android.content.Context
 import android.hardware.Sensor
@@ -25,26 +25,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import com.example.lifesaiver.R
-import com.example.lifesaiver.presentation.screen.StandbyStatusUiState
-import com.example.lifesaiver.presentation.sensor.SensorProbe
-import com.example.lifesaiver.presentation.sensor.SensorStatus
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
+import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
@@ -55,31 +53,30 @@ import kotlinx.coroutines.delay
 fun StandbyStatusScreen(
     batteryLevel: Int,
     onPrev: () -> Unit,
-    onSos: () -> Unit,
-    uiState: StandbyStatusUiState,
-    sensorItems: List<SensorProbe>,
-
-    // [추가] 구조 신호 상태 및 제어 함수
-    isRescueSignalActive: Boolean,
-    onStartRescueSignal: () -> Unit,
-    onStopRescueSignal: () -> Unit,
-
-    onSensorExpandedChange: (Boolean) -> Unit,
-    onSensorStatusChange: (Int, SensorStatus) -> Unit
+    onSos: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
     val sensorManager = remember {
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     }
-    val sensorStatus = uiState.sensorStatus
-    val isSensorExpanded = uiState.isSensorExpanded
+    val sensorItems = remember {
+        listOf(
+            SensorProbe("가속도", Sensor.TYPE_ACCELEROMETER),
+            SensorProbe("자이로", Sensor.TYPE_GYROSCOPE),
+            SensorProbe("지자기", Sensor.TYPE_MAGNETIC_FIELD),
+            SensorProbe("조도", Sensor.TYPE_LIGHT),
+            SensorProbe("근접", Sensor.TYPE_PROXIMITY)
+        )
+    }
+    val sensorStatus = remember { mutableStateMapOf<Int, SensorStatus>() }
+    var isSensorExpanded by remember { mutableStateOf(false) }
     val sensorListener = remember {
         object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
                 val type = event?.sensor?.type ?: return
                 if (sensorStatus[type] != SensorStatus.Active) {
-                    onSensorStatusChange(type, SensorStatus.Active)
+                    sensorStatus[type] = SensorStatus.Active
                 }
             }
 
@@ -105,19 +102,21 @@ fun StandbyStatusScreen(
         if (!isSensorExpanded) return@LaunchedEffect
         sensorItems.forEach { item ->
             val sensor = sensorManager.getDefaultSensor(item.type)
-            val status = if (sensor == null) SensorStatus.Unsupported else SensorStatus.Checking
-            onSensorStatusChange(item.type, status)
+            sensorStatus[item.type] = if (sensor == null) {
+                SensorStatus.Unsupported
+            } else {
+                SensorStatus.Checking
+            }
         }
         delay(3000)
         if (isSensorExpanded) {
             sensorItems.forEach { item ->
                 if (sensorStatus[item.type] == SensorStatus.Checking) {
-                    onSensorStatusChange(item.type, SensorStatus.NoData)
+                    sensorStatus[item.type] = SensorStatus.NoData
                 }
             }
         }
     }
-
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
@@ -155,74 +154,54 @@ fun StandbyStatusScreen(
                         .widthIn(max = scaledDp(260, scale)),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // [수정] 구조 신호 상태에 따라 텍스트 변경
-                    if (isRescueSignalActive) {
-                        Text(
-                            text = "구조 신호 송출 중",
-                            color = AppColors.Red,
-                            fontSize = scaledSp(20, scale),
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        Spacer(modifier = Modifier.height(scaledDp(20, scale)))
-                        Text(
-                            text = "주변 기기에 신호를 계속 보내고 있습니다.",
-                            color = AppColors.White,
-                            fontSize = scaledSp(11, scale),
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = "화면이 꺼져도 신호는 유지됩니다 (72시간 생존).",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(11, scale),
-                            textAlign = TextAlign.Center
-                        )
-                    } else {
-                        Text(
-                            text = "구조 신호를 보내실 건가요?",
-                            color = AppColors.White,
-                            fontSize = scaledSp(20, scale),
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        Spacer(modifier = Modifier.height(scaledDp(20, scale)))
-                        Text(
-                            text = "SOS 버튼을 누르면 주변 사용자에게 구조 신호를 보냅니다.",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(11, scale),
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = "이 신호가 이어져 구조자가 더 빨리 찾을 수 있어요.",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(11, scale),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Text(
+                        text = "구조 신호를 보내실 건가요?",
+                        color = AppColors.White,
+                        fontSize = scaledSp(20, scale),
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                    Text(
+                        text = "SOS 버튼을 누르면",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "주변 사용자에게 구조 신호를 보냅니다.",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "주변 기기끼리 신호를 이어 도움을 기다립니다.",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "누군가 신호를 받으면 음성·채팅으로 바로 연결됩니다.",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(scaledDp(48, scale)))
             Spacer(modifier = Modifier.height(scaledDp(24, scale)))
 
-            // [수정] SOS 버튼 (신호 상태에 따라 동작 변경)
             Image(
                 painter = painterResource(id = R.drawable.ic_siren),
                 contentDescription = "SOS",
                 contentScale = ContentScale.Fit,
-                // 구조 신호 중이면 빨간색 틴트 적용 (강조)
-                colorFilter = if (isRescueSignalActive) ColorFilter.tint(AppColors.Red) else null,
                 modifier = Modifier
                     .size(scaledDp(52, scale))
-                    .clickable {
-                        if (isRescueSignalActive) {
-                            onStopRescueSignal() // 켜져 있으면 끄기
-                        } else {
-                            onSos() // 꺼져 있으면 켜기 (화면 이동 등)
-                        }
-                    }
+                    .clickable { onSos() }
             )
             Spacer(modifier = Modifier.height(scaledDp(10, scale)))
             Text(
-                text = if (isRescueSignalActive) "중단" else "SOS",
-                color = if (isRescueSignalActive) AppColors.White else AppColors.Red,
+                text = "SOS",
+                color = AppColors.Red,
                 fontSize = scaledSp(12, scale),
                 fontWeight = FontWeight.SemiBold
             )
@@ -246,11 +225,11 @@ fun StandbyStatusScreen(
                     SensorStatusToggle(
                         label = "센서 상태",
                         isExpanded = isSensorExpanded,
-                        onToggle = { onSensorExpandedChange(!isSensorExpanded) }
+                        onToggle = { isSensorExpanded = !isSensorExpanded }
                     )
                     DropdownMenu(
                         expanded = isSensorExpanded,
-                        onDismissRequest = { onSensorExpandedChange(false) },
+                        onDismissRequest = { isSensorExpanded = false },
                         offset = DpOffset(-scaledDp(4, scale), scaledDp(12, scale)),
                         modifier = Modifier
                             .widthIn(min = scaledDp(150, scale), max = scaledDp(190, scale))
@@ -295,7 +274,6 @@ fun StandbyStatusScreen(
     }
 }
 
-// ... (하단 SensorStatusToggle 등 보조 함수들은 그대로 유지)
 @Composable
 private fun SensorStatusToggle(
     label: String,
@@ -336,6 +314,18 @@ private fun SensorStatusToggle(
             contentScale = ContentScale.Fit
         )
     }
+}
+
+private data class SensorProbe(
+    val label: String,
+    val type: Int
+)
+
+private enum class SensorStatus {
+    Unsupported,
+    Checking,
+    Active,
+    NoData
 }
 
 private fun sensorStatusLabel(status: SensorStatus): String {

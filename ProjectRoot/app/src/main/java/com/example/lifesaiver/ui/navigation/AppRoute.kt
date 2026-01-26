@@ -2,8 +2,16 @@ package com.example.lifesaiver.ui.navigation
 
 sealed class AppRoute(val route: String) {
     data object ModeGate : AppRoute("mode_gate")
-    data object StandbyStatus : AppRoute("standby_status")
-    data object EmergencyBeacon : AppRoute("emergency_beacon")
-    data object PTTLink : AppRoute("ptt_link")
-    data object RescueChat : AppRoute("rescue_chat")
+
+    // survivor
+    data object SurvivorStandby : AppRoute("survivor_standby")
+    data object SurvivorEmergency : AppRoute("survivor_emergency")
+    data object SurvivorPTT : AppRoute("survivor_ptt")
+    data object SurvivorChat : AppRoute("survivor_chat")
+
+    // rescuer
+    data object RescuerStandby : AppRoute("rescuer_standby")
+    data object RescuerPTT : AppRoute("rescuer_ptt")
+    data object RescuerChat : AppRoute("rescuer_chat")
+    data object RescuerEmergency : AppRoute("rescuer_emergency")
 }
