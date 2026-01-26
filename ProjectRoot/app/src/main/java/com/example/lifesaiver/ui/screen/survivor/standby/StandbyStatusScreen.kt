@@ -151,7 +151,7 @@ fun StandbyStatusScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth(0.75f)
-                        .widthIn(max = scaledDp(260, scale)),
+                        .widthIn(max = scaledDp(270, scale)),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -160,7 +160,7 @@ fun StandbyStatusScreen(
                         fontSize = scaledSp(20, scale),
                         fontWeight = FontWeight.ExtraBold
                     )
-                    Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                    Spacer(modifier = Modifier.height(scaledDp(30, scale)))
                     Text(
                         text = "SOS 버튼을 누르면",
                         color = AppColors.Gray500,
