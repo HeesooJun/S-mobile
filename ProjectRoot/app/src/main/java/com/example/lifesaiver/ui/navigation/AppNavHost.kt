@@ -4,9 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -31,6 +29,7 @@ fun AppNavHost(
     isDisconnecting: Boolean,
     messages: List<ChatMessage>,
     onStartAutoConnect: () -> Unit,
+    onStopAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
@@ -38,14 +37,6 @@ fun AppNavHost(
 ) {
     val navController = rememberNavController()
     val roomTitle = remember { "김싸피의 채팅방" }
-    var pendingSosNavigation by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isConnected, pendingSosNavigation) {
-        if (pendingSosNavigation && isConnected) {
-            pendingSosNavigation = false
-            navController.navigate(AppRoute.PTTLink.route)
-        }
-    }
 
     NavHost(
         navController = navController,
@@ -58,11 +49,9 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 uiState = modeGateState,
                 onYes = {
-                    onStartAutoConnect()
                     navController.navigate(AppRoute.StandbyStatus.route)
                 },
                 onNo = {
-                    onStartAutoConnect()
                     navController.navigate(AppRoute.StandbyStatus.route)
                 },
                 onRescuerMode = {
@@ -78,7 +67,6 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 onPrev = { navController.popBackStack() },
                 onSos = {
-                    pendingSosNavigation = true
                     navController.navigate(AppRoute.EmergencyBeacon.route)
                 },
                 uiState = standbyState,
@@ -92,15 +80,23 @@ fun AppNavHost(
         composable(AppRoute.EmergencyBeacon.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             LaunchedEffect(isConnected) {
-                if (!isConnected) {
-                    onStartAutoConnect()
+                if (isConnected) {
+                    navController.navigate(AppRoute.PTTLink.route) {
+                        popUpTo(AppRoute.EmergencyBeacon.route) { inclusive = true }
+                    }
                 }
             }
             EmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
-                onPrev = { navController.popBackStack() },
+                onPrev = {
+                    onStopAutoConnect()
+                    navController.popBackStack()
+                },
                 onNext = { navController.navigate(AppRoute.PTTLink.route) }
             )
         }
