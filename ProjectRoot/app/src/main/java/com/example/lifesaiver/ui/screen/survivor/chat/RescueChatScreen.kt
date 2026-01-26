@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.screen.chat
+package com.example.lifesaiver.ui.screen.survivor.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,20 +67,31 @@ fun RescueChatScreen(
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale)),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale))
         ) {
-            SecondaryButton(label = "이전", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
-            Spacer(modifier = Modifier.width(scaledDp(12, scale)))
+            // 왼쪽: 이전 버튼
+            SecondaryButton(
+                label = "이전",
+                variant = SecondaryButtonVariant.Gray,
+                onClick = onPrev,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+
+            // 중앙: 채팅방 제목
             Text(
                 text = roomTitle,
                 color = AppColors.White,
                 fontSize = scaledSp(14, scale),
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center)
             )
+
+            Text(text = "Connected", color = AppColors.Green,
+                fontSize = scaledSp(12, scale),
+                modifier = Modifier.align(Alignment.CenterEnd))
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
