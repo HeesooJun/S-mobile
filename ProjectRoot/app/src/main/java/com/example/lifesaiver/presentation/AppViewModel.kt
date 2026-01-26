@@ -46,6 +46,7 @@ data class AppUiState(
     val hasPermissions: Boolean = false,
     val batteryLevel: Int = 100,
     val isConnected: Boolean = false,
+    val connectedCount: Int = 0,
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
@@ -337,8 +338,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             audioCallback = { pcmData -> audioEngine?.playAudio(pcmData) },
             textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false)) },
             protocolCallback = { _, _ -> },
-            connectionCallback = { connected ->
-                _uiState.update { it.copy(isConnected = connected) }
+            connectionCallback = { connected, count ->
+                _uiState.update { it.copy(isConnected = connected, connectedCount = count) }
             }
         )
 

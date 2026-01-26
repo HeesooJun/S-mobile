@@ -45,7 +45,7 @@ class BleManager(
     private val audioCallback: (ByteArray) -> Unit,
     private val textCallback: (String) -> Unit,
     private var protocolCallback: (ByteArray, String?) -> Unit,
-    private val connectionCallback: (Boolean) -> Unit
+    private val connectionCallback: (Boolean, Int) -> Unit
 ) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
     private val adapter = bluetoothManager?.adapter
@@ -64,6 +64,7 @@ class BleManager(
 
     var isHost = false
     private var isConnected = false
+    private val connectedPeers = mutableSetOf<String>()
     private var gattServer: BluetoothGattServer? = null
     private var hostGatt: BluetoothGatt? = null
 
@@ -125,7 +126,7 @@ class BleManager(
 
         disconnect()
         isConnected = false
-        connectionCallback(false)
+        connectionCallback(false, 0)
         isHost = false
 
         logCallback("Auto connect start.")
@@ -320,14 +321,14 @@ class BleManager(
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 logCallback("Connected. Requesting MTU...")
                 isConnected = true
-                connectionCallback(true)
+                connectionCallback(true, 1)
                 isHost = false
                 handler.removeCallbacksAndMessages(null)
                 gatt.requestMtu(512)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 logCallback("Disconnected.")
                 isConnected = false
-                connectionCallback(false)
+                connectionCallback(false, 0)
                 hostGatt?.close()
                 hostGatt = null
                 startAutoConnect()
@@ -419,14 +420,19 @@ class BleManager(
                     onRescueConnected?.invoke()
                 }
 
+                synchronized(connectedPeers) {
+                    connectedPeers.add(device.address)
+                }
                 isConnected = true
-                connectionCallback(true)
+                connectionCallback(true, getConnectedPeerCount())
                 handler.removeCallbacksAndMessages(null)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                isConnected = false
-                connectionCallback(false)
-                // 연결 끊기면 다시 자동 연결 모드로 복귀
-                startAutoConnect()
+                synchronized(connectedPeers) {
+                    connectedPeers.remove(device.address)
+                }
+                val remaining = getConnectedPeerCount()
+                isConnected = remaining > 0
+                connectionCallback(isConnected, remaining)
             }
         }
 
@@ -579,9 +585,8 @@ class BleManager(
     }
 
     fun getConnectedPeerCount(): Int {
-        if (!isConnected) return 0
         return if (isHost) {
-            bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT)?.size ?: 0
+            synchronized(connectedPeers) { connectedPeers.size }
         } else {
             if (hostGatt != null) 1 else 0
         }
@@ -619,7 +624,10 @@ class BleManager(
         gattServer?.close()
         gattServer = null
         isConnected = false
-        connectionCallback(false)
+        synchronized(connectedPeers) {
+            connectedPeers.clear()
+        }
+        connectionCallback(false, 0)
     }
 
     // 리소스 정리 함수 (앱 종료 시 호출)
