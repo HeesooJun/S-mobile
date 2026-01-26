@@ -358,7 +358,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
-        protocolCore = ProtocolCore(codec, codec)
+        protocolCore = ProtocolCore(codec, codec, myPeerId = senderId)
         protocolCore.setOnPacketReceived { packet ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
