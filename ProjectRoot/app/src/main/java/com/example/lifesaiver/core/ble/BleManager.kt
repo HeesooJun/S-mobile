@@ -86,6 +86,7 @@ class BleManager(
     private var localPeerId: ByteArray? = null
 
     private var currentAdvertisingSet: AdvertisingSet? = null
+    private var autoConnectActive: Boolean = false
 
     // Discovery/connection tuning knobs.
     private var rssiThresholdDbm: Int = -95
@@ -211,6 +212,9 @@ class BleManager(
             return
         }
 
+        // Multiple screens call this; avoid dropping live connections.
+        if (autoConnectActive) return
+
         disconnect()
         isConnected = false
         connectionCallback(false, 0)
@@ -221,6 +225,7 @@ class BleManager(
         startAdvertisingInternal(isEmergencyMode = false)
         startMaintenanceJobs()
         startScan()
+        autoConnectActive = true
     }
 
     private fun startMaintenanceJobs() {
@@ -1021,6 +1026,7 @@ class BleManager(
     }
 
     fun disconnect() {
+        autoConnectActive = false
         handler.removeCallbacksAndMessages(null)
         stopScan()
         stopAdvertising()
@@ -1062,6 +1068,7 @@ class BleManager(
     // 리소스 정리 함수 (앱 종료 시 호출)
     fun release() {
         try {
+            autoConnectActive = false
             stopAdvertising()
             stopScan()
             stopMaintenanceJobs()
