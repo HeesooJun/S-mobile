@@ -173,7 +173,7 @@ fun RescuerPTTLinkScreen(
                     )
                     ExpandableAction(
                         iconRes = R.drawable.connection_filled,
-                        label = "사용자 $displayConnectedCount",
+                        label = "사용자 DB $displayConnectedCount",
                         isExpanded = expandedAction == ActionType.Count,
                         iconSizeOverride = scaledDp(32, scale),
                         showLabelAlways = showActionLabelsAlways,
