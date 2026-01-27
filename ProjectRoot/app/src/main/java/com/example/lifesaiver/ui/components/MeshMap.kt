@@ -1,5 +1,6 @@
 package com.example.lifesaiver.ui.components
 
+import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -17,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -34,7 +37,8 @@ data class MeshNode(
     val id: String,
     val hop: Int,
     val signal: Float,
-    val isSelf: Boolean = false
+    val isSelf: Boolean = false,
+    val label: String? = null
 )
 
 @Composable
@@ -48,6 +52,7 @@ fun MeshMap(
     val baseRingColor = AppColors.Gray700.copy(alpha = 0.55f)
     val edgeColor = AppColors.Gray500.copy(alpha = 0.55f)
     val nodeStrokeColor = AppColors.White.copy(alpha = 0.9f)
+    val labelColor = AppColors.Gray400.copy(alpha = 0.95f)
     val density = LocalDensity.current
 
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
@@ -57,6 +62,14 @@ fun MeshMap(
 
     val ringStepPx = with(density) { ringStepDp.toPx() }
     val nodeRadiusPx = with(density) { nodeRadiusDp.toPx() }
+    val labelTextSizePx = with(density) { scaledDp(10, scaleFactor).toPx() }
+    val labelPaddingPx = with(density) { scaledDp(6, scaleFactor).toPx() }
+    val labelPaint = remember {
+        Paint().apply {
+            isAntiAlias = true
+            textAlign = Paint.Align.CENTER
+        }
+    }
 
     val manualOffsets = remember { mutableStateMapOf<String, Offset>() }
     LaunchedEffect(nodes) {
@@ -178,6 +191,17 @@ fun MeshMap(
                     radius = nodeRadius,
                     style = Stroke(width = 1f * zoom)
                 )
+                val label = node.label
+                if (!label.isNullOrBlank() && !node.isSelf) {
+                    labelPaint.color = labelColor.toArgb()
+                    labelPaint.textSize = labelTextSizePx
+                    drawContext.canvas.nativeCanvas.drawText(
+                        label,
+                        screenOffset.x,
+                        screenOffset.y + nodeRadius + labelPaddingPx + labelTextSizePx,
+                        labelPaint
+                    )
+                }
             }
         }
     }
