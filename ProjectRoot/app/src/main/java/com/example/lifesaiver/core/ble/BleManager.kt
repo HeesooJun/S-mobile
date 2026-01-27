@@ -404,7 +404,7 @@ class BleManager(
                         gatt.setPreferredPhy(
                             BluetoothDevice.PHY_LE_CODED,
                             BluetoothDevice.PHY_LE_CODED,
-                            BluetoothGatt.PHY_OPTION_NO_PREFERRED
+                            BluetoothDevice.PHY_OPTION_NO_PREFERRED
                         )
                     } catch (_: Exception) {
                     }
