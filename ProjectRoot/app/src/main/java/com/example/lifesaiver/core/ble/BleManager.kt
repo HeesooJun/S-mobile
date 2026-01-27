@@ -586,7 +586,8 @@ class BleManager(
 
                 // 구조대가 접속하면 ViewModel에 알림 (사이렌 울리기)
                 Handler(Looper.getMainLooper()).post {
-                    onRescueConnected?.invoke()
+                    // 사이렌 살려줘...
+                    // onRescueConnected?.invoke()
                 }
 
                 synchronized(connectedPeers) {
