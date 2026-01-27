@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+﻿@file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.example.lifesaiver.ui.screen.survivor.profile
 
@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -20,13 +20,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
@@ -42,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
@@ -69,7 +70,6 @@ fun SurvivorProfileScreen(
     val scale = LocalAppScale.current
     val scope = rememberCoroutineScope()
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
-    var isInitialized by rememberSaveable { mutableStateOf(false) }
 
     var name by rememberSaveable { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("") }
@@ -79,18 +79,17 @@ fun SurvivorProfileScreen(
     var bloodType by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(profileState) {
-        if (!isInitialized) {
-            name = profileState.name
-            gender = profileState.gender
-            birthDate = profileState.birthDate
-            emergencyContact = profileState.emergencyContact
-            notes = profileState.notes
-            bloodType = profileState.bloodType
-            isInitialized = true
-        }
+        name = profileState.name
+        gender = profileState.gender
+        birthDate = profileState.birthDate
+        emergencyContact = profileState.emergencyContact
+        notes = profileState.notes
+        bloodType = profileState.bloodType
     }
 
-    val isComplete = name.isNotBlank() && gender.isNotBlank() && birthDate.isNotBlank()
+    val birthDateValid = isBirthDateValid(birthDate)
+    var showBirthDateError by rememberSaveable { mutableStateOf(false) }
+    val isComplete = name.isNotBlank() && gender.isNotBlank() && birthDateValid
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
 
     if (showDatePicker) {
@@ -106,8 +105,26 @@ fun SurvivorProfileScreen(
                         .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
                         .clickable {
                             val millis = datePickerState.selectedDateMillis
-                            birthDate = formatDate(millis)
-                            showDatePicker = false
+                            if (millis != null) {
+                                val formatted = formatDate(millis)
+                                birthDate = formatted
+                                showBirthDateError = false
+                                showDatePicker = false
+                                scope.launch {
+                                    profileStore.saveProfile(
+                                        SurvivorProfile(
+                                            name = name,
+                                            gender = gender,
+                                            birthDate = formatted,
+                                            emergencyContact = emergencyContact,
+                                            notes = notes,
+                                            bloodType = bloodType
+                                        )
+                                    )
+                                }
+                            } else {
+                                showBirthDateError = true
+                            }
                         }
                 )
             },
@@ -179,11 +196,15 @@ fun SurvivorProfileScreen(
                 options = listOf("남성", "여성"),
                 onSelected = { gender = it }
             )
-            ProfileReadOnlyField(
+            ProfileDateField(
                 label = "생년월일",
                 value = birthDate,
                 placeholder = "YYYY-MM-DD",
-                onClick = { showDatePicker = true }
+                isError = showBirthDateError,
+                onClick = {
+                    showBirthDateError = false
+                    showDatePicker = true
+                }
             )
 
             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
@@ -194,13 +215,13 @@ fun SurvivorProfileScreen(
                 fontWeight = FontWeight.Medium
             )
             ProfileInputField(
-                label = "긴급연락처 (권장)",
+                label = "긴급연락처(권장)",
                 value = emergencyContact,
                 placeholder = "연락처 입력",
                 onValueChange = { emergencyContact = it }
             )
             ProfileExposedSelectField(
-                label = "혈액형 (선택)",
+                label = "혈액형(선택)",
                 value = bloodType,
                 placeholder = "선택",
                 options = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"),
@@ -243,6 +264,8 @@ fun SurvivorProfileScreen(
                             )
                             onSaved()
                         }
+                    } else if (!birthDateValid) {
+                        showBirthDateError = true
                     }
                 }
             )
@@ -264,7 +287,7 @@ private fun ProfileInputField(
         modifier = Modifier.fillMaxWidth(),
         label = { Text(text = label, color = AppColors.Gray500) },
         placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
-        textStyle = androidx.compose.ui.text.TextStyle(
+        textStyle = TextStyle(
             color = AppColors.White,
             fontSize = scaledSp(12, scale)
         ),
@@ -296,7 +319,7 @@ private fun ProfileExposedSelectField(
                 .menuAnchor(),
             label = { Text(text = label, color = AppColors.Gray500) },
             placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
-            textStyle = androidx.compose.ui.text.TextStyle(
+            textStyle = TextStyle(
                 color = AppColors.White,
                 fontSize = scaledSp(12, scale)
             ),
@@ -356,18 +379,23 @@ private fun profileFieldColors() = TextFieldDefaults.colors(
     disabledContainerColor = AppColors.Gray800,
     focusedIndicatorColor = AppColors.Gray700,
     unfocusedIndicatorColor = AppColors.Gray700,
+    disabledIndicatorColor = AppColors.Gray700,
     cursorColor = AppColors.Green,
     focusedTextColor = AppColors.White,
     unfocusedTextColor = AppColors.White,
+    disabledTextColor = AppColors.White,
     focusedLabelColor = AppColors.Gray400,
-    unfocusedLabelColor = AppColors.Gray500
+    unfocusedLabelColor = AppColors.Gray500,
+    disabledLabelColor = AppColors.Gray500,
+    disabledPlaceholderColor = AppColors.Gray500
 )
 
 @Composable
-private fun ProfileReadOnlyField(
+private fun ProfileDateField(
     label: String,
     value: String,
     placeholder: String,
+    isError: Boolean,
     onClick: () -> Unit
 ) {
     val scale = LocalAppScale.current
@@ -380,10 +408,12 @@ private fun ProfileReadOnlyField(
             modifier = Modifier.fillMaxWidth(),
             label = { Text(text = label, color = AppColors.Gray500) },
             placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
-            textStyle = androidx.compose.ui.text.TextStyle(
+            textStyle = TextStyle(
                 color = AppColors.White,
                 fontSize = scaledSp(12, scale)
             ),
+            enabled = false,
+            isError = isError,
             readOnly = true,
             singleLine = true,
             colors = profileFieldColors()
@@ -414,5 +444,15 @@ private fun parseDateToMillis(value: String): Long? {
         localDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     } catch (_: Exception) {
         null
+    }
+}
+
+private fun isBirthDateValid(value: String): Boolean {
+    if (value.isBlank()) return false
+    return try {
+        LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE)
+        true
+    } catch (_: Exception) {
+        false
     }
 }
