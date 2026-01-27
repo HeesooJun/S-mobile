@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.ui.components.BatteryIndicator
 import com.example.lifesaiver.ui.components.MeshMap
 import com.example.lifesaiver.ui.components.MeshNode
@@ -72,6 +73,8 @@ fun PTTLinkScreen(
     batteryLevel: Int,
     connectedCount: Int,
     meshPeerCount: Int,
+    directPeerIds: List<String>,
+    bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
     onMicPress: () -> Unit,
@@ -131,8 +134,8 @@ fun PTTLinkScreen(
     val displayConnectedCount = meshDisplayCount
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
-    val meshNodes = remember(connectedCount, meshDisplayCount) {
-        buildMeshNodes(connectedCount, meshDisplayCount)
+    val meshNodes = remember(directPeerIds, meshDisplayCount) {
+        buildMeshNodes(directPeerIds, meshDisplayCount)
     }
 
     LaunchedEffect(expandedAction) {
@@ -413,6 +416,19 @@ fun PTTLinkScreen(
                             color = AppColors.Gray400,
                             fontSize = scaledSp(12, scale)
                         )
+                        val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
+                        val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
+                        Text(
+                            text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
+                            color = AppColors.Gray500,
+                            fontSize = scaledSp(11, scale),
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
+                            color = AppColors.Gray500,
+                            fontSize = scaledSp(10, scale)
+                        )
                     }
                 }
             }
@@ -581,19 +597,21 @@ private fun sensorStatusColor(status: SensorStatus): Color {
     }
 }
 
-private fun buildMeshNodes(connectedCount: Int, meshPeerCount: Int): List<MeshNode> {
-    val directCount = connectedCount.coerceAtLeast(0)
+private fun buildMeshNodes(directPeerIds: List<String>, meshPeerCount: Int): List<MeshNode> {
+    val directIds = directPeerIds.distinct()
+    val directCount = directIds.size.coerceAtLeast(0)
     val total = meshPeerCount.coerceAtLeast(directCount)
     val indirectCount = (total - directCount).coerceAtLeast(0)
     val nodes = mutableListOf<MeshNode>()
     nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true))
-    repeat(directCount) { index ->
+    directIds.forEachIndexed { index, peerId ->
         val signal = 0.55f + (index % 5) * 0.1f
         nodes.add(
             MeshNode(
-                id = "peer-$index",
+                id = peerId,
                 hop = 1,
-                signal = signal
+                signal = signal,
+                label = peerId
             )
         )
     }
