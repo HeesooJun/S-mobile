@@ -258,7 +258,9 @@ class ProtocolCore(
         val existing = storeForwardJobs[peerId]
         if (existing?.isActive == true) return
         val job = storeForwardScope.launch {
-            storeForwardManager.drainForPeer(peerId, ::sendPacketToPeer)
+            storeForwardManager.drainForPeer(peerId) { packet ->
+                sendPacketToPeer(peerId, packet)
+            }
         }
         storeForwardJobs[peerId] = job
         job.invokeOnCompletion { storeForwardJobs.remove(peerId) }
