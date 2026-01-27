@@ -571,9 +571,40 @@ class BleManager(
     }
 
     private fun notifyConnectionState() {
+        val activeAddresses = getSystemConnectedAddresses()
+        if (!activeAddresses.isNullOrEmpty()) {
+            synchronized(connectedPeers) {
+                connectedPeers.retainAll(activeAddresses)
+            }
+            synchronized(clientConnections) {
+                val iterator = clientConnections.keys.iterator()
+                while (iterator.hasNext()) {
+                    val address = iterator.next()
+                    if (!activeAddresses.contains(address)) {
+                        iterator.remove()
+                    }
+                }
+            }
+        }
         val count = getAllConnectedAddresses().size
         isConnected = count > 0
         connectionCallback(isConnected, count)
+    }
+
+    private fun getSystemConnectedAddresses(): Set<String>? {
+        val manager = bluetoothManager ?: return null
+        val addresses = mutableSetOf<String>()
+        try {
+            manager.getConnectedDevices(BluetoothProfile.GATT)
+                ?.mapTo(addresses) { it.address }
+        } catch (_: Exception) {
+        }
+        try {
+            manager.getConnectedDevices(BluetoothProfile.GATT_SERVER)
+                ?.mapTo(addresses) { it.address }
+        } catch (_: Exception) {
+        }
+        return addresses.takeIf { it.isNotEmpty() }
     }
 
     private fun isConnectionKnown(address: String): Boolean {
