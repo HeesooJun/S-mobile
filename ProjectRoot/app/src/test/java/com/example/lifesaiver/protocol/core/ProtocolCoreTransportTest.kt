@@ -7,14 +7,17 @@ import com.example.lifesaiver.protocol.model.PacketType
 import com.example.lifesaiver.protocol.transport.RecordingTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ProtocolCoreTransportTest {
 
     @Test
     fun sendAndBroadcastUseTransport() {
         val codec = BinaryPacketCodec(enableCompression = false, enablePadding = false)
-        val core = ProtocolCore(codec, codec)
+        val core = ProtocolCore(codec, codec, myPeerId = TEST_PEER_ID)
         val transport = RecordingTransport()
         core.attachTransport(transport)
 
@@ -29,17 +32,22 @@ class ProtocolCoreTransportTest {
     @Test
     fun inboundBytesTriggerPacketHandler() {
         val codec = BinaryPacketCodec(enableCompression = false, enablePadding = false)
-        val core = ProtocolCore(codec, codec)
+        val core = ProtocolCore(codec, codec, myPeerId = TEST_PEER_ID)
         val transport = RecordingTransport()
         core.attachTransport(transport)
 
         var received: Packet? = null
-        core.setOnPacketReceived { packet -> received = packet }
+        val latch = CountDownLatch(1)
+        core.setOnPacketReceived { packet ->
+            received = packet
+            latch.countDown()
+        }
 
         val packet = createPacket()
         val encoded = codec.encode(packet)
         transport.emit(encoded)
 
+        assertTrue(latch.await(1, TimeUnit.SECONDS))
         assertNotNull(received)
     }
 
@@ -55,5 +63,9 @@ class ProtocolCoreTransportTest {
             senderId = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
         )
         return Packet(header = header, payload = payload)
+    }
+
+    companion object {
+        private val TEST_PEER_ID = byteArrayOf(9, 9, 9, 9, 9, 9, 9, 9)
     }
 }
