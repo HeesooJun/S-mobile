@@ -3,7 +3,9 @@ package com.example.lifesaiver.protocol.core
 import com.example.lifesaiver.protocol.codec.PacketDecoder
 import com.example.lifesaiver.protocol.codec.PacketEncoder
 import com.example.lifesaiver.protocol.core.ProtocolConstants
+import com.example.lifesaiver.protocol.model.FileTransferAckPayload
 import com.example.lifesaiver.protocol.model.Packet
+import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
 import com.example.lifesaiver.protocol.pipeline.PacketPipeline
 import com.example.lifesaiver.protocol.relay.PacketRelayManager
@@ -14,18 +16,20 @@ import com.example.lifesaiver.protocol.storeforward.StoreForwardManager
 import com.example.lifesaiver.protocol.transport.Transport
 import com.example.lifesaiver.protocol.util.sha256Hex
 import com.example.lifesaiver.protocol.util.toHexString
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 
 class ProtocolCore(
     private val encoder: PacketEncoder,
     private val decoder: PacketDecoder,
     private val pipeline: PacketPipeline = PacketPipeline(encoder, decoder),
-    myPeerId: ByteArray
+    private val myPeerId: ByteArray
 ) {
     private var transport: Transport? = null
     private var onPacket: ((Packet) -> Unit)? = null
@@ -36,6 +40,7 @@ class ProtocolCore(
     private val storeForwardManager = StoreForwardManager()
     private val fileTransferJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private val storeForwardJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+    private val fileAckWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
     init {
         relayManager.delegate = object : PacketRelayManagerDelegate {
@@ -69,6 +74,19 @@ class ProtocolCore(
         val recipientId = packet.header.recipientId
         if (recipientId != null) {
             val peerId = recipientId.toHexString()
+            if (packet.header.type == PacketType.FILE_ACK) {
+                storeForwardScope.launch { sendPacketToPeer(peerId, packet) }
+                return
+            }
+            if (packet.header.type == PacketType.FILE_TRANSFER) {
+                storeForwardScope.launch {
+                    val delivered = sendFileTransferWithAck(peerId, packet)
+                    if (!delivered) {
+                        storeForwardManager.cache(packet)
+                    }
+                }
+                return
+            }
             storeForwardScope.launch {
                 val delivered = sendPacketToPeer(peerId, packet)
                 if (!delivered) {
@@ -104,6 +122,11 @@ class ProtocolCore(
             peerDirectory.record(packet.header.senderId, relayAddress)
             val peerId = packet.header.senderId.toHexString()
             drainStoreForward(peerId)
+        }
+
+        if (packet.header.type == PacketType.FILE_ACK) {
+            handleFileAck(packet)
+            return
         }
 
         val inbound = pipeline.handleInbound(packet)
@@ -148,6 +171,71 @@ class ProtocolCore(
             if (!sent) return false
         }
         return true
+    }
+
+    private suspend fun sendFileTransferWithAck(peerId: String, packet: Packet): Boolean {
+        val transferIdHex = packet.payload.sha256Hex()
+        val ackKey = "$peerId:$transferIdHex"
+        val attempts = ProtocolConstants.FileTransfer.MAX_RETRY_ATTEMPTS
+        repeat(attempts) { attempt ->
+            val wait = CompletableDeferred<Boolean>()
+            fileAckWaiters[ackKey]?.cancel()
+            fileAckWaiters[ackKey] = wait
+
+            val refreshed = packet.copy(
+                header = packet.header.copy(timestamp = System.currentTimeMillis())
+            )
+            val delivered = sendPacketToPeer(peerId, refreshed)
+            if (!delivered) {
+                fileAckWaiters.remove(ackKey)
+                return false
+            }
+
+            val acked = withTimeoutOrNull(ProtocolConstants.FileTransfer.ACK_TIMEOUT_MS) {
+                wait.await()
+            } ?: false
+
+            if (acked) {
+                fileAckWaiters.remove(ackKey)
+                return true
+            }
+
+            fileAckWaiters.remove(ackKey)
+            if (attempt < attempts - 1) {
+                delay(ProtocolConstants.FileTransfer.ACK_TIMEOUT_MS / 2)
+            }
+        }
+        return false
+    }
+
+    fun sendFileAck(recipientId: ByteArray, transferId: ByteArray) {
+        if (transferId.size != FileTransferAckPayload.TRANSFER_ID_SIZE) return
+        val payload = FileTransferAckPayload(transferId = transferId).encode()
+        if (payload.isEmpty()) return
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.FILE_ACK,
+                ttl = ProtocolConstants.SYNC_TTL_HOPS,
+                flags = 0,
+                length = payload.size,
+                timestamp = System.currentTimeMillis(),
+                senderId = myPeerId,
+                recipientId = recipientId
+            ),
+            payload = payload
+        )
+        val peerId = recipientId.toHexString()
+        storeForwardScope.launch { sendPacketToPeer(peerId, packet) }
+    }
+
+    private fun handleFileAck(packet: Packet) {
+        val payload = FileTransferAckPayload.decode(packet.payload) ?: return
+        if (payload.status != FileTransferAckPayload.STATUS_OK) return
+        val senderId = packet.header.senderId.toHexString()
+        val transferIdHex = payload.transferId.toHexString()
+        val key = "$senderId:$transferIdHex"
+        fileAckWaiters[key]?.complete(true)
     }
 
     private suspend fun sendFragments(

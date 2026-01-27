@@ -24,6 +24,8 @@ object ProtocolConstants {
 
     object FileTransfer {
         const val FRAGMENT_DELAY_MS: Long = 200L
+        const val ACK_TIMEOUT_MS: Long = 5_000L
+        const val MAX_RETRY_ATTEMPTS: Int = 3
     }
 
     object StoreForward {
