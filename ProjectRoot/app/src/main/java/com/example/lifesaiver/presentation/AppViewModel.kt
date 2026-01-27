@@ -17,17 +17,21 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lifesaiver.core.audio.AudioEngine
 import com.example.lifesaiver.core.audio.VoiceRecorder
+import com.example.lifesaiver.core.ble.BleDebugSnapshot
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
+import com.example.lifesaiver.core.media.FileTransferStorage
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.service.RescueService
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
+import com.example.lifesaiver.protocol.mesh.MeshPeerRegistry
 import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
+import com.example.lifesaiver.protocol.util.sha256Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -41,15 +45,43 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.random.Random
 
+data class BleDebugStats(
+    val scanRssiAvg: Int? = null,
+    val scanRssiCount: Int = 0,
+    val connectionRssiAvg: Int? = null,
+    val connectionRssiCount: Int = 0,
+    val pendingCount: Int = 0,
+    val attemptTracked: Int = 0,
+    val maxAttempts: Int = 0
+) {
+    companion object {
+        fun fromSnapshot(snapshot: BleDebugSnapshot): BleDebugStats {
+            return BleDebugStats(
+                scanRssiAvg = snapshot.scanRssiAvg,
+                scanRssiCount = snapshot.scanRssiCount,
+                connectionRssiAvg = snapshot.connectionRssiAvg,
+                connectionRssiCount = snapshot.connectionRssiCount,
+                pendingCount = snapshot.pendingCount,
+                attemptTracked = snapshot.attemptTracked,
+                maxAttempts = snapshot.maxAttempts
+            )
+        }
+    }
+}
+
 // UI 상태
 data class AppUiState(
     val hasPermissions: Boolean = false,
     val batteryLevel: Int = 100,
     val isConnected: Boolean = false,
+    val connectedCount: Int = 0,
+    val meshPeerCount: Int = 0,
+    val directPeerIds: List<String> = emptyList(),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
-    val messages: List<ChatMessage> = emptyList()
+    val messages: List<ChatMessage> = emptyList(),
+    val bleDebug: BleDebugStats = BleDebugStats()
 )
 
 // UI 이벤트
@@ -109,6 +141,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
+    private val meshRegistry = MeshPeerRegistry()
+    private var announceJob: kotlinx.coroutines.Job? = null
+    private var meshCleanupJob: kotlinx.coroutines.Job? = null
+    private var bleDebugJob: kotlinx.coroutines.Job? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -172,35 +208,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * [수정] 사이렌 울리기 (강제 최대 볼륨 적용)
-     * 시나리오: 현재 볼륨 저장 -> 최대 볼륨 설정 -> 사이렌 발사 -> 원래 볼륨 복구
+     * [수정] 사이렌 울리기 (기기 볼륨 설정을 그대로 사용)
      */
     private fun playSiren() {
         viewModelScope.launch(Dispatchers.Default) {
-            // 1. 현재 알람 볼륨 저장 (나중에 복구를 위해)
-            val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-            // 2. 알람 채널의 최대 볼륨 가져오기
-            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-
             try {
-                // 3. 볼륨을 강제로 최대로 설정 (플래그 0: UI 표시 안 함)
-                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVolume, 0)
-
-                // 4. 사이렌 울리기 (5회 반복)
-                repeat(5) {
-                    // TONE_CDMA_ALERT_CALL_GUARD: 매우 시끄럽고 긴급한 소리
-                    toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1000)
-                    delay(1500)
-                }
+                // 기기 설정된 알람 볼륨으로 사이렌 1회 울리기
+                toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1000)
             } catch (e: Exception) {
                 Log.e("Siren", "Error playing siren: ${e.message}")
-            } finally {
-                // 5. 사이렌이 끝나면 원래 볼륨으로 복구 (매너 모드)
-                try {
-                    audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
-                } catch (e: Exception) {
-                    Log.e("Siren", "Error restoring volume: ${e.message}")
-                }
             }
         }
     }
@@ -262,14 +278,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onMicRelease() {
         if (!_uiState.value.isMicOn) return
-        val file = voiceRecorder?.stop() ?: recordingFile
+        val recorder = voiceRecorder
+        val pendingFile = recordingFile
         voiceRecorder = null
         recordingFile = null
         _uiState.update { it.copy(isMicOn = false) }
 
-        if (file == null || !file.exists()) return
-
         viewModelScope.launch(Dispatchers.IO) {
+            delay(500)
+            val file = recorder?.stop() ?: pendingFile
+            if (file == null || !file.exists()) return@launch
+
             val bytes = runCatching { file.readBytes() }.getOrNull()
 
             if (bytes == null) {
@@ -336,17 +355,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             logCallback = { msg -> Log.d("BleManager", msg) },
             audioCallback = { pcmData -> audioEngine?.playAudio(pcmData) },
             textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false)) },
-            protocolCallback = { },
-            connectionCallback = { connected ->
-                _uiState.update { it.copy(isConnected = connected) }
+            protocolCallback = { _, _ -> },
+            connectionCallback = { connected, count ->
+                val directPeerIds = bleManager.getConnectedPeerIds()
+                _uiState.update {
+                    it.copy(
+                        isConnected = connected,
+                        connectedCount = count,
+                        meshPeerCount = meshRegistry.count() + 1,
+                        directPeerIds = directPeerIds
+                    )
+                }
             }
         )
+        bleManager.setLocalPeerId(senderId)
 
-        // 구조대 발견 시 사이렌
-        bleManager.onRescueConnected = {
-            playSiren()
-            _uiEvents.tryEmit(UiEvent.Toast("🚨 구조대가 발견했습니다! (소리 발생)"))
-        }
+        bleManager.onRescueConnected = null
 
         // 모드 변경 알림
         bleManager.onModeChange = { message ->
@@ -354,15 +378,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         protocolCore.attachTransport(BleTransport(bleManager))
+        startBleDebugLoop()
     }
 
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
-        protocolCore = ProtocolCore(codec, codec)
+        protocolCore = ProtocolCore(codec, codec, myPeerId = senderId)
         protocolCore.setOnPacketReceived { packet ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             when (packet.header.type) {
+                PacketType.ANNOUNCE -> {
+                    val peerHex = bytesToHex(packet.header.senderId)
+                    meshRegistry.markSeen(peerHex)
+                    updateMeshCount()
+                }
+                PacketType.LEAVE -> {
+                    val peerHex = bytesToHex(packet.header.senderId)
+                    meshRegistry.remove(peerHex)
+                    updateMeshCount()
+                }
                 PacketType.MESSAGE -> {
                     val text = packet.payload.toString(Charsets.UTF_8)
                     addMessage(ChatMessage(text = text, isMine = false))
@@ -370,19 +405,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.FILE_TRANSFER -> {
                     viewModelScope.launch(Dispatchers.IO) {
                         val payload = FileTransferPayload.decode(packet.payload) ?: return@launch
-                        val inDir = File(app.filesDir, "voicenotes/incoming")
-                        if (!inDir.exists()) inDir.mkdirs()
-
-                        val name = payload.fileName?.takeIf { it.isNotBlank() } ?: "voice_${packet.header.timestamp}.m4a"
-                        val file = File(inDir, name)
-
-                        runCatching { file.writeBytes(payload.content) }
-                        addMessage(ChatMessage(text = "[voice] ${file.absolutePath}", isMine = false))
+                        val stored = FileTransferStorage.storeIncoming(
+                            context = app,
+                            payload = payload,
+                            timestamp = packet.header.timestamp
+                        ) ?: return@launch
+                        addMessage(
+                            ChatMessage(
+                                text = FileTransferStorage.buildMarker(stored),
+                                isMine = false
+                            )
+                        )
+                        if (packet.header.recipientId != null) {
+                            val transferId = packet.payload.sha256Bytes()
+                            protocolCore.sendFileAck(packet.header.senderId, transferId)
+                        }
                     }
                 }
                 else -> Unit
             }
         }
+        startAnnounceLoop()
+        startMeshCleanupLoop()
     }
 
     private fun initBatteryMonitor() {
@@ -403,6 +447,60 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { current ->
             current.copy(messages = current.messages + message)
         }
+    }
+
+    private fun updateMeshCount() {
+        val meshCount = meshRegistry.count() + 1
+        _uiState.update { it.copy(meshPeerCount = meshCount) }
+    }
+
+    private fun startAnnounceLoop() {
+        if (announceJob?.isActive == true) return
+        announceJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(ProtocolConstants.Mesh.ANNOUNCE_INITIAL_DELAY_MS)
+            while (true) {
+                sendAnnounce()
+                delay(ProtocolConstants.Mesh.ANNOUNCE_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun startMeshCleanupLoop() {
+        if (meshCleanupJob?.isActive == true) return
+        meshCleanupJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                meshRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
+                updateMeshCount()
+                delay(ProtocolConstants.Mesh.PEER_CLEANUP_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun startBleDebugLoop() {
+        if (bleDebugJob?.isActive == true) return
+        bleDebugJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val snapshot = bleManager.getDebugSnapshot()
+                _uiState.update { it.copy(bleDebug = BleDebugStats.fromSnapshot(snapshot)) }
+                delay(3_000L)
+            }
+        }
+    }
+
+    private fun sendAnnounce() {
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.ANNOUNCE,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = 0,
+                timestamp = System.currentTimeMillis(),
+                senderId = senderId
+            ),
+            payload = ByteArray(0)
+        )
+        protocolCore.broadcast(packet)
     }
 
     private fun buildMessagePacket(text: String): Packet {
@@ -449,6 +547,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
+        announceJob?.cancel()
+        meshCleanupJob?.cancel()
+        bleDebugJob?.cancel()
 
         // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {

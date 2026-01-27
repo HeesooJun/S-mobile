@@ -9,6 +9,7 @@ enum class PacketType(val code: Int) {
     FRAGMENT(0x20),
     REQUEST_SYNC(0x21),
     FILE_TRANSFER(0x22),
+    FILE_ACK(0x23),
     RESCUE_ID(0x30);
 
     companion object {

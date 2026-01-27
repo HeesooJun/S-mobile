@@ -3,11 +3,11 @@ package com.example.lifesaiver.core.ble
 import com.example.lifesaiver.protocol.transport.Transport
 
 class BleTransport(private val bleManager: BleManager) : Transport {
-    private var onReceive: ((ByteArray) -> Unit)? = null
+    private var onReceive: ((ByteArray, String?) -> Unit)? = null
 
     init {
-        bleManager.setProtocolCallback { bytes ->
-            onReceive?.invoke(bytes)
+        bleManager.setProtocolCallback { bytes, address ->
+            onReceive?.invoke(bytes, address)
         }
     }
 
@@ -15,11 +15,19 @@ class BleTransport(private val bleManager: BleManager) : Transport {
         bleManager.sendProtocol(data)
     }
 
-    override fun broadcast(data: ByteArray) {
-        bleManager.broadcastProtocol(data)
+    override fun broadcast(data: ByteArray, excludeAddress: String?) {
+        bleManager.broadcastProtocol(data, excludeAddress)
     }
 
-    override fun setOnReceive(listener: (ByteArray) -> Unit) {
+    override fun setOnReceive(listener: (ByteArray, String?) -> Unit) {
         onReceive = listener
+    }
+
+    override fun sendToAddress(address: String, data: ByteArray): Boolean {
+        return bleManager.sendProtocolTo(address, data)
+    }
+
+    override fun getNetworkSize(): Int {
+        return bleManager.getConnectedPeerCount()
     }
 }

@@ -35,12 +35,14 @@ import com.example.lifesaiver.ui.theme.scaledSp
 @Composable
 fun RescuerChatScreen(
     roomTitle: String,
+    meshPeerCount: Int,
     messages: List<ChatMessage>,
     onPrev: () -> Unit,
     onSend: (String) -> Unit
 ) {
     val (inputValue, setInputValue) = remember { mutableStateOf("") }
     val scale = LocalAppScale.current
+    val participantCount = meshPeerCount.coerceAtLeast(0)
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -70,9 +72,12 @@ fun RescuerChatScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
 
-            Text(text = "Connected", color = AppColors.Green,
+            Text(
+                text = "인원 ${participantCount}명",
+                color = AppColors.Green,
                 fontSize = scaledSp(12, scale),
-                modifier = Modifier.align(Alignment.CenterEnd))
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
