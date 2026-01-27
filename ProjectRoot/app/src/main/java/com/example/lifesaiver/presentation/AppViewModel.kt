@@ -30,6 +30,7 @@ import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
+import com.example.lifesaiver.protocol.util.sha256Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -383,6 +384,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 isMine = false
                             )
                         )
+                        if (packet.header.recipientId != null) {
+                            val transferId = packet.payload.sha256Bytes()
+                            protocolCore.sendFileAck(packet.header.senderId, transferId)
+                        }
                     }
                 }
                 else -> Unit
