@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.navigation
+﻿package com.example.lifesaiver.ui.navigation
 
 sealed class AppRoute(val route: String) {
     data object ModeGate : AppRoute("mode_gate")
@@ -15,4 +15,5 @@ sealed class AppRoute(val route: String) {
     data object RescuerPTT : AppRoute("rescuer_ptt")
     data object RescuerChat : AppRoute("rescuer_chat")
     data object RescuerEmergency : AppRoute("rescuer_emergency")
+    data object RescuerSurvivorDb : AppRoute("rescuer/survivor_db")
 }

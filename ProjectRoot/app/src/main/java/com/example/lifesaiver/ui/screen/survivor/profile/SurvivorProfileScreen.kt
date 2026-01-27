@@ -2,6 +2,7 @@
 
 package com.example.lifesaiver.ui.screen.survivor.profile
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -42,6 +43,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.core.profile.ProfileStore
@@ -59,6 +61,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -68,6 +71,7 @@ fun SurvivorProfileScreen(
     onBack: () -> Unit
 ) {
     val scale = LocalAppScale.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
 
@@ -92,6 +96,10 @@ fun SurvivorProfileScreen(
     val isComplete = name.isNotBlank() && gender.isNotBlank() && birthDateValid
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
 
+    val formModifier = Modifier
+        .fillMaxWidth(0.85f)
+        .widthIn(max = scaledDp(360, scale))
+
     if (showDatePicker) {
         val initialMillis = parseDateToMillis(birthDate)
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
@@ -110,18 +118,6 @@ fun SurvivorProfileScreen(
                                 birthDate = formatted
                                 showBirthDateError = false
                                 showDatePicker = false
-                                scope.launch {
-                                    profileStore.saveProfile(
-                                        SurvivorProfile(
-                                            name = name,
-                                            gender = gender,
-                                            birthDate = formatted,
-                                            emergencyContact = emergencyContact,
-                                            notes = notes,
-                                            bloodType = bloodType
-                                        )
-                                    )
-                                }
                             } else {
                                 showBirthDateError = true
                             }
@@ -168,72 +164,82 @@ fun SurvivorProfileScreen(
             Spacer(modifier = Modifier.width(scaledDp(56, scale)))
         }
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = scaledDp(24, scale)),
-            verticalArrangement = Arrangement.spacedBy(scaledDp(16, scale))
+            contentAlignment = Alignment.Center
         ) {
-            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-            Text(
-                text = "필수",
-                color = AppColors.Red,
-                fontSize = scaledSp(12, scale),
-                fontWeight = FontWeight.SemiBold
-            )
-            ProfileInputField(
-                label = "이름",
-                value = name,
-                placeholder = "이름 입력",
-                onValueChange = { name = it }
-            )
-            ProfileExposedSelectField(
-                label = "성별",
-                value = gender,
-                placeholder = "선택",
-                options = listOf("남성", "여성"),
-                onSelected = { gender = it }
-            )
-            ProfileDateField(
-                label = "생년월일",
-                value = birthDate,
-                placeholder = "YYYY-MM-DD",
-                isError = showBirthDateError,
-                onClick = {
-                    showBirthDateError = false
-                    showDatePicker = true
-                }
-            )
+            Column(
+                modifier = formModifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(scaledDp(16, scale))
+            ) {
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                Text(
+                    text = "필수",
+                    color = AppColors.Red,
+                    fontSize = scaledSp(12, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+                ProfileInputField(
+                    label = "이름",
+                    value = name,
+                    placeholder = "이름 입력",
+                    modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { name = it }
+                )
+                ProfileExposedSelectField(
+                    label = "성별",
+                    value = gender,
+                    placeholder = "선택",
+                    options = listOf("남성", "여성"),
+                    modifier = Modifier.fillMaxWidth(),
+                    onSelected = { gender = it }
+                )
+                ProfileDateField(
+                    label = "생년월일",
+                    value = birthDate,
+                    placeholder = "YYYY-MM-DD",
+                    isError = showBirthDateError,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        showBirthDateError = false
+                        showDatePicker = true
+                    }
+                )
 
-            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-            Text(
-                text = "권장 / 선택",
-                color = AppColors.Gray400,
-                fontSize = scaledSp(12, scale),
-                fontWeight = FontWeight.Medium
-            )
-            ProfileInputField(
-                label = "긴급연락처(권장)",
-                value = emergencyContact,
-                placeholder = "연락처 입력",
-                onValueChange = { emergencyContact = it }
-            )
-            ProfileExposedSelectField(
-                label = "혈액형(선택)",
-                value = bloodType,
-                placeholder = "선택",
-                options = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"),
-                onSelected = { bloodType = it }
-            )
-            ProfileInputField(
-                label = "특이사항 (선택)",
-                value = notes,
-                placeholder = "특이사항 입력",
-                onValueChange = { notes = it }
-            )
-            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                Text(
+                    text = "권장 / 선택",
+                    color = AppColors.Gray400,
+                    fontSize = scaledSp(12, scale),
+                    fontWeight = FontWeight.Medium
+                )
+                ProfileInputField(
+                    label = "긴급연락처(권장)",
+                    value = emergencyContact,
+                    placeholder = "연락처 입력",
+                    modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { emergencyContact = it }
+                )
+                ProfileExposedSelectField(
+                    label = "혈액형(선택)",
+                    value = bloodType,
+                    placeholder = "선택",
+                    options = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"),
+                    modifier = Modifier.fillMaxWidth(),
+                    onSelected = { bloodType = it }
+                )
+                ProfileInputField(
+                    label = "특이사항 (선택)",
+                    value = notes,
+                    placeholder = "특이사항 입력",
+                    modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { notes = it }
+                )
+                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+            }
         }
 
         Column(
@@ -262,6 +268,8 @@ fun SurvivorProfileScreen(
                                     bloodType = bloodType
                                 )
                             )
+                            Toast.makeText(context, "저장 완료", Toast.LENGTH_SHORT).show()
+                            delay(300)
                             onSaved()
                         }
                     } else if (!birthDateValid) {
@@ -278,13 +286,14 @@ private fun ProfileInputField(
     label: String,
     value: String,
     placeholder: String,
+    modifier: Modifier = Modifier,
     onValueChange: (String) -> Unit
 ) {
     val scale = LocalAppScale.current
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         label = { Text(text = label, color = AppColors.Gray500) },
         placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
         textStyle = TextStyle(
@@ -302,6 +311,7 @@ private fun ProfileExposedSelectField(
     value: String,
     placeholder: String,
     options: List<String>,
+    modifier: Modifier = Modifier,
     onSelected: (String) -> Unit
 ) {
     val scale = LocalAppScale.current
@@ -314,9 +324,7 @@ private fun ProfileExposedSelectField(
         OutlinedTextField(
             value = value,
             onValueChange = {},
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(),
+            modifier = modifier.menuAnchor(),
             label = { Text(text = label, color = AppColors.Gray500) },
             placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
             textStyle = TextStyle(
@@ -396,12 +404,13 @@ private fun ProfileDateField(
     value: String,
     placeholder: String,
     isError: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val interactionSource = remember { MutableInteractionSource() }
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = modifier) {
         OutlinedTextField(
             value = value,
             onValueChange = {},
