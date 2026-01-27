@@ -19,10 +19,14 @@ import com.example.lifesaiver.protocol.util.toHexString
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ObsoleteCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.channels.actor
 import java.util.concurrent.ConcurrentHashMap
 
 class ProtocolCore(
@@ -41,6 +45,13 @@ class ProtocolCore(
     private val fileTransferJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private val storeForwardJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private val fileAckWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val inboundScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val inboundActors = ConcurrentHashMap<String, SendChannel<InboundEnvelope>>()
+
+    private data class InboundEnvelope(
+        val packet: Packet,
+        val relayAddress: String?
+    )
 
     init {
         relayManager.delegate = object : PacketRelayManagerDelegate {
@@ -118,9 +129,31 @@ class ProtocolCore(
 
     fun onBytesReceived(bytes: ByteArray, relayAddress: String?) {
         val packet = decoder.decode(bytes) ?: return
+        val peerId = packet.header.senderId.toHexString()
+        val actor = getOrCreateInboundActor(peerId)
+        inboundScope.launch {
+            try {
+                actor.send(InboundEnvelope(packet, relayAddress))
+            } catch (_: Exception) {
+                handleInbound(peerId, packet, relayAddress)
+            }
+        }
+    }
+
+    @OptIn(ObsoleteCoroutinesApi::class)
+    private fun getOrCreateInboundActor(peerId: String): SendChannel<InboundEnvelope> {
+        return inboundActors.getOrPut(peerId) {
+            inboundScope.actor(capacity = Channel.UNLIMITED) {
+                for (envelope in channel) {
+                    handleInbound(peerId, envelope.packet, envelope.relayAddress)
+                }
+            }
+        }
+    }
+
+    private fun handleInbound(peerId: String, packet: Packet, relayAddress: String?) {
         if (relayAddress != null && packet.header.ttl >= ProtocolConstants.MESSAGE_TTL_HOPS) {
             peerDirectory.record(packet.header.senderId, relayAddress)
-            val peerId = packet.header.senderId.toHexString()
             drainStoreForward(peerId)
         }
 
@@ -131,7 +164,6 @@ class ProtocolCore(
 
         val inbound = pipeline.handleInbound(packet)
         inbound.packetForRelay?.let {
-            val peerId = packet.header.senderId.toHexString()
             relayManager.handlePacketRelay(RoutedPacket(it, peerId, relayAddress))
         }
         inbound.packetForApp?.let { onPacket?.invoke(it) }
