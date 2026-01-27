@@ -22,6 +22,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.os.ParcelUuid
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -66,7 +67,10 @@ class BleManager(
     private val connectedPeers = mutableSetOf<String>()
     private val clientConnections = mutableMapOf<String, BluetoothGatt>()
     private val pendingConnections = mutableSetOf<String>()
+    private val addressPeerMap = mutableMapOf<String, String>()
+    private val pendingPeerIds = mutableMapOf<String, String>()
     private var gattServer: BluetoothGattServer? = null
+    private var localPeerId: ByteArray? = null
 
     private var currentAdvertisingSet: AdvertisingSet? = null
 
@@ -77,6 +81,10 @@ class BleManager(
 
     fun setProtocolCallback(listener: (ByteArray, String?) -> Unit) {
         protocolCallback = listener
+    }
+
+    fun setLocalPeerId(peerId: ByteArray) {
+        localPeerId = peerId.copyOf()
     }
 
     fun isLongRangeSupported(): Boolean {
@@ -187,6 +195,12 @@ class BleManager(
             val advertiseData = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .addServiceUuid(android.os.ParcelUuid(Constants.SERVICE_UUID))
+                .apply {
+                    val peerId = localPeerId
+                    if (peerId != null && peerId.size == 8) {
+                        addServiceData(ParcelUuid(Constants.SERVICE_UUID), peerId)
+                    }
+                }
                 .build()
 
             val scanResponse = AdvertiseData.Builder()
@@ -225,8 +239,13 @@ class BleManager(
             val device = result?.device ?: return
             val address = device.address
             if (result.rssi <= -90) return
+            val peerId = extractPeerId(result)
+            if (peerId != null && isPeerConnected(peerId)) return
             if (isConnectionKnown(address)) return
             if (!markPending(address)) return
+            if (peerId != null) {
+                recordPendingPeerId(address, peerId)
+            }
 
             logCallback("Peer found: ${device.address}")
             connectToPeer(device)
@@ -287,6 +306,7 @@ class BleManager(
                 synchronized(clientConnections) {
                     clientConnections[address] = gatt
                 }
+                attachPendingPeerId(address)
                 clearPending(address)
                 notifyConnectionState()
                 gatt.requestMtu(512)
@@ -295,6 +315,7 @@ class BleManager(
                 synchronized(clientConnections) {
                     clientConnections.remove(address)
                 }
+                clearPeerId(address)
                 clearPending(address)
                 notifyConnectionState()
                 try {
@@ -398,6 +419,7 @@ class BleManager(
                 synchronized(connectedPeers) {
                     connectedPeers.remove(device.address)
                 }
+                clearPeerId(device.address)
                 notifyConnectionState()
             }
         }
@@ -585,10 +607,19 @@ class BleManager(
                     }
                 }
             }
+            synchronized(addressPeerMap) {
+                val iterator = addressPeerMap.keys.iterator()
+                while (iterator.hasNext()) {
+                    val address = iterator.next()
+                    if (!activeAddresses.contains(address)) {
+                        iterator.remove()
+                    }
+                }
+            }
         }
         val count = getAllConnectedAddresses().size
         isConnected = count > 0
-        connectionCallback(isConnected, count)
+        connectionCallback(isConnected, getConnectedPeerCount())
     }
 
     private fun getSystemConnectedAddresses(): Set<String>? {
@@ -632,10 +663,62 @@ class BleManager(
         synchronized(pendingConnections) {
             pendingConnections.remove(address)
         }
+        synchronized(pendingPeerIds) {
+            pendingPeerIds.remove(address)
+        }
     }
 
     fun getConnectedPeerCount(): Int {
-        return getAllConnectedAddresses().size
+        val addresses = getAllConnectedAddresses()
+        val peerIds = mutableSetOf<String>()
+        var unknownCount = 0
+        synchronized(addressPeerMap) {
+            addresses.forEach { address ->
+                val peerId = addressPeerMap[address]
+                if (peerId != null) {
+                    peerIds.add(peerId)
+                } else {
+                    unknownCount += 1
+                }
+            }
+        }
+        return peerIds.size + unknownCount
+    }
+
+    private fun extractPeerId(result: ScanResult): String? {
+        val data = result.scanRecord?.getServiceData(ParcelUuid(Constants.SERVICE_UUID)) ?: return null
+        if (data.size < 8) return null
+        return data.copyOfRange(0, 8).toHexString()
+    }
+
+    private fun isPeerConnected(peerIdHex: String): Boolean {
+        synchronized(addressPeerMap) {
+            if (addressPeerMap.values.any { it == peerIdHex }) return true
+        }
+        return false
+    }
+
+    private fun recordPendingPeerId(address: String, peerId: String) {
+        synchronized(pendingPeerIds) {
+            pendingPeerIds[address] = peerId
+        }
+    }
+
+    private fun attachPendingPeerId(address: String) {
+        val peerId = synchronized(pendingPeerIds) { pendingPeerIds.remove(address) } ?: return
+        synchronized(addressPeerMap) {
+            addressPeerMap[address] = peerId
+        }
+    }
+
+    private fun clearPeerId(address: String) {
+        synchronized(addressPeerMap) {
+            addressPeerMap.remove(address)
+        }
+    }
+
+    private fun ByteArray.toHexString(): String {
+        return joinToString("") { "%02x".format(it) }
     }
 
     private fun relayData(sender: String, data: ByteArray, characteristicUuid: UUID) {
