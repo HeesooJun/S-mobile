@@ -127,9 +127,12 @@ fun PTTLinkScreen(
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
-    val displayConnectedCount = meshPeerCount.coerceAtLeast(0)
-    val meshNodes = remember(connectedCount, meshPeerCount) {
-        buildMeshNodes(connectedCount, meshPeerCount)
+    val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
+    val displayConnectedCount = meshDisplayCount
+    val hasMeshPeers = meshDisplayCount > 0
+    val isLinkActive = isConnected || hasMeshPeers
+    val meshNodes = remember(connectedCount, meshDisplayCount) {
+        buildMeshNodes(connectedCount, meshDisplayCount)
     }
 
     LaunchedEffect(expandedAction) {
@@ -206,8 +209,12 @@ fun PTTLinkScreen(
                 )
                 Spacer(modifier = Modifier.height(scaledDp(20, scale)))
                 Text(
-                    text = if (isConnected) "구조자 연결됨" else "구조자 연결 대기 중",
-                    color = if (isConnected) AppColors.Green else AppColors.Gray500,
+                    text = when {
+                        hasMeshPeers -> "메쉬 연결됨"
+                        isConnected -> "구조자 연결됨"
+                        else -> "구조자 연결 대기 중"
+                    },
+                    color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
@@ -402,7 +409,7 @@ fun PTTLinkScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "직접 ${connectedCount}명 · 메쉬 ${displayConnectedCount}명",
+                            text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
                             color = AppColors.Gray400,
                             fontSize = scaledSp(12, scale)
                         )
