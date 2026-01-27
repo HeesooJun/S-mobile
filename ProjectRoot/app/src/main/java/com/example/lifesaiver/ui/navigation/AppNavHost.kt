@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.navigation
+﻿package com.example.lifesaiver.ui.navigation
 
 import android.app.Activity
 import androidx.compose.runtime.Composable
@@ -20,15 +20,16 @@ import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.ui.screen.mode.ModeGateScreen
-import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
+import com.example.lifesaiver.ui.screen.rescuer.db.RescuerSurvivorDbScreen
 import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
-import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
-import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
+import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
+import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
+import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 
 @Composable
 fun AppNavHost(
@@ -187,7 +188,15 @@ fun AppNavHost(
                     onDisconnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
-                onChat = { navController.navigate(AppRoute.RescuerChat.route) }
+                onChat = { navController.navigate(AppRoute.RescuerChat.route) },
+                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) }
+            )
+        }
+
+        composable(AppRoute.RescuerSurvivorDb.route) {
+            RescuerSurvivorDbScreen(
+                survivors = emptyList(),
+                onBack = { navController.popBackStack() }
             )
         }
 
