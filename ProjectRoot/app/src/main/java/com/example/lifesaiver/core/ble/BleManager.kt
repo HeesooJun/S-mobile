@@ -87,7 +87,15 @@ class BleManager(
     private val connectionBackoffBaseMs: Long = 5_000L
     private val connectionBackoffMaxMs: Long = 30_000L
     private val connectionAttemptResetMs: Long = 60_000L
+    private val connectionAttemptCleanupIntervalMs: Long = 30_000L
+    private val maxConnectionAttempts: Int = 6
     private val connectionAttempts = mutableMapOf<String, ConnectionAttempt>()
+    private var connectionAttemptCleanupJob: Job? = null
+
+    private val rssiUpdateIntervalMs: Long = 10_000L
+    private val scanRssi = mutableMapOf<String, Int>()
+    private val connectionRssi = mutableMapOf<String, Int>()
+    private var rssiMonitorJob: Job? = null
 
     private data class ConnectionAttempt(
         var attempts: Int,
@@ -177,6 +185,7 @@ class BleManager(
 
         // 2. 타이머 없이 바로 '절전형 고출력' 모드로 시작
         // 전략: Interval은 느리게(배터리 절약), TxPower는 강하게(장거리)
+        startMaintenanceJobs()
         startAdvertisingInternal(isEmergencyMode = true)
     }
 
@@ -198,7 +207,50 @@ class BleManager(
         logCallback("Auto connect start (mesh mode).")
         setupGattServer()
         startAdvertisingInternal(isEmergencyMode = false)
+        startMaintenanceJobs()
         startScan()
+    }
+
+    private fun startMaintenanceJobs() {
+        startConnectionAttemptCleanup()
+        startRssiMonitoring()
+    }
+
+    private fun stopMaintenanceJobs() {
+        connectionAttemptCleanupJob?.cancel()
+        connectionAttemptCleanupJob = null
+        rssiMonitorJob?.cancel()
+        rssiMonitorJob = null
+    }
+
+    private fun startConnectionAttemptCleanup() {
+        if (connectionAttemptCleanupJob?.isActive == true) return
+        connectionAttemptCleanupJob = ioScope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                synchronized(connectionAttempts) {
+                    val expired = connectionAttempts.filterValues { isAttemptExpired(it, now) }.keys
+                    expired.forEach { connectionAttempts.remove(it) }
+                }
+                delay(connectionAttemptCleanupIntervalMs)
+            }
+        }
+    }
+
+    private fun startRssiMonitoring() {
+        if (rssiMonitorJob?.isActive == true) return
+        rssiMonitorJob = ioScope.launch {
+            while (isActive) {
+                val snapshot = synchronized(clientConnections) { clientConnections.toMap() }
+                snapshot.values.forEach { gatt ->
+                    try {
+                        gatt.readRemoteRssi()
+                    } catch (_: Exception) {
+                    }
+                }
+                delay(rssiUpdateIntervalMs)
+            }
+        }
     }
 
     private fun enterScanMode() {
@@ -297,13 +349,19 @@ class BleManager(
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             val device = result?.device ?: return
             val address = device.address
+            synchronized(scanRssi) {
+                scanRssi[address] = result.rssi
+            }
             if (result.rssi < rssiThresholdDbm) return
             val peerId = extractPeerId(result)
             if (peerId != null && isPeerConnected(peerId)) return
             if (isConnectionKnown(address)) return
             if (!isConnectionAttemptAllowed(address)) return
             if (!markPending(address)) return
-            recordConnectionAttempt(address)
+            if (!recordConnectionAttempt(address)) {
+                clearPending(address)
+                return
+            }
             if (peerId != null) {
                 recordPendingPeerId(address, peerId)
             }
@@ -434,6 +492,14 @@ class BleManager(
             enableNotifications(gatt, Constants.CHAR_UUID)
             enableNotifications(gatt, Constants.PROTOCOL_CHAR_UUID)
             logCallback("Ready to chat.")
+        }
+
+        override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) return
+            val address = gatt.device.address
+            synchronized(connectionRssi) {
+                connectionRssi[address] = rssi
+            }
         }
 
         override fun onCharacteristicChanged(
@@ -788,30 +854,41 @@ class BleManager(
         }
     }
 
+    private fun isAttemptExpired(attempt: ConnectionAttempt, now: Long = System.currentTimeMillis()): Boolean {
+        return now - attempt.lastAttemptMs >= connectionAttemptResetMs
+    }
+
     private fun isConnectionAttemptAllowed(address: String): Boolean {
         val now = System.currentTimeMillis()
         synchronized(connectionAttempts) {
             val attempt = connectionAttempts[address] ?: return true
-            val elapsed = now - attempt.lastAttemptMs
-            if (elapsed >= connectionAttemptResetMs) {
+            if (isAttemptExpired(attempt, now)) {
                 connectionAttempts.remove(address)
                 return true
             }
+            if (attempt.attempts >= maxConnectionAttempts) {
+                return false
+            }
+            val elapsed = now - attempt.lastAttemptMs
             val required = requiredBackoffMs(attempt.attempts)
             return elapsed >= required
         }
     }
 
-    private fun recordConnectionAttempt(address: String) {
+    private fun recordConnectionAttempt(address: String): Boolean {
         val now = System.currentTimeMillis()
         synchronized(connectionAttempts) {
             val attempt = connectionAttempts[address]
-            val nextAttempts = if (attempt == null || now - attempt.lastAttemptMs >= connectionAttemptResetMs) {
+            if (attempt != null && !isAttemptExpired(attempt, now) && attempt.attempts >= maxConnectionAttempts) {
+                return false
+            }
+            val nextAttempts = if (attempt == null || isAttemptExpired(attempt, now)) {
                 1
             } else {
-                (attempt.attempts + 1).coerceAtMost(6)
+                (attempt.attempts + 1).coerceAtMost(maxConnectionAttempts)
             }
             connectionAttempts[address] = ConnectionAttempt(nextAttempts, now)
+            return true
         }
     }
 
@@ -918,6 +995,7 @@ class BleManager(
         handler.removeCallbacksAndMessages(null)
         stopScan()
         stopAdvertising()
+        stopMaintenanceJobs()
         synchronized(clientConnections) {
             clientConnections.values.forEach { gatt ->
                 try {
@@ -937,6 +1015,12 @@ class BleManager(
         synchronized(connectionAttempts) {
             connectionAttempts.clear()
         }
+        synchronized(scanRssi) {
+            scanRssi.clear()
+        }
+        synchronized(connectionRssi) {
+            connectionRssi.clear()
+        }
         gattServer?.close()
         gattServer = null
         isConnected = false
@@ -951,6 +1035,7 @@ class BleManager(
         try {
             stopAdvertising()
             stopScan()
+            stopMaintenanceJobs()
             gattServer?.close()
             synchronized(clientConnections) {
                 clientConnections.values.forEach { gatt ->
@@ -967,6 +1052,12 @@ class BleManager(
             }
             synchronized(connectionAttempts) {
                 connectionAttempts.clear()
+            }
+            synchronized(scanRssi) {
+                scanRssi.clear()
+            }
+            synchronized(connectionRssi) {
+                connectionRssi.clear()
             }
             // 코루틴 취소 (메모리 릭 방지)
             job.cancel()
