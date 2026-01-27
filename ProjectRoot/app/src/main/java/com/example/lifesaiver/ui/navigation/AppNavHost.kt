@@ -12,8 +12,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
@@ -31,6 +33,10 @@ import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen
 fun AppNavHost(
     batteryLevel: Int,
     isConnected: Boolean,
+    connectedCount: Int,
+    meshPeerCount: Int,
+    directPeerIds: List<String>,
+    bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
@@ -42,11 +48,18 @@ fun AppNavHost(
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
-    onStopRescueSignal: () -> Unit
+    onStopRescueSignal: () -> Unit,
+    onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
     val activity = LocalContext.current as? Activity
     var pendingSosNavigation by remember { mutableStateOf(false) }
+
+    LaunchedEffect(backStackEntry) {
+        val route = backStackEntry?.destination?.route ?: AppRoute.ModeGate.route
+        onRouteChanged(route)
+    }
 
     LaunchedEffect(isConnected, pendingSosNavigation) {
         if (pendingSosNavigation && isConnected) {
@@ -112,9 +125,15 @@ fun AppNavHost(
         }
 
         composable(AppRoute.SurvivorPTT.route) {
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
+                directPeerIds = directPeerIds,
+                bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -134,7 +153,8 @@ fun AppNavHost(
             val chatViewModel: RescueChatViewModel = viewModel()
             val chatState by chatViewModel.uiState.collectAsState()
             RescueChatScreen(
-                roomTitle = "Survivor Chat",
+                roomTitle = "전체 채팅",
+                meshPeerCount = meshPeerCount,
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 inputValue = chatState.inputValue,
@@ -149,7 +169,7 @@ fun AppNavHost(
             RescuerStandbyScreen(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
                 onPrev = { navController.navigate(AppRoute.ModeGate.route) },
                 onGoPTT = { navController.navigate(AppRoute.RescuerPTT.route) },
                 onSos = { navController.navigate(AppRoute.RescuerEmergency.route) }
@@ -157,9 +177,13 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerPTT.route) {
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -175,7 +199,8 @@ fun AppNavHost(
 
         composable(AppRoute.RescuerChat.route) {
             RescuerChatScreen(
-                roomTitle = "Rescuer Chat",
+                roomTitle = "전체 채팅",
+                meshPeerCount = meshPeerCount,
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 onSend = onSendMessage
