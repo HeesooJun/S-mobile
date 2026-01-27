@@ -17,6 +17,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lifesaiver.core.audio.AudioEngine
 import com.example.lifesaiver.core.audio.VoiceRecorder
+import com.example.lifesaiver.core.ble.BleDebugSnapshot
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.media.FileTransferStorage
@@ -44,6 +45,30 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.random.Random
 
+data class BleDebugStats(
+    val scanRssiAvg: Int? = null,
+    val scanRssiCount: Int = 0,
+    val connectionRssiAvg: Int? = null,
+    val connectionRssiCount: Int = 0,
+    val pendingCount: Int = 0,
+    val attemptTracked: Int = 0,
+    val maxAttempts: Int = 0
+) {
+    companion object {
+        fun fromSnapshot(snapshot: BleDebugSnapshot): BleDebugStats {
+            return BleDebugStats(
+                scanRssiAvg = snapshot.scanRssiAvg,
+                scanRssiCount = snapshot.scanRssiCount,
+                connectionRssiAvg = snapshot.connectionRssiAvg,
+                connectionRssiCount = snapshot.connectionRssiCount,
+                pendingCount = snapshot.pendingCount,
+                attemptTracked = snapshot.attemptTracked,
+                maxAttempts = snapshot.maxAttempts
+            )
+        }
+    }
+}
+
 // UI 상태
 data class AppUiState(
     val hasPermissions: Boolean = false,
@@ -51,10 +76,12 @@ data class AppUiState(
     val isConnected: Boolean = false,
     val connectedCount: Int = 0,
     val meshPeerCount: Int = 0,
+    val directPeerIds: List<String> = emptyList(),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
-    val messages: List<ChatMessage> = emptyList()
+    val messages: List<ChatMessage> = emptyList(),
+    val bleDebug: BleDebugStats = BleDebugStats()
 )
 
 // UI 이벤트
@@ -117,6 +144,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val meshRegistry = MeshPeerRegistry()
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
+    private var bleDebugJob: kotlinx.coroutines.Job? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -329,11 +357,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false)) },
             protocolCallback = { _, _ -> },
             connectionCallback = { connected, count ->
+                val directPeerIds = bleManager.getConnectedPeerIds()
                 _uiState.update {
                     it.copy(
                         isConnected = connected,
                         connectedCount = count,
-                        meshPeerCount = meshRegistry.count() + 1
+                        meshPeerCount = meshRegistry.count() + 1,
+                        directPeerIds = directPeerIds
                     )
                 }
             }
@@ -348,6 +378,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         protocolCore.attachTransport(BleTransport(bleManager))
+        startBleDebugLoop()
     }
 
     private fun initProtocol() {
@@ -445,6 +476,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun startBleDebugLoop() {
+        if (bleDebugJob?.isActive == true) return
+        bleDebugJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val snapshot = bleManager.getDebugSnapshot()
+                _uiState.update { it.copy(bleDebug = BleDebugStats.fromSnapshot(snapshot)) }
+                delay(3_000L)
+            }
+        }
+    }
+
     private fun sendAnnounce() {
         val packet = Packet(
             header = PacketHeader(
@@ -507,6 +549,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         toneGenerator.release()
         announceJob?.cancel()
         meshCleanupJob?.cancel()
+        bleDebugJob?.cancel()
 
         // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {
