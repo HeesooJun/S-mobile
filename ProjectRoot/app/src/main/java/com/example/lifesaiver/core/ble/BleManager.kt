@@ -302,17 +302,17 @@ class BleManager(
      */
     private fun startAdvertisingInternal(isEmergencyMode: Boolean): Boolean {
         return try {
-            val longRange = isLongRangeSupported()
+            // Prefer legacy advertising for cross-device compatibility.
             val parameters = AdvertisingSetParameters.Builder()
-                .setLegacyMode(!longRange)
+                .setLegacyMode(true)
                 .setConnectable(true) // 구조대가 연결할 수 있어야 함 (필수)
                 .setScannable(true)
                 // 발견률을 올리기 위해 광고 간격은 빠르게 유지
                 .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
                 // [핵심 전략] 신호 세기는 무조건 최대(High)로 하여 도달 거리 확보
                 .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
-                .setPrimaryPhy(if (longRange) BluetoothDevice.PHY_LE_CODED else BluetoothDevice.PHY_LE_1M)
-                .setSecondaryPhy(if (longRange) BluetoothDevice.PHY_LE_CODED else BluetoothDevice.PHY_LE_1M)
+                .setPrimaryPhy(BluetoothDevice.PHY_LE_1M)
+                .setSecondaryPhy(BluetoothDevice.PHY_LE_1M)
                 .build()
 
             val advertiseData = AdvertiseData.Builder()
@@ -411,10 +411,6 @@ class BleManager(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 builder.setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
                     .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                builder.setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
-                builder.setLegacy(false)
             }
             val settings = builder.build()
             scanner?.startScan(filters, settings, scanCallback)
