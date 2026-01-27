@@ -27,6 +27,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.actor
 import java.nio.charset.Charset
 import java.util.UUID
 
@@ -61,6 +63,7 @@ class BleManager(
     // 코루틴 제어를 위한 Job 및 Scope
     private val job = Job()
     private val scope = CoroutineScope(Dispatchers.Main + job)
+    private val ioScope = CoroutineScope(Dispatchers.IO + job)
 
     var isHost = false
     private var isConnected = false
@@ -74,6 +77,57 @@ class BleManager(
 
     private var currentAdvertisingSet: AdvertisingSet? = null
 
+    // Discovery/connection tuning knobs.
+    private var rssiThresholdDbm: Int = -95
+    private val scanRateLimitMs: Long = 5_000L
+    private var lastScanStartTimeMs: Long = 0L
+    @Volatile
+    private var isScanning: Boolean = false
+
+    private val connectionBackoffBaseMs: Long = 5_000L
+    private val connectionBackoffMaxMs: Long = 30_000L
+    private val connectionAttemptResetMs: Long = 60_000L
+    private val connectionAttempts = mutableMapOf<String, ConnectionAttempt>()
+
+    private data class ConnectionAttempt(
+        var attempts: Int,
+        var lastAttemptMs: Long
+    )
+
+    private sealed class SendRequest {
+        data class Broadcast(
+            val characteristicUuid: UUID,
+            val data: ByteArray,
+            val excludeAddress: String?
+        ) : SendRequest()
+
+        data class Direct(
+            val address: String,
+            val characteristicUuid: UUID,
+            val data: ByteArray
+        ) : SendRequest()
+    }
+
+    // Serialize outbound GATT operations to avoid write/notify races.
+    @OptIn(ObsoleteCoroutinesApi::class)
+    private val sendActor = ioScope.actor<SendRequest>(capacity = Channel.UNLIMITED) {
+        for (request in channel) {
+            when (request) {
+                is SendRequest.Broadcast -> sendRawInternal(
+                    request.characteristicUuid,
+                    request.data,
+                    request.excludeAddress
+                )
+
+                is SendRequest.Direct -> sendToAddressInternal(
+                    request.address,
+                    request.characteristicUuid,
+                    request.data
+                )
+            }
+        }
+    }
+
     // 구조대가 연결되었을 때 실행할 콜백 (사이렌 울리기용)
     var onRescueConnected: (() -> Unit)? = null
     // UI에 상태 메시지를 전달하기 위한 콜백 (토스트용)
@@ -85,6 +139,10 @@ class BleManager(
 
     fun setLocalPeerId(peerId: ByteArray) {
         localPeerId = peerId.copyOf()
+    }
+
+    fun setRssiThresholdDbm(threshold: Int) {
+        rssiThresholdDbm = threshold
     }
 
     fun isLongRangeSupported(): Boolean {
@@ -180,16 +238,17 @@ class BleManager(
      */
     private fun startAdvertisingInternal(isEmergencyMode: Boolean): Boolean {
         return try {
+            val longRange = isLongRangeSupported()
             val parameters = AdvertisingSetParameters.Builder()
-                .setLegacyMode(true)
+                .setLegacyMode(!longRange)
                 .setConnectable(true) // 구조대가 연결할 수 있어야 함 (필수)
                 .setScannable(true)
-                // [핵심 전략] SOS 모드여도 배터리를 위해 Interval은 HIGH(느림, 약 1초) 사용
-                .setInterval(AdvertisingSetParameters.INTERVAL_HIGH)
+                // 발견률을 올리기 위해 광고 간격은 빠르게 유지
+                .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
                 // [핵심 전략] 신호 세기는 무조건 최대(High)로 하여 도달 거리 확보
                 .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
-                .setPrimaryPhy(BluetoothDevice.PHY_LE_1M)
-                .setSecondaryPhy(BluetoothDevice.PHY_LE_1M)
+                .setPrimaryPhy(if (longRange) BluetoothDevice.PHY_LE_CODED else BluetoothDevice.PHY_LE_1M)
+                .setSecondaryPhy(if (longRange) BluetoothDevice.PHY_LE_CODED else BluetoothDevice.PHY_LE_1M)
                 .build()
 
             val advertiseData = AdvertiseData.Builder()
@@ -238,11 +297,13 @@ class BleManager(
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             val device = result?.device ?: return
             val address = device.address
-            if (result.rssi <= -90) return
+            if (result.rssi < rssiThresholdDbm) return
             val peerId = extractPeerId(result)
             if (peerId != null && isPeerConnected(peerId)) return
             if (isConnectionKnown(address)) return
+            if (!isConnectionAttemptAllowed(address)) return
             if (!markPending(address)) return
+            recordConnectionAttempt(address)
             if (peerId != null) {
                 recordPendingPeerId(address, peerId)
             }
@@ -258,14 +319,37 @@ class BleManager(
 
     private fun startScan(): Boolean {
         return try {
+            val now = System.currentTimeMillis()
+            if (isScanning) return true
+            val elapsed = now - lastScanStartTimeMs
+            if (elapsed in 0 until scanRateLimitMs) {
+                val waitMs = scanRateLimitMs - elapsed
+                scope.launch {
+                    delay(waitMs)
+                    if (!isScanning) startScan()
+                }
+                return false
+            }
             val filters = listOf(
                 ScanFilter.Builder().setServiceUuid(android.os.ParcelUuid(Constants.SERVICE_UUID)).build()
             )
-            val settings = ScanSettings.Builder()
+            val builder = ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .setLegacy(true)
-                .build()
+                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+                .setReportDelay(0)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                builder.setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+                    .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder.setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
+                builder.setLegacy(false)
+            }
+            val settings = builder.build()
             scanner?.startScan(filters, settings, scanCallback)
+            lastScanStartTimeMs = now
+            isScanning = true
             true
         } catch (e: Exception) {
             false
@@ -277,6 +361,7 @@ class BleManager(
             scanner?.stopScan(scanCallback)
         } catch (e: Exception) {
         }
+        isScanning = false
     }
 
     private fun connectToPeer(device: BluetoothDevice) {
@@ -306,9 +391,24 @@ class BleManager(
                 synchronized(clientConnections) {
                     clientConnections[address] = gatt
                 }
+                clearConnectionAttempt(address)
                 attachPendingPeerId(address)
                 clearPending(address)
                 notifyConnectionState()
+                try {
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                } catch (_: Exception) {
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isLongRangeSupported()) {
+                    try {
+                        gatt.setPreferredPhy(
+                            BluetoothDevice.PHY_LE_CODED,
+                            BluetoothDevice.PHY_LE_CODED,
+                            BluetoothGatt.PHY_OPTION_NO_PREFERRED
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
                 gatt.requestMtu(512)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 logCallback("Disconnected.")
@@ -476,8 +576,14 @@ class BleManager(
 
     fun sendProtocolTo(address: String, data: ByteArray): Boolean {
         if (!isConnected) return false
-        if (hostSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)) return true
-        return clientSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)
+        val queued = sendActor.trySend(
+            SendRequest.Direct(address, Constants.PROTOCOL_CHAR_UUID, data)
+        ).isSuccess
+        if (!queued) {
+            if (hostSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)) return true
+            return clientSendTo(address, Constants.PROTOCOL_CHAR_UUID, data)
+        }
+        return true
     }
 
     private fun sendPacket(type: Byte, payload: ByteArray) {
@@ -489,8 +595,22 @@ class BleManager(
 
     private fun sendRaw(characteristicUuid: UUID, data: ByteArray, excludeAddress: String? = null) {
         if (!isConnected) return
+        val queued = sendActor.trySend(
+            SendRequest.Broadcast(characteristicUuid, data, excludeAddress)
+        ).isSuccess
+        if (!queued) {
+            sendRawInternal(characteristicUuid, data, excludeAddress)
+        }
+    }
+
+    private fun sendRawInternal(characteristicUuid: UUID, data: ByteArray, excludeAddress: String?) {
         val serverAddresses = hostBroadcast(characteristicUuid, data, excludeAddress)
         clientBroadcast(characteristicUuid, data, excludeAddress, serverAddresses)
+    }
+
+    private fun sendToAddressInternal(address: String, characteristicUuid: UUID, data: ByteArray) {
+        if (hostSendTo(address, characteristicUuid, data)) return
+        clientSendTo(address, characteristicUuid, data)
     }
 
     private fun hostBroadcast(
@@ -668,21 +788,71 @@ class BleManager(
         }
     }
 
+    private fun isConnectionAttemptAllowed(address: String): Boolean {
+        val now = System.currentTimeMillis()
+        synchronized(connectionAttempts) {
+            val attempt = connectionAttempts[address] ?: return true
+            val elapsed = now - attempt.lastAttemptMs
+            if (elapsed >= connectionAttemptResetMs) {
+                connectionAttempts.remove(address)
+                return true
+            }
+            val required = requiredBackoffMs(attempt.attempts)
+            return elapsed >= required
+        }
+    }
+
+    private fun recordConnectionAttempt(address: String) {
+        val now = System.currentTimeMillis()
+        synchronized(connectionAttempts) {
+            val attempt = connectionAttempts[address]
+            val nextAttempts = if (attempt == null || now - attempt.lastAttemptMs >= connectionAttemptResetMs) {
+                1
+            } else {
+                (attempt.attempts + 1).coerceAtMost(6)
+            }
+            connectionAttempts[address] = ConnectionAttempt(nextAttempts, now)
+        }
+    }
+
+    private fun clearConnectionAttempt(address: String) {
+        synchronized(connectionAttempts) {
+            connectionAttempts.remove(address)
+        }
+    }
+
+    private fun requiredBackoffMs(attempts: Int): Long {
+        if (attempts <= 1) return connectionBackoffBaseMs
+        val factor = 1 shl (attempts - 1).coerceAtMost(5)
+        return (connectionBackoffBaseMs * factor).coerceAtMost(connectionBackoffMaxMs)
+    }
+
     fun getConnectedPeerCount(): Int {
         val addresses = getAllConnectedAddresses()
         val peerIds = mutableSetOf<String>()
-        var unknownCount = 0
         synchronized(addressPeerMap) {
             addresses.forEach { address ->
                 val peerId = addressPeerMap[address]
                 if (peerId != null) {
                     peerIds.add(peerId)
-                } else {
-                    unknownCount += 1
                 }
             }
         }
-        return peerIds.size + unknownCount
+        return peerIds.size
+    }
+
+    fun getConnectedPeerIds(): List<String> {
+        val addresses = getAllConnectedAddresses()
+        val peerIds = mutableSetOf<String>()
+        synchronized(addressPeerMap) {
+            addresses.forEach { address ->
+                val peerId = addressPeerMap[address]
+                if (peerId != null) {
+                    peerIds.add(peerId)
+                }
+            }
+        }
+        return peerIds.toList().sorted()
     }
 
     private fun extractPeerId(result: ScanResult): String? {
@@ -764,6 +934,9 @@ class BleManager(
         synchronized(pendingConnections) {
             pendingConnections.clear()
         }
+        synchronized(connectionAttempts) {
+            connectionAttempts.clear()
+        }
         gattServer?.close()
         gattServer = null
         isConnected = false
@@ -791,6 +964,9 @@ class BleManager(
                     }
                 }
                 clientConnections.clear()
+            }
+            synchronized(connectionAttempts) {
+                connectionAttempts.clear()
             }
             // 코루틴 취소 (메모리 릭 방지)
             job.cancel()
