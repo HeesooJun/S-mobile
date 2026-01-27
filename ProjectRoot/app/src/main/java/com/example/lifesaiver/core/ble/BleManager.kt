@@ -197,6 +197,8 @@ class BleManager(
         // 전략: Interval은 느리게(배터리 절약), TxPower는 강하게(장거리)
         startMaintenanceJobs()
         startAdvertisingInternal(isEmergencyMode = true)
+        // SOS 모드에서도 스캔을 유지해 약한 링크에서의 상호 발견 확률을 올린다.
+        startScan()
     }
 
     // --------------------------------------------------------------------------
