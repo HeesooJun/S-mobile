@@ -15,6 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
@@ -34,6 +35,8 @@ fun AppNavHost(
     isConnected: Boolean,
     connectedCount: Int,
     meshPeerCount: Int,
+    directPeerIds: List<String>,
+    bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
@@ -129,6 +132,8 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
+                directPeerIds = directPeerIds,
+                bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,

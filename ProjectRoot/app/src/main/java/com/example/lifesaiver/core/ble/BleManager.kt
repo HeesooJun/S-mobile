@@ -40,6 +40,16 @@ object Constants {
     const val TYPE_TEXT: Byte = 0x02
 }
 
+data class BleDebugSnapshot(
+    val scanRssiAvg: Int?,
+    val scanRssiCount: Int,
+    val connectionRssiAvg: Int?,
+    val connectionRssiCount: Int,
+    val pendingCount: Int,
+    val attemptTracked: Int,
+    val maxAttempts: Int
+)
+
 @SuppressLint("MissingPermission")
 class BleManager(
     private val context: Context,
@@ -902,6 +912,27 @@ class BleManager(
         if (attempts <= 1) return connectionBackoffBaseMs
         val factor = 1 shl (attempts - 1).coerceAtMost(5)
         return (connectionBackoffBaseMs * factor).coerceAtMost(connectionBackoffMaxMs)
+    }
+
+    fun getDebugSnapshot(): BleDebugSnapshot {
+        val scanValues = synchronized(scanRssi) { scanRssi.values.toList() }
+        val connectionValues = synchronized(connectionRssi) { connectionRssi.values.toList() }
+        val pendingCount = synchronized(pendingConnections) { pendingConnections.size }
+        val attemptTracked = synchronized(connectionAttempts) { connectionAttempts.size }
+        return BleDebugSnapshot(
+            scanRssiAvg = averageRssi(scanValues),
+            scanRssiCount = scanValues.size,
+            connectionRssiAvg = averageRssi(connectionValues),
+            connectionRssiCount = connectionValues.size,
+            pendingCount = pendingCount,
+            attemptTracked = attemptTracked,
+            maxAttempts = maxConnectionAttempts
+        )
+    }
+
+    private fun averageRssi(values: List<Int>): Int? {
+        if (values.isEmpty()) return null
+        return values.sum() / values.size
     }
 
     fun getConnectedPeerCount(): Int {

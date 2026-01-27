@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
 import com.example.lifesaiver.ui.navigation.AppNavHost
@@ -43,6 +44,8 @@ fun LifesaiverApp(
     isConnected: Boolean,
     connectedCount: Int,
     meshPeerCount: Int,
+    directPeerIds: List<String>,
+    bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
@@ -134,6 +137,8 @@ fun LifesaiverApp(
                 isConnected = isConnected,
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
+                directPeerIds = directPeerIds,
+                bleDebugStats = bleDebugStats,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
