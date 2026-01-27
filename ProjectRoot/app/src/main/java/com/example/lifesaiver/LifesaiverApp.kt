@@ -67,7 +67,7 @@ fun LifesaiverApp(
                 val currentTime = System.currentTimeMillis()
                 // 마지막 터치로부터 10초(10000ms) 지났는지 확인
                 if (currentTime - lastInteractionTime >= 10000L) {
-                    isSaverVisible = true // 절전 모드 진입
+                    isSaverVisible = false // 절전 모드 진입
                 }
                 delay(1000L) // 1초마다 검사
             }

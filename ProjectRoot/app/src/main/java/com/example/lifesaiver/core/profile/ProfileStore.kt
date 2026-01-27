@@ -8,6 +8,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 private val Context.profileDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "survivor_profile"
@@ -30,7 +33,7 @@ class ProfileStore(private val context: Context) {
         SurvivorProfile(
             name = prefs[NAME_KEY].orEmpty(),
             gender = prefs[GENDER_KEY].orEmpty(),
-            birthDate = prefs[BIRTH_DATE_KEY].orEmpty(),
+            birthDate = normalizeBirthDate(prefs[BIRTH_DATE_KEY]),
             emergencyContact = prefs[EMERGENCY_CONTACT_KEY].orEmpty(),
             notes = prefs[NOTES_KEY].orEmpty(),
             bloodType = prefs[BLOOD_TYPE_KEY].orEmpty()
@@ -41,7 +44,7 @@ class ProfileStore(private val context: Context) {
         context.profileDataStore.edit { prefs ->
             prefs[NAME_KEY] = profile.name.trim()
             prefs[GENDER_KEY] = profile.gender.trim()
-            prefs[BIRTH_DATE_KEY] = profile.birthDate.trim()
+            prefs[BIRTH_DATE_KEY] = normalizeBirthDate(profile.birthDate)
             prefs[EMERGENCY_CONTACT_KEY] = profile.emergencyContact.trim()
             prefs[NOTES_KEY] = profile.notes.trim()
             prefs[BLOOD_TYPE_KEY] = profile.bloodType.trim()
@@ -55,3 +58,25 @@ private val BIRTH_DATE_KEY = stringPreferencesKey("survivor_birth_date")
 private val EMERGENCY_CONTACT_KEY = stringPreferencesKey("survivor_emergency_contact")
 private val NOTES_KEY = stringPreferencesKey("survivor_notes")
 private val BLOOD_TYPE_KEY = stringPreferencesKey("survivor_blood_type")
+
+private val birthDateFormatters = listOf(
+    DateTimeFormatter.ISO_LOCAL_DATE,
+    DateTimeFormatter.ofPattern("yyyy.MM.dd"),
+    DateTimeFormatter.ofPattern("yyyy/MM/dd"),
+    DateTimeFormatter.ofPattern("yyyyMMdd")
+)
+
+private fun normalizeBirthDate(raw: String?): String {
+    val value = raw?.trim().orEmpty()
+    if (value.isBlank()) return ""
+
+    for (formatter in birthDateFormatters) {
+        try {
+            val parsed = LocalDate.parse(value, formatter)
+            return DateTimeFormatter.ISO_LOCAL_DATE.format(parsed)
+        } catch (_: DateTimeParseException) {
+            // Try the next known format.
+        }
+    }
+    return ""
+}
