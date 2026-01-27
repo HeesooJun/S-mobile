@@ -16,5 +16,9 @@ class MeshPeerRegistry(
         peers.entries.removeIf { it.value < cutoff }
     }
 
+    fun remove(peerIdHex: String) {
+        peers.remove(peerIdHex)
+    }
+
     fun count(): Int = peers.size
 }

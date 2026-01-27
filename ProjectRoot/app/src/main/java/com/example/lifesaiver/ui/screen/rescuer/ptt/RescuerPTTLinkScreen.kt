@@ -70,7 +70,10 @@ fun RescuerPTTLinkScreen(
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     val showActionLabelsAlways = true
-    val displayConnectedCount = meshPeerCount.coerceAtLeast(0)
+    val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
+    val displayConnectedCount = meshDisplayCount
+    val hasMeshPeers = meshDisplayCount > 0
+    val isLinkActive = isConnected || hasMeshPeers
 
     LaunchedEffect(expandedAction) {
         if (
@@ -125,8 +128,12 @@ fun RescuerPTTLinkScreen(
             )
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
-                text = if (isConnected) "생존자 연결됨" else "생존자 연결 대기 중",
-                color = if (isConnected) AppColors.Green else AppColors.Gray500,
+                text = when {
+                    hasMeshPeers -> "메쉬 연결됨"
+                    isConnected -> "생존자 연결됨"
+                    else -> "생존자 연결 대기 중"
+                },
+                color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.SemiBold
             )
