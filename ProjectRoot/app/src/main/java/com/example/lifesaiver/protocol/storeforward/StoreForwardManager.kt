@@ -61,6 +61,7 @@ class StoreForwardManager(
         return when (type) {
             PacketType.ANNOUNCE,
             PacketType.LEAVE,
+            PacketType.FILE_ACK,
             PacketType.FRAGMENT -> true
             else -> false
         }
