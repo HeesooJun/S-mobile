@@ -64,18 +64,16 @@ fun LifesaiverApp(
     // [상태 2] 절전 화면 표시 여부
     var isSaverVisible by remember { mutableStateOf(false) }
     var currentRoute by remember { mutableStateOf(AppRoute.ModeGate.route) }
-    val autoSaverTimeoutMs = if (
-        currentRoute == AppRoute.SurvivorPTT.route ||
-        currentRoute == AppRoute.RescuerPTT.route
-    ) {
-        60_000L
-    } else {
-        10_000L
-    }
+    val autoSaverEnabled =
+        isRescueSignalActive && (
+            currentRoute == AppRoute.SurvivorEmergency.route ||
+                currentRoute == AppRoute.RescuerEmergency.route
+            )
+    val autoSaverTimeoutMs = 60_000L
 
     // [로직 1] SOS가 켜져 있고, 화면이 켜져있다면(절전X) -> 타이머 체크
-    LaunchedEffect(isRescueSignalActive, isSaverVisible, autoSaverTimeoutMs) {
-        if (isRescueSignalActive && !isSaverVisible) {
+    LaunchedEffect(autoSaverEnabled, isSaverVisible, autoSaverTimeoutMs) {
+        if (autoSaverEnabled && !isSaverVisible) {
             while (true) {
                 val currentTime = System.currentTimeMillis()
                 // 마지막 터치로부터 일정 시간이 지났는지 확인
@@ -84,15 +82,15 @@ fun LifesaiverApp(
                 }
                 delay(1000L) // 1초마다 검사
             }
-        } else if (!isRescueSignalActive) {
+        } else if (!autoSaverEnabled) {
             // SOS 끄면 절전 모드도 해제
             isSaverVisible = false
         }
     }
 
     // [로직 2] SOS 시작 시 타이머 초기화
-    LaunchedEffect(isRescueSignalActive) {
-        if (isRescueSignalActive) {
+    LaunchedEffect(autoSaverEnabled) {
+        if (autoSaverEnabled) {
             lastInteractionTime = System.currentTimeMillis()
             isSaverVisible = false
         }
@@ -152,7 +150,7 @@ fun LifesaiverApp(
             )
 
             // 2. 절전 모드 오버레이 (SOS 켜짐 + 10초간 터치 없음)
-            if (isRescueSignalActive && isSaverVisible) {
+            if (autoSaverEnabled && isSaverVisible) {
                 BlackSaverScreen(
                     onUnlock = {
                         // 더블 탭 시: 터치 시간 갱신 + 화면 켜기
