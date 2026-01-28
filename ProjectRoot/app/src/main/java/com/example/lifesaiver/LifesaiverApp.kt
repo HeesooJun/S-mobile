@@ -25,9 +25,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
 import com.example.lifesaiver.ui.navigation.AppNavHost
+import com.example.lifesaiver.ui.navigation.AppRoute
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.rememberAppScale
@@ -40,12 +42,17 @@ fun LifesaiverApp(
     hasPermissions: Boolean,
     batteryLevel: Int,
     isConnected: Boolean,
+    connectedCount: Int,
+    meshPeerCount: Int,
+    directPeerIds: List<String>,
+    bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
     messages: List<ChatMessage>,
     onRequestPermissions: () -> Unit,
     onStartAutoConnect: () -> Unit,
+    onStopAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
@@ -59,27 +66,34 @@ fun LifesaiverApp(
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     // [상태 2] 절전 화면 표시 여부
     var isSaverVisible by remember { mutableStateOf(false) }
+    var currentRoute by remember { mutableStateOf(AppRoute.ModeGate.route) }
+    val autoSaverEnabled =
+        isRescueSignalActive && (
+            currentRoute == AppRoute.SurvivorEmergency.route ||
+                currentRoute == AppRoute.RescuerEmergency.route
+            )
+    val autoSaverTimeoutMs = 60_000L
 
-    // [로직 1] SOS가 켜져 있고, 화면이 켜져있다면(절전X) -> 10초 타이머 체크
-    LaunchedEffect(isRescueSignalActive, isSaverVisible) {
-        if (isRescueSignalActive && !isSaverVisible) {
+    // [로직 1] SOS가 켜져 있고, 화면이 켜져있다면(절전X) -> 타이머 체크
+    LaunchedEffect(autoSaverEnabled, isSaverVisible, autoSaverTimeoutMs) {
+        if (autoSaverEnabled && !isSaverVisible) {
             while (true) {
                 val currentTime = System.currentTimeMillis()
-                // 마지막 터치로부터 10초(10000ms) 지났는지 확인
-                if (currentTime - lastInteractionTime >= 10000L) {
-                    isSaverVisible = false // 절전 모드 진입
+                // 마지막 터치로부터 일정 시간이 지났는지 확인
+                if (currentTime - lastInteractionTime >= autoSaverTimeoutMs) {
+                    isSaverVisible = true // 절전 모드 진입
                 }
                 delay(1000L) // 1초마다 검사
             }
-        } else if (!isRescueSignalActive) {
+        } else if (!autoSaverEnabled) {
             // SOS 끄면 절전 모드도 해제
             isSaverVisible = false
         }
     }
 
     // [로직 2] SOS 시작 시 타이머 초기화
-    LaunchedEffect(isRescueSignalActive) {
-        if (isRescueSignalActive) {
+    LaunchedEffect(autoSaverEnabled) {
+        if (autoSaverEnabled) {
             lastInteractionTime = System.currentTimeMillis()
             isSaverVisible = false
         }
@@ -121,21 +135,27 @@ fun LifesaiverApp(
             AppNavHost(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
+                connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
+                directPeerIds = directPeerIds,
+                bleDebugStats = bleDebugStats,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
                 messages = messages,
                 onStartAutoConnect = onStartAutoConnect,
+                onStopAutoConnect = onStopAutoConnect,
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onSendMessage = onSendMessage,
                 onDisconnect = onDisconnect,
                 onStartRescueSignal = onStartRescueSignal,
-                onStopRescueSignal = onStopRescueSignal
+                onStopRescueSignal = onStopRescueSignal,
+                onRouteChanged = { route -> currentRoute = route }
             )
 
             // 2. 절전 모드 오버레이 (SOS 켜짐 + 10초간 터치 없음)
-            if (isRescueSignalActive && isSaverVisible) {
+            if (autoSaverEnabled && isSaverVisible) {
                 BlackSaverScreen(
                     onUnlock = {
                         // 더블 탭 시: 터치 시간 갱신 + 화면 켜기
