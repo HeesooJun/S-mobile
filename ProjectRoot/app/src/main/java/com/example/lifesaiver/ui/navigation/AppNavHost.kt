@@ -15,6 +15,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.core.profile.ProfileStore
+import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
@@ -22,12 +24,14 @@ import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.ui.screen.mode.ModeGateScreen
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
+import com.example.lifesaiver.ui.screen.rescuer.db.RescuerSurvivorDbScreen
 import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
 import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
+import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
 
 @Composable
 fun AppNavHost(
@@ -53,7 +57,10 @@ fun AppNavHost(
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val profileStore = remember(context) { ProfileStore(context) }
+    val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
 
     LaunchedEffect(backStackEntry) {
@@ -79,8 +86,12 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 uiState = modeGateState,
                 onYes = {
-                    onStartAutoConnect()
-                    navController.navigate(AppRoute.SurvivorStandby.route)
+                    if (profileState.isComplete) {
+                        onStartAutoConnect()
+                        navController.navigate(AppRoute.SurvivorStandby.route)
+                    } else {
+                        navController.navigate(AppRoute.SurvivorProfile.route)
+                    }
                 },
                 onNo = { activity?.finish() },
                 onRescuerMode = {
@@ -94,12 +105,26 @@ fun AppNavHost(
             StandbyStatusScreen(
                 batteryLevel = batteryLevel,
                 onPrev = { navController.popBackStack() },
+                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onSos = {
                     onStartRescueSignal()
                     pendingSosNavigation = true
                     onStartAutoConnect()
                     navController.navigate(AppRoute.SurvivorEmergency.route)
                 }
+            )
+        }
+
+        composable(AppRoute.SurvivorProfile.route) {
+            SurvivorProfileScreen(
+                profileStore = profileStore,
+                onSaved = {
+                    onStartAutoConnect()
+                    navController.navigate(AppRoute.SurvivorStandby.route) {
+                        popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -193,7 +218,15 @@ fun AppNavHost(
                     onDisconnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
-                onChat = { navController.navigate(AppRoute.RescuerChat.route) }
+                onChat = { navController.navigate(AppRoute.RescuerChat.route) },
+                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) }
+            )
+        }
+
+        composable(AppRoute.RescuerSurvivorDb.route) {
+            RescuerSurvivorDbScreen(
+                survivors = emptyList(),
+                onBack = { navController.popBackStack() }
             )
         }
 

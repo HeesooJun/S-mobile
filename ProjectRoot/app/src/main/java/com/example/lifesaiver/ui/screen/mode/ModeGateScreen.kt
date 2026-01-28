@@ -43,21 +43,6 @@ fun ModeGateScreen(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(scaledDp(56, scale))
-                .padding(horizontal = scaledDp(32, scale)),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = uiState.appName,
-                color = AppColors.White,
-                fontSize = scaledSp(18, scale),
-                fontWeight = FontWeight.Bold
-            )
-        }
 
         Column(
             modifier = Modifier
