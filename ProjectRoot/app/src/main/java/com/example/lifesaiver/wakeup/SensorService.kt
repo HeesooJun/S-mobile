@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import com.example.lifesaiver.R
 import kotlin.math.sqrt
 
 class SensorService : Service(), SensorEventListener {
@@ -23,7 +24,7 @@ class SensorService : Service(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
 
-    private val CHANNEL_ID_SERVICE = "WAKEUP_SERVICE_CHANNEL"
+    private val CHANNEL_ID_HIDDEN = "WAKEUP_HIDDEN_CHANNEL_V3"
     private val CHANNEL_ID_ALERT = "WAKEUP_ALERT_CHANNEL"
 
     private val IMPACT_THRESHOLD = 40.0f // 충격 임계값
@@ -106,6 +107,7 @@ class SensorService : Service(), SensorEventListener {
 
         val intent = Intent(this, AlertActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        intent.putExtra("isFallDetected", true)
 
         // 권한이 있으면 화면을 바로 띄워버림 (홈화면 상태 해결)
         if (Settings.canDrawOverlays(this)) {
@@ -134,10 +136,13 @@ class SensorService : Service(), SensorEventListener {
     }
 
     private fun startForegroundServiceNotification() {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID_SERVICE)
-            .setContentTitle("Wakeup 감시 중")
-            .setSmallIcon(android.R.drawable.ic_menu_view)
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID_HIDDEN)
+            .setContentTitle("")
+            .setContentText("")
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setOngoing(true)
+            .setShowWhen(false)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -151,8 +156,14 @@ class SensorService : Service(), SensorEventListener {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
             val serviceChannel = NotificationChannel(
-                CHANNEL_ID_SERVICE, "감시 상태", NotificationManager.IMPORTANCE_MIN
-            )
+                CHANNEL_ID_HIDDEN,
+                "백그라운드 감시 (숨김)",
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                setShowBadge(false)
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_SECRET
+            }
             val alertChannel = NotificationChannel(
                 CHANNEL_ID_ALERT, "재난 경보", NotificationManager.IMPORTANCE_HIGH
             ).apply {

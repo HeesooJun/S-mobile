@@ -1,10 +1,12 @@
 package com.example.lifesaiver.wakeup
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.example.lifesaiver.R
 
@@ -18,6 +20,7 @@ class AlertActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        turnOnScreen()
         // 1. 레이아웃 먼저!
         setContentView(R.layout.activity_alert)
 
@@ -26,6 +29,33 @@ class AlertActivity : AppCompatActivity() {
         stopButton.setOnClickListener {
             finish()
         }
+
+        checkFallDetected(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        turnOnScreen()
+        checkFallDetected(intent)
+    }
+
+    private fun checkFallDetected(intent: Intent?) {
+        val isEmergency = intent?.getBooleanExtra("isFallDetected", false) ?: false
+        if (isEmergency) {
+            showEmergencyDialog()
+        }
+    }
+
+    private fun showEmergencyDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("낙상 감지됨")
+            .setMessage("큰 충격이 감지되었습니다.\n위급 상황입니까?\n(테스트: 확인을 누르면 닫힙니다)")
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .setPositiveButton("확인") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun turnOnScreen() {
