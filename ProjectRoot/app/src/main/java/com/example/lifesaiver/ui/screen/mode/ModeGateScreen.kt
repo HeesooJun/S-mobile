@@ -24,6 +24,8 @@ import com.example.lifesaiver.presentation.screen.ModeGateUiState
 import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.components.PrimaryButton
 import com.example.lifesaiver.ui.components.PrimaryButtonVariant
+import com.example.lifesaiver.ui.components.SecondaryButton
+import com.example.lifesaiver.ui.components.SecondaryButtonVariant
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
@@ -34,9 +36,11 @@ import com.example.lifesaiver.ui.theme.scaledSp
 fun ModeGateScreen(
     batteryLevel: Int,
     uiState: ModeGateUiState,
+    isSensorMonitoring: Boolean,
     onYes: () -> Unit,
     onNo: () -> Unit,
-    onRescuerMode: () -> Unit
+    onRescuerMode: () -> Unit,
+    onToggleSensorMonitor: () -> Unit
 ) {
     val scale = LocalAppScale.current
     ScreenScaffold(
@@ -51,6 +55,18 @@ fun ModeGateScreen(
                 .padding(horizontal = scaledDp(32, scale)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = scaledDp(16, scale)),
+                horizontalArrangement = Arrangement.End
+            ) {
+                SecondaryButton(
+                    label = if (isSensorMonitoring) "센서 작동 중지" else "센서 작동 시작",
+                    variant = if (isSensorMonitoring) SecondaryButtonVariant.Red else SecondaryButtonVariant.Gray,
+                    onClick = onToggleSensorMonitor
+                )
+            }
             Spacer(modifier = Modifier.weight(1f))
 
             val circleSize = scaledDp(130, scale)
