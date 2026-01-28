@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.screen.survivor.chat
+﻿package com.example.lifesaiver.ui.screen.survivor.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,17 +13,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +44,7 @@ import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
 @Composable
@@ -52,33 +59,47 @@ fun RescueChatScreen(
 ) {
     val scale = LocalAppScale.current
     val participantCount = meshPeerCount.coerceAtLeast(0)
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val isNearBottom by remember {
+        derivedStateOf {
+            if (messages.isEmpty()) {
+                true
+            } else {
+                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                val lastIndex = messages.lastIndex
+                lastVisibleIndex >= lastIndex - 2
+            }
+        }
+    }
+    val hasUserScrolledUp by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+        }
+    }
+    val showScrollToBottom by remember {
+        derivedStateOf {
+            messages.isNotEmpty() && hasUserScrolledUp && !isNearBottom
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty() && (isNearBottom || !listState.canScrollForward)) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(scaledDp(56, scale))
-                .padding(horizontal = scaledDp(32, scale)),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "인원 ${participantCount}명",
-                color = AppColors.Green,
-                fontSize = scaledSp(12, scale)
-            )
-        }
-
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale))
         ) {
-            // 왼쪽: 이전 버튼
+            // ??긱걹: ??곸읈 甕곌쑵??
             SecondaryButton(
                 label = "이전",
                 variant = SecondaryButtonVariant.Gray,
@@ -86,7 +107,7 @@ fun RescueChatScreen(
                 modifier = Modifier.align(Alignment.CenterStart)
             )
 
-            // 중앙: 채팅방 제목
+            // 餓λ쵐釉? 筌?쑵?욤쳸???뺛걠
             Text(
                 text = roomTitle,
                 color = AppColors.White,
@@ -104,15 +125,52 @@ fun RescueChatScreen(
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = scaledDp(24, scale)),
-            verticalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
         ) {
-            items(messages) { message ->
-                MessageBubble(message = message)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scaledDp(24, scale)),
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
+            ) {
+                items(messages) { message ->
+                    MessageBubble(message = message)
+                }
+            }
+            if (showScrollToBottom) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = scaledDp(24, scale),
+                            bottom = scaledDp(12, scale)
+                        )
+                        .background(
+                            color = AppColors.Gray800,
+                            shape = RoundedCornerShape(scaledDp(20, scale))
+                        )
+                        .clickable {
+                            coroutineScope.launch {
+                                if (messages.isNotEmpty()) {
+                                    listState.animateScrollToItem(messages.lastIndex)
+                                }
+                            }
+                        }
+                        .padding(
+                            horizontal = scaledDp(14, scale),
+                            vertical = scaledDp(8, scale)
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "Scroll to bottom",
+                        tint = AppColors.White
+                    )
+                }
             }
         }
 
@@ -136,7 +194,7 @@ fun RescueChatScreen(
                     value = inputValue,
                     onValueChange = onInputChange,
                     placeholder = {
-                        Text("메시지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+                        Text("메세지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
                     },
                     modifier = Modifier.weight(1f),
                     textStyle = androidx.compose.ui.text.TextStyle(
@@ -293,7 +351,7 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (isPlaying) "⏸" else "▶",
+                        text = if (isPlaying) "Pause" else "Play",
                         color = textColor,
                         fontSize = scaledSp(14, scale),
                         fontWeight = FontWeight.Bold
@@ -324,7 +382,7 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
             }
             if (!isReady) {
                 Text(
-                    text = "음성 파일을 불러올 수 없습니다.",
+                    text = "???쉐 ???뵬???븍뜄???????곷뮸??덈뼄.",
                     color = AppColors.Red,
                     fontSize = scaledSp(10, scale)
                 )
