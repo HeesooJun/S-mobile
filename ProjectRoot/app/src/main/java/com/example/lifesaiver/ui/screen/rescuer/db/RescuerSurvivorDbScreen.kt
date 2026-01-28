@@ -80,37 +80,17 @@ fun RescuerSurvivorDbScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            deepBlack,
-                            charcoal.copy(alpha = 0.25f),
-                            deepBlack
-                        )
-                    )
-                )
-                .drawBehind {
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                neonGreen.copy(alpha = 0.15f),
-                                deepBlack.copy(alpha = 0.90f)
-                            ),
-                            center = Offset(size.width / 2f, 0f),
-                            radius = size.maxDimension * 0.85f
-                        )
-                    )
-                }
+                .background(deepBlack)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = scaledDp(18, scale))
-                    .padding(top = scaledDp(14, scale))
+                    .padding(top = scaledDp(14, scale)),
+                    horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -120,12 +100,13 @@ fun RescuerSurvivorDbScreen(
                         )
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f))
+                    {
                         Text(
                             text = "생존자 DB",
                             color = Color.White,
                             fontSize = scaledSp(20, scale),
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.ExtraBold,
                         )
                         Text(
                             text = "생존자 정보 ${survivors.size}건",

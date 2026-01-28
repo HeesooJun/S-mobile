@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.screen.rescuer.chat
+﻿package com.example.lifesaiver.ui.screen.rescuer.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -55,7 +54,7 @@ fun RescuerChatScreen(
                 .fillMaxWidth()
                 .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale))
         ) {
-            // 왼쪽: 이전 버튼
+            // 좌측: 이전 버튼
             SecondaryButton(
                 label = "이전",
                 variant = SecondaryButtonVariant.Gray,
@@ -81,16 +80,17 @@ fun RescuerChatScreen(
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-        LazyColumn(
+        AutoScrollChatList(
+            messages = messages,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .weight(1f),
+            listModifier = Modifier
+                .fillMaxWidth()
                 .padding(horizontal = scaledDp(24, scale)),
-            verticalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
-        ) {
-            items(messages) { message ->
-                MessageBubble(message = message)
-            }
+            verticalSpacing = scaledDp(10, scale)
+        ) { message ->
+            MessageBubble(message = message)
         }
 
         Column(
@@ -113,7 +113,7 @@ fun RescuerChatScreen(
                     value = inputValue,
                     onValueChange = setInputValue,
                     placeholder = {
-                        Text("메시지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+                        Text("메세지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
                     },
                     modifier = Modifier.weight(1f),
                     textStyle = TextStyle(
