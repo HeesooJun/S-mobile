@@ -18,9 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
@@ -78,25 +76,16 @@ fun SurvivorProfileScreen(
     var name by rememberSaveable { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("") }
     var birthDate by rememberSaveable { mutableStateOf("") }
-    var emergencyContact by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
-    var bloodType by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(profileState) {
         name = profileState.name
         gender = profileState.gender
         birthDate = profileState.birthDate
-        emergencyContact = profileState.emergencyContact
-        notes = profileState.notes
-        bloodType = profileState.bloodType
 
         if (!profileState.isComplete) {
             name = name.ifBlank { "홍길동" }
             gender = gender.ifBlank { "남성" }
             birthDate = birthDate.ifBlank { "1990-01-01" }
-            emergencyContact = emergencyContact.ifBlank { "010-1234-5678" }
-            notes = notes.ifBlank { "특이사항 없음" }
-            bloodType = bloodType.ifBlank { "O+" }
         }
     }
 
@@ -173,24 +162,19 @@ fun SurvivorProfileScreen(
             Spacer(modifier = Modifier.width(scaledDp(56, scale)))
         }
 
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = scaledDp(24, scale)),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = scaledDp(35, scale)),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = formModifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(scaledDp(16, scale))
-            ) {
-                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-                Text(
-                    text = "필수",
-                    color = AppColors.Red,
-                    fontSize = scaledSp(12, scale),
-                    fontWeight = FontWeight.SemiBold
-                )
+            Spacer(modifier = Modifier.height(scaledDp(25, scale)))
+            Spacer(modifier = Modifier.weight(1f))
+            Column(modifier = formModifier)
+            {
+                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
                 ProfileInputField(
                     label = "이름",
                     value = name,
@@ -198,6 +182,7 @@ fun SurvivorProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     onValueChange = { name = it }
                 )
+                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
                 ProfileExposedSelectField(
                     label = "성별",
                     value = gender,
@@ -206,6 +191,7 @@ fun SurvivorProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     onSelected = { gender = it }
                 )
+                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
                 ProfileDateField(
                     label = "생년월일",
                     value = birthDate,
@@ -217,38 +203,9 @@ fun SurvivorProfileScreen(
                         showDatePicker = true
                     }
                 )
-
-                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-                Text(
-                    text = "권장 / 선택",
-                    color = AppColors.Gray400,
-                    fontSize = scaledSp(12, scale),
-                    fontWeight = FontWeight.Medium
-                )
-                ProfileInputField(
-                    label = "긴급연락처(권장)",
-                    value = emergencyContact,
-                    placeholder = "연락처 입력",
-                    modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { emergencyContact = it }
-                )
-                ProfileExposedSelectField(
-                    label = "혈액형(선택)",
-                    value = bloodType,
-                    placeholder = "선택",
-                    options = listOf("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"),
-                    modifier = Modifier.fillMaxWidth(),
-                    onSelected = { bloodType = it }
-                )
-                ProfileInputField(
-                    label = "특이사항 (선택)",
-                    value = notes,
-                    placeholder = "특이사항 입력",
-                    modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { notes = it }
-                )
-                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
             }
+            Spacer(modifier = Modifier.height(scaledDp(28, scale)))
+            Spacer(modifier = Modifier.weight(1f))
         }
 
         Column(
@@ -271,10 +228,7 @@ fun SurvivorProfileScreen(
                                 SurvivorProfile(
                                     name = name,
                                     gender = gender,
-                                    birthDate = birthDate,
-                                    emergencyContact = emergencyContact,
-                                    notes = notes,
-                                    bloodType = bloodType
+                                    birthDate = birthDate
                                 )
                             )
                             Toast.makeText(context, "저장 완료", Toast.LENGTH_SHORT).show()
