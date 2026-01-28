@@ -1,8 +1,9 @@
-package com.example.wakeup
+package com.example.lifesaiver.wakeup
 
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -14,6 +15,10 @@ import androidx.core.app.NotificationCompat
 import kotlin.math.sqrt
 
 class SensorService : Service(), SensorEventListener {
+
+    companion object {
+        const val ACTION_SENSOR_TRIGGERED = "com.example.wakeup.ACTION_SENSOR_TRIGGERED"
+    }
 
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
@@ -96,6 +101,9 @@ class SensorService : Service(), SensorEventListener {
     }
 
     private fun triggerAlert() {
+        // 앱이 포그라운드일 때만 Standby 화면 이동 처리
+        sendBroadcast(Intent(ACTION_SENSOR_TRIGGERED).apply { setPackage(packageName) })
+
         val intent = Intent(this, AlertActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 
@@ -131,7 +139,11 @@ class SensorService : Service(), SensorEventListener {
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
-        startForeground(1, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(1, notification)
+        }
     }
 
     private fun createNotificationChannels() {

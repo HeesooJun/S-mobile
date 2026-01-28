@@ -1,7 +1,13 @@
 package com.example.lifesaiver.ui.navigation
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,6 +38,7 @@ import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
+import com.example.lifesaiver.wakeup.SensorService
 
 @Composable
 fun AppNavHost(
@@ -59,9 +66,44 @@ fun AppNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val context = LocalContext.current
     val activity = context as? Activity
+    val appContext = context.applicationContext
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
+
+    fun startSensorService() {
+        val intent = Intent(appContext, SensorService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            appContext.startForegroundService(intent)
+        } else {
+            appContext.startService(intent)
+        }
+    }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action != SensorService.ACTION_SENSOR_TRIGGERED) return
+                val currentRoute = navController.currentBackStackEntry?.destination?.route
+                if (currentRoute != AppRoute.SurvivorStandby.route) {
+                    navController.navigate(AppRoute.SurvivorStandby.route) {
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter(SensorService.ACTION_SENSOR_TRIGGERED)
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+        onDispose {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (_: Exception) { }
+        }
+    }
 
     LaunchedEffect(backStackEntry) {
         val route = backStackEntry?.destination?.route ?: AppRoute.ModeGate.route
@@ -97,6 +139,10 @@ fun AppNavHost(
                 onRescuerMode = {
                     onStartAutoConnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
+                },
+                onStartSensorMonitor = {
+                    startSensorService()
+                    activity?.moveTaskToBack(true)
                 }
             )
         }

@@ -1,4 +1,4 @@
-package com.example.wakeup
+package com.example.lifesaiver.wakeup
 
 import android.content.Context
 import android.os.Build
@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
+import com.example.lifesaiver.R
 
 class AlertActivity : AppCompatActivity() {
 
