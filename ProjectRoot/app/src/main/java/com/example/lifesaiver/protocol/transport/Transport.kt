@@ -2,6 +2,8 @@ package com.example.lifesaiver.protocol.transport
 
 interface Transport {
     fun send(data: ByteArray)
-    fun broadcast(data: ByteArray)
-    fun setOnReceive(listener: (ByteArray) -> Unit)
+    fun broadcast(data: ByteArray, excludeAddress: String? = null)
+    fun setOnReceive(listener: (ByteArray, String?) -> Unit)
+    fun sendToAddress(address: String, data: ByteArray): Boolean = false
+    fun getNetworkSize(): Int = 1
 }

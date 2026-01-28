@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * BitChat-compatible file transfer TLV payload (v2)
+ * File transfer TLV payload (v2)
  * TLVs:
  * 0x01 FILE_NAME  -> type(1) + len(2) + value
  * 0x02 FILE_SIZE  -> type(1) + len(2=4) + value(4)
