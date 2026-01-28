@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.media.MediaPlayer
+import androidx.compose.runtime.LaunchedEffect
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
 import com.example.lifesaiver.ui.components.ScreenScaffold
