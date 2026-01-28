@@ -1,4 +1,4 @@
-package com.example.lifesaiver.ui.screen.survivor.chat
+﻿package com.example.lifesaiver.ui.screen.survivor.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,15 +12,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,7 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.media.MediaPlayer
+import androidx.compose.runtime.LaunchedEffect
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -57,28 +56,13 @@ fun RescueChatScreen(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(scaledDp(56, scale))
-                .padding(horizontal = scaledDp(32, scale)),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "인원 ${participantCount}명",
-                color = AppColors.Green,
-                fontSize = scaledSp(12, scale)
-            )
-        }
-
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale))
         ) {
-            // 왼쪽: 이전 버튼
+            // 좌측: 이전 버튼
             SecondaryButton(
                 label = "이전",
                 variant = SecondaryButtonVariant.Gray,
@@ -104,16 +88,17 @@ fun RescueChatScreen(
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-        LazyColumn(
+        AutoScrollChatList(
+            messages = messages,
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .weight(1f),
+            listModifier = Modifier
+                .fillMaxWidth()
                 .padding(horizontal = scaledDp(24, scale)),
-            verticalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
-        ) {
-            items(messages) { message ->
-                MessageBubble(message = message)
-            }
+            verticalSpacing = scaledDp(10, scale)
+        ) { message ->
+            MessageBubble(message = message)
         }
 
         Column(
@@ -136,7 +121,7 @@ fun RescueChatScreen(
                     value = inputValue,
                     onValueChange = onInputChange,
                     placeholder = {
-                        Text("메시지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+                        Text("메세지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
                     },
                     modifier = Modifier.weight(1f),
                     textStyle = androidx.compose.ui.text.TextStyle(
@@ -293,7 +278,7 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (isPlaying) "⏸" else "▶",
+                        text = if (isPlaying) "Pause" else "Play",
                         color = textColor,
                         fontSize = scaledSp(14, scale),
                         fontWeight = FontWeight.Bold
@@ -324,7 +309,7 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
             }
             if (!isReady) {
                 Text(
-                    text = "음성 파일을 불러올 수 없습니다.",
+                    text = "음성 파일을 불러오지 못했습니다.",
                     color = AppColors.Red,
                     fontSize = scaledSp(10, scale)
                 )
