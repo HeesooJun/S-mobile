@@ -28,8 +28,9 @@ class PacketPipelineTest {
             val encoded = codec.encode(fragment)
             val decoded = codec.decode(encoded)
             val result = decoded?.let { pipeline.handleInbound(it) }
-            if (result != null) {
-                delivered = result
+            val packetForApp = result?.packetForApp
+            if (packetForApp != null) {
+                delivered = packetForApp
             }
         }
 

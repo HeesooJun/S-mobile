@@ -1,4 +1,4 @@
-﻿package com.example.lifesaiver.ui.navigation
+package com.example.lifesaiver.ui.navigation
 
 import android.app.Activity
 import androidx.compose.runtime.Composable
@@ -12,47 +12,54 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
-import com.example.lifesaiver.core.profile.ProfileStore
-import com.example.lifesaiver.core.profile.SurvivorProfile
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.ui.screen.mode.ModeGateScreen
+import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
-import com.example.lifesaiver.ui.screen.rescuer.db.RescuerSurvivorDbScreen
 import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
+import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
-import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
-import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
-import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 
 @Composable
 fun AppNavHost(
     batteryLevel: Int,
     isConnected: Boolean,
+    connectedCount: Int,
+    meshPeerCount: Int,
+    directPeerIds: List<String>,
+    bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
     messages: List<ChatMessage>,
     onStartAutoConnect: () -> Unit,
+    onStopAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
-    onStopRescueSignal: () -> Unit
+    onStopRescueSignal: () -> Unit,
+    onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
-    val context = LocalContext.current
-    val activity = context as? Activity
-    val profileStore = remember(context) { ProfileStore(context) }
-    val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val activity = LocalContext.current as? Activity
     var pendingSosNavigation by remember { mutableStateOf(false) }
+
+    LaunchedEffect(backStackEntry) {
+        val route = backStackEntry?.destination?.route ?: AppRoute.ModeGate.route
+        onRouteChanged(route)
+    }
 
     LaunchedEffect(isConnected, pendingSosNavigation) {
         if (pendingSosNavigation && isConnected) {
@@ -72,12 +79,8 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 uiState = modeGateState,
                 onYes = {
-                    if (profileState.isComplete) {
-                        onStartAutoConnect()
-                        navController.navigate(AppRoute.SurvivorStandby.route)
-                    } else {
-                        navController.navigate(AppRoute.SurvivorProfile.route)
-                    }
+                    onStartAutoConnect()
+                    navController.navigate(AppRoute.SurvivorStandby.route)
                 },
                 onNo = { activity?.finish() },
                 onRescuerMode = {
@@ -87,24 +90,10 @@ fun AppNavHost(
             )
         }
 
-        composable(AppRoute.SurvivorProfile.route) {
-            SurvivorProfileScreen(
-                profileStore = profileStore,
-                onSaved = {
-                    onStartAutoConnect()
-                    navController.navigate(AppRoute.SurvivorStandby.route) {
-                        popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
-                    }
-                },
-                onBack = { navController.popBackStack() }
-            )
-        }
-
         composable(AppRoute.SurvivorStandby.route) {
             StandbyStatusScreen(
                 batteryLevel = batteryLevel,
                 onPrev = { navController.popBackStack() },
-                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onSos = {
                     onStartRescueSignal()
                     pendingSosNavigation = true
@@ -117,23 +106,34 @@ fun AppNavHost(
         composable(AppRoute.SurvivorEmergency.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
-            LaunchedEffect(isConnected) {
-                if (!isConnected) {
-                    onStartAutoConnect()
-                }
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
             }
             SurvivorEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
-                onPrev = { navController.popBackStack() },
-                onNext = { navController.navigate(AppRoute.SurvivorPTT.route) }
+                onPrev = {
+                    pendingSosNavigation = false
+                    onStopAutoConnect()
+                    navController.popBackStack()
+                },
+                onNext = {
+                    pendingSosNavigation = false
+                    navController.navigate(AppRoute.SurvivorPTT.route)
+                }
             )
         }
 
         composable(AppRoute.SurvivorPTT.route) {
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
+                directPeerIds = directPeerIds,
+                bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -153,7 +153,8 @@ fun AppNavHost(
             val chatViewModel: RescueChatViewModel = viewModel()
             val chatState by chatViewModel.uiState.collectAsState()
             RescueChatScreen(
-                roomTitle = "Survivor Chat",
+                roomTitle = "전체 채팅",
+                meshPeerCount = meshPeerCount,
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 inputValue = chatState.inputValue,
@@ -168,7 +169,7 @@ fun AppNavHost(
             RescuerStandbyScreen(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
                 onPrev = { navController.navigate(AppRoute.ModeGate.route) },
                 onGoPTT = { navController.navigate(AppRoute.RescuerPTT.route) },
                 onSos = { navController.navigate(AppRoute.RescuerEmergency.route) }
@@ -176,9 +177,13 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerPTT.route) {
+            LaunchedEffect(Unit) {
+                onStartAutoConnect()
+            }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
-                connectedCount = if (isConnected) 2 else 0,
+                connectedCount = connectedCount,
+                meshPeerCount = meshPeerCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
                 onMicPress = onMicPress,
@@ -188,21 +193,14 @@ fun AppNavHost(
                     onDisconnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
-                onChat = { navController.navigate(AppRoute.RescuerChat.route) },
-                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) }
-            )
-        }
-
-        composable(AppRoute.RescuerSurvivorDb.route) {
-            RescuerSurvivorDbScreen(
-                survivors = emptyList(),
-                onBack = { navController.popBackStack() }
+                onChat = { navController.navigate(AppRoute.RescuerChat.route) }
             )
         }
 
         composable(AppRoute.RescuerChat.route) {
             RescuerChatScreen(
-                roomTitle = "Rescuer Chat",
+                roomTitle = "전체 채팅",
+                meshPeerCount = meshPeerCount,
                 messages = messages,
                 onPrev = { navController.popBackStack() },
                 onSend = onSendMessage

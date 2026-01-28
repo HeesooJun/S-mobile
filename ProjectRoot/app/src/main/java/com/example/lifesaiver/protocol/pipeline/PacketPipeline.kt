@@ -16,16 +16,26 @@ class PacketPipeline(
         return fragmentManager.createFragments(packet)
     }
 
-    fun handleInbound(packet: Packet): Packet? {
-        if (!deduplicator.shouldProcess(packet)) return null
-
-        if (packet.header.type == PacketType.FRAGMENT) {
-            val reassembled = fragmentManager.handleFragment(packet) ?: return null
-            val decoded = decoder.decode(reassembled) ?: return null
-            val suppressed = decoded.copy(header = decoded.header.copy(ttl = ProtocolConstants.SYNC_TTL_HOPS))
-            return if (deduplicator.shouldProcess(suppressed)) suppressed else null
+    fun handleInbound(packet: Packet): InboundResult {
+        if (!deduplicator.shouldProcess(packet)) {
+            return InboundResult(packetForApp = null, packetForRelay = null)
         }
 
-        return packet
+        if (packet.header.type == PacketType.FRAGMENT) {
+            val reassembled = fragmentManager.handleFragment(packet)
+            if (reassembled == null) {
+                return InboundResult(packetForApp = null, packetForRelay = packet)
+            }
+
+            val decoded = decoder.decode(reassembled)
+                ?: return InboundResult(packetForApp = null, packetForRelay = packet)
+            val suppressed = decoded.copy(
+                header = decoded.header.copy(ttl = ProtocolConstants.SYNC_TTL_HOPS)
+            )
+            val forApp = if (deduplicator.shouldProcess(suppressed)) suppressed else null
+            return InboundResult(packetForApp = forApp, packetForRelay = packet)
+        }
+
+        return InboundResult(packetForApp = packet, packetForRelay = packet)
     }
 }
