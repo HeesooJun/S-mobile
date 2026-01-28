@@ -1,6 +1,7 @@
 ﻿package com.example.lifesaiver.ui.screen.survivor.standby
 
-import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
+import com.example.lifesaiver.ai.stt.EmergencyIntentClassifierKorean
+import com.example.lifesaiver.ai.stt.VoiceTriggerDetector
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -48,17 +50,78 @@ import kotlinx.coroutines.delay
 @Composable
 fun StandbyStatusScreen(
     batteryLevel: Int,
+    sttResetToken: Long,
+    sttEnabled: Boolean,
     onPrev: () -> Unit,
     onProfile: () -> Unit,
     onSos: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
+    val classifier = remember(context) { EmergencyIntentClassifierKorean(context) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var hasTriggered by remember { mutableStateOf(false) }
+    var sttStatus by remember { mutableStateOf("🎙️ 대기 중") }
+    var lastHeardText by remember { mutableStateOf("") }
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
+        LaunchedEffect(sttResetToken, sttEnabled) {
+            hasTriggered = false
+            sttStatus = "🎙️ 대기 중"
+            lastHeardText = ""
+            if (sttEnabled) {
+                delay(30_000)
+                if (!hasTriggered) {
+                    hasTriggered = true
+                    sttStatus = "⏱️ 시간 초과로 자동 송출"
+                    onSos()
+                }
+            }
+        }
+        DisposableEffect(context, sttResetToken, sttEnabled) {
+            if (!sttEnabled) {
+                onDispose {}
+                return@DisposableEffect onDispose {}
+            }
+            var detector: VoiceTriggerDetector? = null
+            detector = VoiceTriggerDetector(
+                context = context,
+                onStateChange = { state ->
+                    sttStatus = state
+                },
+                onDetected = { text ->
+                    if (hasTriggered) return@VoiceTriggerDetector
+                    lastHeardText = text
+                    classifier.checkIntent(text) { isEmergency, _, _ ->
+                        if (!isEmergency) {
+                            detector?.startListening()
+                            return@checkIntent
+                        }
+                        if (!hasTriggered) {
+                            mainHandler.post {
+                                if (!hasTriggered) {
+                                    hasTriggered = true
+                                    detector?.stopListening()
+                                    onSos()
+                                }
+                            }
+                        }
+                    }
+                },
+                onErrorOccurred = {
+                    if (!hasTriggered) {
+                        detector?.startListening()
+                    }
+                }
+            )
+            detector.startListening()
+            onDispose {
+                detector.stopListening()
+            }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -73,6 +136,14 @@ fun StandbyStatusScreen(
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.Medium
             )
+            if (sttEnabled) {
+                Text(
+                    text = sttStatus,
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
 
         Column(
@@ -118,13 +189,32 @@ fun StandbyStatusScreen(
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "구조자가 신호를 받으면 음성/채팅으로 바로 연결됩니다.",
-                        color = AppColors.Gray500,
-                        fontSize = scaledSp(11, scale),
-                        textAlign = TextAlign.Center
+                text = "구조자가 신호를 받으면 음성/채팅으로 바로 연결됩니다.",
+                color = AppColors.Gray500,
+                fontSize = scaledSp(11, scale),
+                textAlign = TextAlign.Center
+            )
+            if (sttEnabled) {
+                Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(color = AppColors.White, shape = RoundedCornerShape(scaledDp(10, scale)))
+                        .padding(
+                            horizontal = scaledDp(14, scale),
+                            vertical = scaledDp(10, scale)
+                        )
+                ) {
+                    Text(
+                        text = if (lastHeardText.isBlank()) "최근 인식된 문장이 여기 표시됩니다." else lastHeardText,
+                        color = AppColors.Gray900,
+                        fontSize = scaledSp(12, scale),
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
+        }
+    }
             Spacer(modifier = Modifier.height(scaledDp(48, scale)))
             Spacer(modifier = Modifier.height(scaledDp(24, scale)))
 
