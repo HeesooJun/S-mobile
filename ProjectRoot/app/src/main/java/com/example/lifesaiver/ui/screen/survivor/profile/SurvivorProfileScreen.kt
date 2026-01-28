@@ -89,6 +89,15 @@ fun SurvivorProfileScreen(
         emergencyContact = profileState.emergencyContact
         notes = profileState.notes
         bloodType = profileState.bloodType
+
+        if (!profileState.isComplete) {
+            name = name.ifBlank { "홍길동" }
+            gender = gender.ifBlank { "남성" }
+            birthDate = birthDate.ifBlank { "1990-01-01" }
+            emergencyContact = emergencyContact.ifBlank { "010-1234-5678" }
+            notes = notes.ifBlank { "특이사항 없음" }
+            bloodType = bloodType.ifBlank { "O+" }
+        }
     }
 
     val birthDateValid = isBirthDateValid(birthDate)
