@@ -36,10 +36,11 @@ import com.example.lifesaiver.ui.theme.scaledSp
 fun ModeGateScreen(
     batteryLevel: Int,
     uiState: ModeGateUiState,
+    isSensorMonitoring: Boolean,
     onYes: () -> Unit,
     onNo: () -> Unit,
     onRescuerMode: () -> Unit,
-    onStartSensorMonitor: () -> Unit
+    onToggleSensorMonitor: () -> Unit
 ) {
     val scale = LocalAppScale.current
     ScreenScaffold(
@@ -61,9 +62,9 @@ fun ModeGateScreen(
                 horizontalArrangement = Arrangement.End
             ) {
                 SecondaryButton(
-                    label = "센서 작동 시작",
-                    variant = SecondaryButtonVariant.Gray,
-                    onClick = onStartSensorMonitor
+                    label = if (isSensorMonitoring) "센서 작동 중지" else "센서 작동 시작",
+                    variant = if (isSensorMonitoring) SecondaryButtonVariant.Red else SecondaryButtonVariant.Gray,
+                    onClick = onToggleSensorMonitor
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
