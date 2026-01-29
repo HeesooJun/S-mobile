@@ -22,15 +22,19 @@ import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.media.FileTransferStorage
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.service.RescueService
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
+import com.example.lifesaiver.protocol.mesh.GossipTlv
 import com.example.lifesaiver.protocol.mesh.MeshPeerRegistry
 import com.example.lifesaiver.protocol.model.FileTransferPayload
+import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
+import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -40,6 +44,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -122,6 +127,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var audioEngine: AudioEngine? = null
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
+    private lateinit var signatureManager: SignatureManager
 
     // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
@@ -138,6 +144,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             newId
         }
     }
+    private val profileStore = ProfileStore(app)
+    @Volatile private var cachedNickname: String = ""
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -157,6 +165,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         initBle()
         initBatteryMonitor()
         refreshPermissions()
+        observeProfileName()
     }
 
     // ------------------------------------------------------------------------
@@ -383,7 +392,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
-        protocolCore = ProtocolCore(codec, codec, myPeerId = senderId)
+        signatureManager = SignatureManager(app, codec)
+        protocolCore = ProtocolCore(
+            codec,
+            codec,
+            myPeerId = senderId,
+            signatureManager = signatureManager
+        )
         protocolCore.setOnPacketReceived { packet ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
@@ -488,19 +503,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun sendAnnounce() {
+        val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
+        val noisePublicKey = signatureManager.getNoisePublicKeyBytes()
+        val signingPublicKey = signatureManager.getPublicKeyBytes()
+        val announcement = IdentityAnnouncementPayload(
+            nickname = nickname,
+            noisePublicKey = noisePublicKey,
+            signingPublicKey = signingPublicKey
+        )
+        val basePayload = announcement.encode() ?: return
+        val directPeers = bleManager.getConnectedPeerIds()
+        val payload = if (directPeers.isNotEmpty()) {
+            basePayload + GossipTlv.encodeNeighbors(directPeers)
+        } else {
+            basePayload
+        }
         val packet = Packet(
             header = PacketHeader(
                 version = 2,
                 type = PacketType.ANNOUNCE,
                 ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
                 flags = 0,
-                length = 0,
+                length = payload.size,
                 timestamp = System.currentTimeMillis(),
                 senderId = senderId
             ),
-            payload = ByteArray(0)
+            payload = payload
         )
         protocolCore.broadcast(packet)
+    }
+
+    private fun observeProfileName() {
+        viewModelScope.launch {
+            profileStore.profileFlow.collect { profile ->
+                cachedNickname = profile.name.trim()
+            }
+        }
     }
 
     private fun buildMessagePacket(text: String): Packet {
