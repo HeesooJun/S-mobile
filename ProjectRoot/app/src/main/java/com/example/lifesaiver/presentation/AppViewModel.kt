@@ -28,7 +28,7 @@ import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
 import com.example.lifesaiver.protocol.mesh.GossipTlv
-import com.example.lifesaiver.protocol.mesh.MeshPeerRegistry
+import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
 import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
 import com.example.lifesaiver.protocol.model.Packet
@@ -152,7 +152,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
-    private val meshRegistry = MeshPeerRegistry()
+    private val meshGraphRegistry = MeshGraphRegistry()
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
@@ -371,10 +371,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             connectionCallback = { connected, count ->
                 val directPeerIds = bleManager.getConnectedPeerIds()
                 _uiState.update {
+                    val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
                     it.copy(
                         isConnected = connected,
                         connectedCount = count,
-                        meshPeerCount = meshRegistry.count() + 1,
+                        meshPeerCount = meshCount,
                         directPeerIds = directPeerIds
                     )
                 }
@@ -408,12 +409,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
                     val peerHex = bytesToHex(packet.header.senderId)
-                    meshRegistry.markSeen(peerHex)
+                    val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    val neighbors = GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload)
+                    meshGraphRegistry.updateFromAnnouncement(
+                        originPeerId = peerHex,
+                        originNickname = announcement.nickname,
+                        neighborsOrNull = neighbors,
+                        timestamp = packet.header.timestamp
+                    )
                     updateMeshCount()
                 }
                 PacketType.LEAVE -> {
                     val peerHex = bytesToHex(packet.header.senderId)
-                    meshRegistry.remove(peerHex)
+                    meshGraphRegistry.removePeer(peerHex)
                     updateMeshCount()
                 }
                 PacketType.MESSAGE -> {
@@ -468,7 +476,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateMeshCount() {
-        val meshCount = meshRegistry.count() + 1
+        val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
         _uiState.update { it.copy(meshPeerCount = meshCount) }
     }
 
@@ -487,7 +495,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (meshCleanupJob?.isActive == true) return
         meshCleanupJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
-                meshRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
+                meshGraphRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
                 updateMeshCount()
                 delay(ProtocolConstants.Mesh.PEER_CLEANUP_INTERVAL_MS)
             }
@@ -521,6 +529,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             basePayload
         }
+        val now = System.currentTimeMillis()
+        meshGraphRegistry.updateFromAnnouncement(
+            originPeerId = bytesToHex(senderId),
+            originNickname = nickname,
+            neighborsOrNull = directPeers,
+            timestamp = now
+        )
+        updateMeshCount()
         val packet = Packet(
             header = PacketHeader(
                 version = 2,
@@ -528,7 +544,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
                 flags = 0,
                 length = payload.size,
-                timestamp = System.currentTimeMillis(),
+                timestamp = now,
                 senderId = senderId
             ),
             payload = payload
