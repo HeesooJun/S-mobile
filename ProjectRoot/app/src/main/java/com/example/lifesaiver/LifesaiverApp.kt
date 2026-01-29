@@ -28,6 +28,7 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
+import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.navigation.AppRoute
 import com.example.lifesaiver.ui.theme.AppColors
@@ -50,6 +51,7 @@ fun LifesaiverApp(
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
     messages: List<ChatMessage>,
+    signatureLogs: List<SignatureLogEntry>,
     onRequestPermissions: () -> Unit,
     onStartAutoConnect: () -> Unit,
     onStopAutoConnect: () -> Unit,
@@ -58,7 +60,8 @@ fun LifesaiverApp(
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
-    onStopRescueSignal: () -> Unit
+    onStopRescueSignal: () -> Unit,
+    onClearSignatureLogs: () -> Unit
 ) {
     val scale = rememberAppScale()
 
@@ -143,6 +146,8 @@ fun LifesaiverApp(
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
                 messages = messages,
+                signatureLogs = signatureLogs,
+                onClearSignatureLogs = onClearSignatureLogs,
                 onStartAutoConnect = onStartAutoConnect,
                 onStopAutoConnect = onStopAutoConnect,
                 onMicPress = onMicPress,
