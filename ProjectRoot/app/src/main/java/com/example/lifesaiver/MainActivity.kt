@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
                     connectedCount = uiState.connectedCount,
                     meshPeerCount = uiState.meshPeerCount,
                     directPeerIds = uiState.directPeerIds,
+                    myPeerId = uiState.myPeerId,
                     bleDebugStats = uiState.bleDebug,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,

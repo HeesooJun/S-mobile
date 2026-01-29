@@ -83,6 +83,7 @@ data class AppUiState(
     val connectedCount: Int = 0,
     val meshPeerCount: Int = 0,
     val directPeerIds: List<String> = emptyList(),
+    val myPeerId: String = "",
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
@@ -149,6 +150,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedNickname: String = ""
+    private val announcedToPeers = mutableSetOf<String>()
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -169,6 +171,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         initBatteryMonitor()
         refreshPermissions()
         observeProfileName()
+        _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
     }
 
     // ------------------------------------------------------------------------
@@ -370,6 +373,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             protocolCallback = { _, _ -> },
             connectionCallback = { connected, count ->
                 val directPeerIds = bleManager.getConnectedPeerIds()
+                val newPeers = directPeerIds.filterNot { announcedToPeers.contains(it) }
+                if (newPeers.isNotEmpty()) {
+                    sendAnnounce()
+                    announcedToPeers.addAll(newPeers)
+                }
+                announcedToPeers.retainAll(directPeerIds.toSet())
                 _uiState.update {
                     val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
                     it.copy(
