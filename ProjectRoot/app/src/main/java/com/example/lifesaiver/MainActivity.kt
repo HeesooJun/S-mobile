@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
                     isDisconnecting = uiState.isDisconnecting,
                     isRescueSignalActive = uiState.isRescueSignalActive,
                     messages = uiState.messages,
+                    signatureLogs = uiState.signatureLogs,
                     onRequestPermissions = { requestPermissions() },
                     onStartAutoConnect = { viewModel.onStartAutoConnect() },
                     onStopAutoConnect = { viewModel.onStopAutoConnect() },
@@ -69,7 +70,8 @@ class MainActivity : ComponentActivity() {
                     onSendMessage = { text -> viewModel.onSendMessage(text) },
                     onDisconnect = { viewModel.onDisconnect() },
                     onStartRescueSignal = { viewModel.startRescueSignal() },
-                    onStopRescueSignal = { viewModel.stopRescueSignal() }
+                    onStopRescueSignal = { viewModel.stopRescueSignal() },
+                    onClearSignatureLogs = { viewModel.clearSignatureLogs() }
                 )
             }
         }

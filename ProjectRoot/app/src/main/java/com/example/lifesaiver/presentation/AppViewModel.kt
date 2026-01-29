@@ -35,6 +35,7 @@ import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
 import com.example.lifesaiver.protocol.security.SignatureManager
+import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.protocol.util.sha256Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -86,7 +87,8 @@ data class AppUiState(
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
     val messages: List<ChatMessage> = emptyList(),
-    val bleDebug: BleDebugStats = BleDebugStats()
+    val bleDebug: BleDebugStats = BleDebugStats(),
+    val signatureLogs: List<SignatureLogEntry> = emptyList()
 )
 
 // UI 이벤트
@@ -128,6 +130,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
     private lateinit var signatureManager: SignatureManager
+    private val signatureLogBuffer = ArrayDeque<SignatureLogEntry>()
 
     // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
@@ -392,7 +395,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
-        signatureManager = SignatureManager(app, codec)
+        signatureManager = SignatureManager(app, codec, ::appendSignatureLog)
         protocolCore = ProtocolCore(
             codec,
             codec,
@@ -541,6 +544,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearSignatureLogs() {
+        signatureLogBuffer.clear()
+        _uiState.update { it.copy(signatureLogs = emptyList()) }
+    }
+
+    private fun appendSignatureLog(entry: SignatureLogEntry) {
+        signatureLogBuffer.addLast(entry)
+        while (signatureLogBuffer.size > MAX_SIGNATURE_LOGS) {
+            signatureLogBuffer.removeFirst()
+        }
+        _uiState.update { it.copy(signatureLogs = signatureLogBuffer.toList()) }
+    }
+
     private fun buildMessagePacket(text: String): Packet {
         val payload = text.toByteArray(Charsets.UTF_8)
         val header = PacketHeader(
@@ -579,6 +595,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return hex.chunked(2)
             .map { it.toInt(16).toByte() }
             .toByteArray()
+    }
+
+    private companion object {
+        const val MAX_SIGNATURE_LOGS = 200
     }
 
     override fun onCleared() {
