@@ -600,7 +600,8 @@ private fun sensorStatusColor(status: SensorStatus): Color {
 private fun buildMeshNodes(directPeerIds: List<String>, meshPeerCount: Int): List<MeshNode> {
     val directIds = directPeerIds.distinct()
     val directCount = directIds.size.coerceAtLeast(0)
-    val total = meshPeerCount.coerceAtLeast(directCount)
+    val peerCount = (meshPeerCount - 1).coerceAtLeast(0)
+    val total = peerCount.coerceAtLeast(directCount)
     val indirectCount = (total - directCount).coerceAtLeast(0)
     val nodes = mutableListOf<MeshNode>()
     nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true))
