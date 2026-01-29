@@ -21,9 +21,28 @@ import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
+enum class SignatureLogResult {
+    VERIFIED,
+    INVALID,
+    NO_SIGNATURE,
+    NO_SIGNING_KEY,
+    ENCODING_ERROR,
+    ANNOUNCE_DECODE_FAILED,
+    SKIPPED
+}
+
+data class SignatureLogEntry(
+    val timestamp: Long,
+    val peerId: String,
+    val packetType: PacketType,
+    val result: SignatureLogResult,
+    val detail: String
+)
+
 class SignatureManager(
     context: Context,
-    private val encoder: PacketEncoder
+    private val encoder: PacketEncoder,
+    private val logSink: ((SignatureLogEntry) -> Unit)? = null
 ) {
     private val prefs: SharedPreferences = createEncryptedPrefs(context)
     private val signingPrivateKey: Ed25519PrivateKeyParameters
@@ -52,16 +71,43 @@ class SignatureManager(
     }
 
     fun verify(packet: Packet): Boolean {
-        if (!shouldVerify(packet.header.type)) return true
-        val signature = packet.header.signature ?: return false
+        if (!shouldVerify(packet.header.type)) {
+            logEvent(packet, SignatureLogResult.SKIPPED, "검증 대상 아님")
+            return true
+        }
+        val signature = packet.header.signature ?: run {
+            logEvent(packet, SignatureLogResult.NO_SIGNATURE, "서명 없음")
+            return false
+        }
         val peerId = packet.header.senderId.toHexString()
         val publicKeyBytes = when (packet.header.type) {
             PacketType.ANNOUNCE -> extractAnnouncePublicKey(packet.payload)
             else -> peerSigningKeys[peerId]
-        } ?: return false
+        } ?: run {
+            val detail = if (packet.header.type == PacketType.ANNOUNCE) {
+                "ANNOUNCE 공개키 추출 실패"
+            } else {
+                "서명 공개키 없음"
+            }
+            val result = if (packet.header.type == PacketType.ANNOUNCE) {
+                SignatureLogResult.ANNOUNCE_DECODE_FAILED
+            } else {
+                SignatureLogResult.NO_SIGNING_KEY
+            }
+            logEvent(packet, result, detail)
+            return false
+        }
 
-        val data = toSigningBytes(packet) ?: return false
+        val data = toSigningBytes(packet) ?: run {
+            logEvent(packet, SignatureLogResult.ENCODING_ERROR, "서명용 인코딩 실패")
+            return false
+        }
         val isValid = verifyBytes(signature, data, publicKeyBytes)
+        if (isValid) {
+            logEvent(packet, SignatureLogResult.VERIFIED, "서명 일치")
+        } else {
+            logEvent(packet, SignatureLogResult.INVALID, "서명 불일치")
+        }
         if (isValid && packet.header.type == PacketType.ANNOUNCE) {
             peerSigningKeys[peerId] = publicKeyBytes
         }
@@ -103,8 +149,24 @@ class SignatureManager(
     }
 
     private fun extractAnnouncePublicKey(payload: ByteArray): ByteArray? {
-        val announcement = IdentityAnnouncementPayload.decode(payload) ?: return null
+        val announcement = IdentityAnnouncementPayload.decode(payload)
+        if (announcement == null) {
+            return null
+        }
         return announcement.signingPublicKey
+    }
+
+    private fun logEvent(packet: Packet, result: SignatureLogResult, detail: String) {
+        val peerId = packet.header.senderId.toHexString()
+        logSink?.invoke(
+            SignatureLogEntry(
+                timestamp = System.currentTimeMillis(),
+                peerId = peerId,
+                packetType = packet.header.type,
+                result = result,
+                detail = detail
+            )
+        )
     }
 
     private fun createEncryptedPrefs(context: Context): SharedPreferences {

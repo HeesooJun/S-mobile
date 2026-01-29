@@ -20,7 +20,7 @@ datastore = "1.2.0"
 room = "2.6.1"
 ksp = "2.0.21-1.0.28"
 bouncycastle = "1.70"
-securityCrypto = "1.0.0"
+securityCrypto = "1.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
