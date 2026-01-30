@@ -95,6 +95,10 @@ data class AppUiState(
     val myPeerId: String = "",
     val myNickname: String = "",
     val peerNicknames: Map<String, String> = emptyMap(),
+    val meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot = MeshGraphRegistry.GraphSnapshot(
+        emptyList(),
+        emptyList()
+    ),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
@@ -188,6 +192,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         initBatteryMonitor()
         refreshPermissions()
         observeProfileName()
+        observeMeshGraph()
         _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
     }
 
@@ -700,6 +705,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             profileStore.profileFlow.collect { profile ->
                 cachedNickname = profile.name.trim()
                 _uiState.update { it.copy(myNickname = cachedNickname) }
+            }
+        }
+    }
+
+    private fun observeMeshGraph() {
+        viewModelScope.launch {
+            meshGraphRegistry.graphState.collect { snapshot ->
+                _uiState.update { it.copy(meshGraphSnapshot = snapshot) }
             }
         }
     }

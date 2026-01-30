@@ -45,8 +45,9 @@ import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.ui.components.BatteryIndicator
-import com.example.lifesaiver.ui.components.MeshMap
 import com.example.lifesaiver.ui.components.MeshNode
+import com.example.lifesaiver.ui.components.MeshEdge
+import com.example.lifesaiver.ui.components.MeshMap
 import com.example.lifesaiver.ui.components.MicButton
 import com.example.lifesaiver.ui.components.tripleClickable
 import com.example.lifesaiver.ui.components.ScreenScaffold
@@ -68,6 +69,7 @@ fun PTTLinkScreen(
     myPeerId: String,
     myNickname: String,
     peerNicknames: Map<String, String>,
+    meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
@@ -89,8 +91,13 @@ fun PTTLinkScreen(
     val displayConnectedCount = meshDisplayCount
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
-    val meshNodes = remember(directPeerIds, meshDisplayCount, myPeerId) {
-        buildMeshNodes(directPeerIds, meshDisplayCount, myPeerId, myNickname, peerNicknames)
+    val meshGraphState = remember(meshGraphSnapshot, myPeerId, myNickname, peerNicknames) {
+        buildMeshGraphState(
+            snapshot = meshGraphSnapshot,
+            myPeerId = myPeerId,
+            myNickname = myNickname,
+            peerNicknames = peerNicknames
+        )
     }
 
     LaunchedEffect(expandedAction) {
@@ -292,7 +299,11 @@ fun PTTLinkScreen(
                         .fillMaxSize()
                         .background(AppColors.Black.copy(alpha = 0.9f))
                 ) {
-                    MeshMap(nodes = meshNodes, modifier = Modifier.fillMaxSize())
+                    MeshMap(
+                        nodes = meshGraphState.nodes,
+                        edges = meshGraphState.edges,
+                        modifier = Modifier.fillMaxSize()
+                    )
                     TopIconButton(
                         iconRes = R.drawable.ic_back,
                         contentDescription = "닫기",
@@ -458,43 +469,77 @@ private fun ProfileActionButton(
     }
 }
 
-private fun buildMeshNodes(
-    directPeerIds: List<String>,
-    meshPeerCount: Int,
+private data class MeshGraphUiState(
+    val nodes: List<MeshNode>,
+    val edges: List<MeshEdge>
+)
+
+private fun buildMeshGraphState(
+    snapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     myPeerId: String,
     myNickname: String,
     peerNicknames: Map<String, String>
-): List<MeshNode> {
-    val directIds = directPeerIds.distinct()
-    val directCount = directIds.size.coerceAtLeast(0)
-    val peerCount = (meshPeerCount - 1).coerceAtLeast(0)
-    val total = peerCount.coerceAtLeast(directCount)
-    val indirectCount = (total - directCount).coerceAtLeast(0)
+): MeshGraphUiState {
+    if (snapshot.nodes.isEmpty()) {
+        val selfId = myPeerId.trim().ifBlank { "self" }
+        val selfLabel = myNickname.trim().ifBlank { selfId }
+        return MeshGraphUiState(
+            nodes = listOf(
+                MeshNode(id = selfId, hop = 0, signal = 1f, isSelf = true, label = selfLabel)
+            ),
+            edges = emptyList()
+        )
+    }
+
+    val selfId = myPeerId
+    val adjacency = mutableMapOf<String, MutableSet<String>>()
+    snapshot.edges.forEach { edge ->
+        adjacency.getOrPut(edge.a) { mutableSetOf() }.add(edge.b)
+        adjacency.getOrPut(edge.b) { mutableSetOf() }.add(edge.a)
+    }
+
+    val hops = mutableMapOf<String, Int>()
+    val queue = ArrayDeque<String>()
+    hops[selfId] = 0
+    queue.add(selfId)
+    while (queue.isNotEmpty()) {
+        val current = queue.removeFirst()
+        val nextHop = (hops[current] ?: 0) + 1
+        adjacency[current].orEmpty().forEach { neighbor ->
+            if (hops.containsKey(neighbor)) return@forEach
+            hops[neighbor] = nextHop
+            queue.add(neighbor)
+        }
+    }
+
     val nodes = mutableListOf<MeshNode>()
-    val selfLabel = myNickname.trim().ifBlank {
-        myPeerId.trim().ifBlank { "self" }
-    }
-    nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true, label = selfLabel))
-    directIds.forEachIndexed { index, peerId ->
-        val signal = 0.55f + (index % 5) * 0.1f
+    val selfLabel = myNickname.trim().ifBlank { myPeerId.trim().ifBlank { "self" } }
+    nodes.add(MeshNode(id = selfId, hop = 0, signal = 1f, isSelf = true, label = selfLabel))
+
+    snapshot.nodes.forEach { node ->
+        if (node.peerId == selfId) return@forEach
+        val hop = (hops[node.peerId] ?: 2).coerceAtLeast(1)
+        val signal = when (hop) {
+            1 -> 0.8f
+            2 -> 0.55f
+            else -> 0.4f
+        }
+        val label = node.nickname?.takeIf { it.isNotBlank() }
+            ?: peerNicknames[node.peerId]
+            ?: node.peerId
         nodes.add(
             MeshNode(
-                id = peerId,
-                hop = 1,
+                id = node.peerId,
+                hop = hop,
                 signal = signal,
-                label = peerNicknames[peerId] ?: peerId
+                label = label
             )
         )
     }
-    repeat(indirectCount) { index ->
-        val signal = 0.35f + (index % 4) * 0.08f
-        nodes.add(
-            MeshNode(
-                id = "mesh-$index",
-                hop = 2,
-                signal = signal
-            )
-        )
+
+    val edges = snapshot.edges.map { edge ->
+        MeshEdge(a = edge.a, b = edge.b, isConfirmed = edge.isConfirmed)
     }
-    return nodes
+
+    return MeshGraphUiState(nodes = nodes, edges = edges)
 }
