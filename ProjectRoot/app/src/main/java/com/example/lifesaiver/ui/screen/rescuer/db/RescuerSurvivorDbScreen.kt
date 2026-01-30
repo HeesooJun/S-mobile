@@ -291,18 +291,6 @@ private fun SurvivorCard(
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))) {
-                    MiniChip(
-                        text = if (survivor.bloodType.isBlank()) "혈액형 ?" else survivor.bloodType,
-                        bg = neonGreen.copy(alpha = 0.10f),
-                        fg = neonGreen
-                    )
-                    if (survivor.emergencyContact.isNotBlank()) {
-                        MiniChip(
-                            text = "긴급 ${survivor.emergencyContact}",
-                            bg = Color.White.copy(alpha = 0.06f),
-                            fg = Color.White.copy(alpha = 0.85f)
-                        )
-                    }
                     if (survivor.notes.isNotBlank()) {
                         MiniChip(
                             text = survivor.notes,

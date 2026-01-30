@@ -20,9 +20,7 @@ data class SurvivorProfile(
     val name: String = "",
     val gender: String = "",
     val birthDate: String = "",
-    val emergencyContact: String = "",
-    val notes: String = "",
-    val bloodType: String = ""
+    val notes: String = ""
 ) {
     val isComplete: Boolean
         get() = name.isNotBlank() && gender.isNotBlank() && birthDate.isNotBlank()
@@ -34,9 +32,7 @@ class ProfileStore(private val context: Context) {
             name = prefs[NAME_KEY].orEmpty(),
             gender = prefs[GENDER_KEY].orEmpty(),
             birthDate = normalizeBirthDate(prefs[BIRTH_DATE_KEY]),
-            emergencyContact = prefs[EMERGENCY_CONTACT_KEY].orEmpty(),
-            notes = prefs[NOTES_KEY].orEmpty(),
-            bloodType = prefs[BLOOD_TYPE_KEY].orEmpty()
+            notes = prefs[NOTES_KEY].orEmpty()
         )
     }
 
@@ -45,9 +41,7 @@ class ProfileStore(private val context: Context) {
             prefs[NAME_KEY] = profile.name.trim()
             prefs[GENDER_KEY] = profile.gender.trim()
             prefs[BIRTH_DATE_KEY] = normalizeBirthDate(profile.birthDate)
-            prefs[EMERGENCY_CONTACT_KEY] = profile.emergencyContact.trim()
             prefs[NOTES_KEY] = profile.notes.trim()
-            prefs[BLOOD_TYPE_KEY] = profile.bloodType.trim()
         }
     }
 }
@@ -55,9 +49,7 @@ class ProfileStore(private val context: Context) {
 private val NAME_KEY = stringPreferencesKey("survivor_name")
 private val GENDER_KEY = stringPreferencesKey("survivor_gender")
 private val BIRTH_DATE_KEY = stringPreferencesKey("survivor_birth_date")
-private val EMERGENCY_CONTACT_KEY = stringPreferencesKey("survivor_emergency_contact")
 private val NOTES_KEY = stringPreferencesKey("survivor_notes")
-private val BLOOD_TYPE_KEY = stringPreferencesKey("survivor_blood_type")
 
 private val birthDateFormatters = listOf(
     DateTimeFormatter.ISO_LOCAL_DATE,
