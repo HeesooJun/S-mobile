@@ -26,22 +26,27 @@ import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
+import com.example.lifesaiver.ui.components.SignatureLogDialog
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import com.example.lifesaiver.protocol.security.SignatureLogEntry
 
 @Composable
 fun RescuerChatScreen(
     roomTitle: String,
     meshPeerCount: Int,
     messages: List<ChatMessage>,
+    signatureLogs: List<SignatureLogEntry>,
+    onClearSignatureLogs: () -> Unit,
     onPrev: () -> Unit,
     onSend: (String) -> Unit
 ) {
     val (inputValue, setInputValue) = remember { mutableStateOf("") }
     val scale = LocalAppScale.current
     val participantCount = meshPeerCount.coerceAtLeast(0)
+    val (showSignatureLog, setShowSignatureLog) = remember { mutableStateOf(false) }
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -71,12 +76,30 @@ fun RescuerChatScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
 
-            Text(
-                text = "인원 ${participantCount}명",
-                color = AppColors.Green,
-                fontSize = scaledSp(12, scale),
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+            ) {
+                Text(
+                    text = "인원 ${participantCount}명",
+                    color = AppColors.Green,
+                    fontSize = scaledSp(12, scale)
+                )
+                Box(
+                    modifier = Modifier
+                        .background(AppColors.Gray700, shape = RoundedCornerShape(scaledDp(12, scale)))
+                        .clickable { setShowSignatureLog(true) }
+                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                ) {
+                    Text(
+                        text = "로그",
+                        color = AppColors.White,
+                        fontSize = scaledSp(10, scale),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(scaledDp(8, scale)))
@@ -157,6 +180,14 @@ fun RescuerChatScreen(
                     )
                 }
             }
+        }
+
+        if (showSignatureLog) {
+            SignatureLogDialog(
+                entries = signatureLogs,
+                onDismiss = { setShowSignatureLog(false) },
+                onClear = onClearSignatureLogs
+            )
         }
     }
 }

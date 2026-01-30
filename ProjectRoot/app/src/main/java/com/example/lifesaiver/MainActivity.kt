@@ -56,11 +56,13 @@ class MainActivity : ComponentActivity() {
                     connectedCount = uiState.connectedCount,
                     meshPeerCount = uiState.meshPeerCount,
                     directPeerIds = uiState.directPeerIds,
+                    myPeerId = uiState.myPeerId,
                     bleDebugStats = uiState.bleDebug,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
                     isRescueSignalActive = uiState.isRescueSignalActive,
                     messages = uiState.messages,
+                    signatureLogs = uiState.signatureLogs,
                     onRequestPermissions = { requestPermissions() },
                     onStartAutoConnect = { viewModel.onStartAutoConnect() },
                     onStopAutoConnect = { viewModel.onStopAutoConnect() },
@@ -69,7 +71,8 @@ class MainActivity : ComponentActivity() {
                     onSendMessage = { text -> viewModel.onSendMessage(text) },
                     onDisconnect = { viewModel.onDisconnect() },
                     onStartRescueSignal = { viewModel.startRescueSignal() },
-                    onStopRescueSignal = { viewModel.stopRescueSignal() }
+                    onStopRescueSignal = { viewModel.stopRescueSignal() },
+                    onClearSignatureLogs = { viewModel.clearSignatureLogs() }
                 )
             }
         }
