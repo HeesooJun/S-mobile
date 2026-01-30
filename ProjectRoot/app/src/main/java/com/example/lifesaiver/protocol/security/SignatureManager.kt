@@ -70,13 +70,13 @@ class SignatureManager(
         )
     }
 
-    fun verify(packet: Packet): Boolean {
+    fun verify(packet: Packet, pathLabel: String? = null): Boolean {
         if (!shouldVerify(packet.header.type)) {
-            logEvent(packet, SignatureLogResult.SKIPPED, "검증 대상 아님")
+            logEvent(packet, SignatureLogResult.SKIPPED, "검증 대상 아님", pathLabel)
             return true
         }
         val signature = packet.header.signature ?: run {
-            logEvent(packet, SignatureLogResult.NO_SIGNATURE, "서명 없음")
+            logEvent(packet, SignatureLogResult.NO_SIGNATURE, "서명 없음", pathLabel)
             return false
         }
         val peerId = packet.header.senderId.toHexString()
@@ -94,19 +94,19 @@ class SignatureManager(
             } else {
                 SignatureLogResult.NO_SIGNING_KEY
             }
-            logEvent(packet, result, detail)
+            logEvent(packet, result, detail, pathLabel)
             return false
         }
 
         val data = toSigningBytes(packet) ?: run {
-            logEvent(packet, SignatureLogResult.ENCODING_ERROR, "서명용 인코딩 실패")
+            logEvent(packet, SignatureLogResult.ENCODING_ERROR, "서명용 인코딩 실패", pathLabel)
             return false
         }
         val isValid = verifyBytes(signature, data, publicKeyBytes)
         if (isValid) {
-            logEvent(packet, SignatureLogResult.VERIFIED, "서명 일치")
+            logEvent(packet, SignatureLogResult.VERIFIED, "서명 일치", pathLabel)
         } else {
-            logEvent(packet, SignatureLogResult.INVALID, "서명 불일치")
+            logEvent(packet, SignatureLogResult.INVALID, "서명 불일치", pathLabel)
         }
         if (isValid && packet.header.type == PacketType.ANNOUNCE) {
             peerSigningKeys[peerId] = publicKeyBytes
@@ -156,15 +156,25 @@ class SignatureManager(
         return announcement.signingPublicKey
     }
 
-    private fun logEvent(packet: Packet, result: SignatureLogResult, detail: String) {
+    private fun logEvent(
+        packet: Packet,
+        result: SignatureLogResult,
+        detail: String,
+        pathLabel: String?
+    ) {
         val peerId = packet.header.senderId.toHexString()
+        val detailWithPath = if (pathLabel.isNullOrBlank()) {
+            detail
+        } else {
+            "$detail · path=$pathLabel"
+        }
         logSink?.invoke(
             SignatureLogEntry(
                 timestamp = System.currentTimeMillis(),
                 peerId = peerId,
                 packetType = packet.header.type,
                 result = result,
-                detail = detail
+                detail = detailWithPath
             )
         )
     }

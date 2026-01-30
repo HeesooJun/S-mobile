@@ -41,9 +41,16 @@ data class MeshNode(
     val label: String? = null
 )
 
+data class MeshEdge(
+    val a: String,
+    val b: String,
+    val isConfirmed: Boolean = false
+)
+
 @Composable
 fun MeshMap(
     nodes: List<MeshNode>,
+    edges: List<MeshEdge> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val scaleFactor = LocalAppScale.current
@@ -154,18 +161,39 @@ fun MeshMap(
                 )
             }
 
-            nodes.filter { !it.isSelf && it.hop == 1 }.forEach { node ->
-                val nodeOffset = layoutPositions[node.id] ?: Offset.Zero
-                val draggedOffset = manualOffsets[node.id]
-                val graphOffset = draggedOffset ?: nodeOffset
-                val screenOffset = center + (graphOffset * zoom)
-                drawLine(
-                    color = edgeColor,
-                    start = center,
-                    end = screenOffset,
-                    strokeWidth = 1.3f * zoom,
-                    cap = StrokeCap.Round
-                )
+            if (edges.isNotEmpty()) {
+                edges.forEach { edge ->
+                    val aOffset = manualOffsets[edge.a] ?: layoutPositions[edge.a] ?: return@forEach
+                    val bOffset = manualOffsets[edge.b] ?: layoutPositions[edge.b] ?: return@forEach
+                    val aScreen = center + (aOffset * zoom)
+                    val bScreen = center + (bOffset * zoom)
+                    val color = if (edge.isConfirmed) {
+                        AppColors.Green.copy(alpha = 0.6f)
+                    } else {
+                        edgeColor
+                    }
+                    drawLine(
+                        color = color,
+                        start = aScreen,
+                        end = bScreen,
+                        strokeWidth = 1.3f * zoom,
+                        cap = StrokeCap.Round
+                    )
+                }
+            } else {
+                nodes.filter { !it.isSelf && it.hop == 1 }.forEach { node ->
+                    val nodeOffset = layoutPositions[node.id] ?: Offset.Zero
+                    val draggedOffset = manualOffsets[node.id]
+                    val graphOffset = draggedOffset ?: nodeOffset
+                    val screenOffset = center + (graphOffset * zoom)
+                    drawLine(
+                        color = edgeColor,
+                        start = center,
+                        end = screenOffset,
+                        strokeWidth = 1.3f * zoom,
+                        cap = StrokeCap.Round
+                    )
+                }
             }
 
             nodes.forEach { node ->
@@ -193,15 +221,26 @@ fun MeshMap(
                 )
                 val label = node.label
                 if (!label.isNullOrBlank()) {
+                    val shortId = if (node.id.length > 8) node.id.take(8) else node.id
                     val color = if (node.isSelf) AppColors.Green else labelColor
                     labelPaint.color = color.toArgb()
                     labelPaint.textSize = labelTextSizePx
+                    val line1Y = screenOffset.y + nodeRadius + labelPaddingPx + labelTextSizePx
                     drawContext.canvas.nativeCanvas.drawText(
                         label,
                         screenOffset.x,
-                        screenOffset.y + nodeRadius + labelPaddingPx + labelTextSizePx,
+                        line1Y,
                         labelPaint
                     )
+                    if (label != node.id) {
+                        val line2Y = line1Y + labelTextSizePx + (labelPaddingPx * 0.6f)
+                        drawContext.canvas.nativeCanvas.drawText(
+                            shortId,
+                            screenOffset.x,
+                            line2Y,
+                            labelPaint
+                        )
+                    }
                 }
             }
         }
@@ -256,6 +295,7 @@ private fun findNodeHit(
         val base = layoutPositions[node.id] ?: Offset.Zero
         val offset = manualOffsets[node.id] ?: base
         val distance = hypot(point.x - offset.x, point.y - offset.y)
+        if (node.isSelf) return@forEach
         if (distance <= radius && distance < closestDistance) {
             closestDistance = distance
             closestId = node.id
