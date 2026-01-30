@@ -21,7 +21,6 @@ import com.example.lifesaiver.core.ble.BleDebugSnapshot
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.database.AppDatabase
-import com.example.lifesaiver.core.database.entity.ProfileEntity
 import com.example.lifesaiver.core.media.FileTransferStorage
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
@@ -40,12 +39,12 @@ import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
 import com.example.lifesaiver.protocol.model.RequestSyncPayload
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
-import com.example.lifesaiver.protocol.profile.ProfileSyncLogResult
 import com.example.lifesaiver.protocol.profile.ProfileTlv
 import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
+import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -148,6 +147,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private lateinit var protocolCore: ProtocolCore
     private lateinit var signatureManager: SignatureManager
     private lateinit var gossipSyncManager: GossipSyncManager
+    private lateinit var profilePacketHandler: ProfilePacketHandler
     private val signatureLogBuffer = ArrayDeque<SignatureLogEntry>()
     private val profileLogBuffer = ArrayDeque<ProfileSyncLogEntry>()
     private val profileDao by lazy { AppDatabase.getInstance(app).profileDao() }
@@ -504,6 +504,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         )
+        profilePacketHandler = ProfilePacketHandler(
+            profileDao = profileDao,
+            scope = viewModelScope,
+            logSink = ::appendProfileLog,
+            onPublicPacketSeen = { packet -> gossipSyncManager.onPublicPacketSeen(packet) }
+        )
         protocolCore.setOnPacketReceived { packet, relayAddress ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
@@ -561,7 +567,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.MESSAGE -> {
                     val profileResult = ProfileTlv.decodeIfProfile(packet.payload)
                     if (profileResult != null) {
-                        handleProfilePayload(packet, profileResult, pathLabel)
+                        profilePacketHandler.handle(packet, profileResult, pathLabel)
                     } else {
                         val text = packet.payload.toString(Charsets.UTF_8)
                         addMessage(ChatMessage(text = text, isMine = false, path = pathLabel))
@@ -750,132 +756,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             profileLogBuffer.removeFirst()
         }
         _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) }
-    }
-
-    private fun handleProfilePayload(
-        packet: Packet,
-        result: ProfileTlv.DecodeResult,
-        pathLabel: String
-    ) {
-        val peerHex = bytesToHex(packet.header.senderId)
-        val payloadSize = packet.payload.size
-        when (result) {
-            is ProfileTlv.DecodeResult.Failure -> {
-                appendProfileLog(
-                    ProfileSyncLogEntry(
-                        timestamp = System.currentTimeMillis(),
-                        peerId = peerHex,
-                        packetType = packet.header.type,
-                        result = ProfileSyncLogResult.TLV_PARSE_FAILED,
-                        detail = "len=$payloadSize path=$pathLabel reason=${result.reason}"
-                    )
-                )
-            }
-            is ProfileTlv.DecodeResult.Success -> {
-                val decoded = result.decoded
-                val updatedAt = decoded.updatedAt
-                val kind = decoded.kind
-                val schemaVersion = decoded.schemaVersion
-                if (kind == null || updatedAt == null) {
-                    appendProfileLog(
-                        ProfileSyncLogEntry(
-                            timestamp = System.currentTimeMillis(),
-                            peerId = peerHex,
-                            packetType = packet.header.type,
-                            result = ProfileSyncLogResult.MISSING_FIELD,
-                            detail = "len=$payloadSize path=$pathLabel missing=${missingFields(kind, updatedAt)}"
-                        )
-                    )
-                    return
-                }
-                if (schemaVersion != null && schemaVersion != 1) {
-                    appendProfileLog(
-                        ProfileSyncLogEntry(
-                            timestamp = System.currentTimeMillis(),
-                            peerId = peerHex,
-                            packetType = packet.header.type,
-                            result = ProfileSyncLogResult.UPSERT_SKIPPED,
-                            detail = "len=$payloadSize path=$pathLabel unsupported schema=$schemaVersion"
-                        )
-                    )
-                    return
-                }
-                appendProfileLog(
-                    ProfileSyncLogEntry(
-                        timestamp = System.currentTimeMillis(),
-                        peerId = peerHex,
-                        packetType = packet.header.type,
-                        result = ProfileSyncLogResult.RECEIVED,
-                        detail = "len=$payloadSize path=$pathLabel kind=$kind updatedAt=$updatedAt"
-                    )
-                )
-                if (kind == ProfileTlv.KIND_REQUEST) {
-                    appendProfileLog(
-                        ProfileSyncLogEntry(
-                            timestamp = System.currentTimeMillis(),
-                            peerId = peerHex,
-                            packetType = packet.header.type,
-                            result = ProfileSyncLogResult.UPSERT_SKIPPED,
-                            detail = "path=$pathLabel request packet"
-                        )
-                    )
-                    return
-                }
-                val entity = ProfileEntity(
-                    peerId = peerHex,
-                    name = decoded.name.orEmpty(),
-                    gender = decoded.gender?.toString().orEmpty(),
-                    birthDate = decoded.birthDate.orEmpty(),
-                    notes = decoded.notes.orEmpty(),
-                    updatedAt = updatedAt,
-                    sourcePeerId = peerHex,
-                    lastSeenAt = System.currentTimeMillis()
-                )
-                viewModelScope.launch(Dispatchers.IO) {
-                    runCatching {
-                        profileDao.upsertIfNewer(entity)
-                    }.onSuccess { applied ->
-                        appendProfileLog(
-                            ProfileSyncLogEntry(
-                                timestamp = System.currentTimeMillis(),
-                                peerId = peerHex,
-                                packetType = packet.header.type,
-                                result = if (applied) {
-                                    ProfileSyncLogResult.UPSERT_OK
-                                } else {
-                                    ProfileSyncLogResult.UPSERT_SKIPPED
-                                },
-                                detail = if (applied) {
-                                    "path=$pathLabel updatedAt=$updatedAt"
-                                } else {
-                                    "path=$pathLabel stale updatedAt=$updatedAt"
-                                }
-                            )
-                        )
-                    }.onFailure { err ->
-                        appendProfileLog(
-                            ProfileSyncLogEntry(
-                                timestamp = System.currentTimeMillis(),
-                                peerId = peerHex,
-                                packetType = packet.header.type,
-                                result = ProfileSyncLogResult.UPSERT_FAILED,
-                                detail = "path=$pathLabel db error: ${err.message}"
-                            )
-                        )
-                    }
-                }
-                if (packet.header.recipientId == null) {
-                    gossipSyncManager.onPublicPacketSeen(packet)
-                }
-            }
-        }
-    }
-
-    private fun missingFields(kind: Int?, updatedAt: Long?): String {
-        val missing = mutableListOf<String>()
-        if (kind == null) missing.add("kind")
-        if (updatedAt == null) missing.add("updatedAt")
-        return missing.joinToString(",")
     }
 
     private fun buildMessagePacket(text: String): Packet {
