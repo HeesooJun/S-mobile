@@ -74,6 +74,11 @@ class BleManager(
     private val job = Job()
     private val scope = CoroutineScope(Dispatchers.Main + job)
     private val ioScope = CoroutineScope(Dispatchers.IO + job)
+    private val deviceMonitor = DeviceMonitoringManager(
+        scope = ioScope,
+        disconnectCallback = { address -> disconnectAddress(address) },
+        log = logCallback
+    )
 
     var isHost = false
     private var isConnected = false
@@ -366,6 +371,7 @@ class BleManager(
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             val device = result?.device ?: return
             val address = device.address
+            if (deviceMonitor.isBlocked(address)) return
             synchronized(scanRssi) {
                 scanRssi[address] = result.rssi
             }
@@ -437,6 +443,10 @@ class BleManager(
 
     private fun connectToPeer(device: BluetoothDevice) {
         try {
+            if (deviceMonitor.isBlocked(device.address)) {
+                clearPending(device.address)
+                return
+            }
             val phyMask = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isLongRangeSupported()) {
                 BluetoothDevice.PHY_LE_1M_MASK or BluetoothDevice.PHY_LE_CODED_MASK
             } else BluetoothDevice.PHY_LE_1M_MASK
@@ -466,6 +476,7 @@ class BleManager(
                 attachPendingPeerId(address)
                 clearPending(address)
                 notifyConnectionState()
+                deviceMonitor.onConnectionEstablished(address)
                 try {
                     gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                 } catch (_: Exception) {
@@ -489,6 +500,7 @@ class BleManager(
                 clearPeerId(address)
                 clearPending(address)
                 notifyConnectionState()
+                deviceMonitor.onDeviceDisconnected(address, status != BluetoothGatt.GATT_SUCCESS)
                 try {
                     gatt.close()
                 } catch (_: Exception) {
@@ -519,6 +531,7 @@ class BleManager(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
         ) {
+            deviceMonitor.onAnyPacketReceived(gatt.device.address)
             if (characteristic.uuid == Constants.PROTOCOL_CHAR_UUID) {
                 protocolCallback(characteristic.value, gatt.device.address)
             } else {
@@ -582,6 +595,13 @@ class BleManager(
         ) {
             // [핵심] 구조대 접속 감지 (사이렌 발생 조건)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                if (deviceMonitor.isBlocked(device.address)) {
+                    try {
+                        gattServer?.cancelConnection(device)
+                    } catch (_: Exception) {
+                    }
+                    return
+                }
                 logCallback("✅ Peer joined (구조대 접속!): ${device.address}")
 
                 // 구조대가 접속하면 ViewModel에 알림 (사이렌 울리기)
@@ -594,12 +614,14 @@ class BleManager(
                 }
                 notifyConnectionState()
                 handler.removeCallbacksAndMessages(null)
+                deviceMonitor.onConnectionEstablished(device.address)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 synchronized(connectedPeers) {
                     connectedPeers.remove(device.address)
                 }
                 clearPeerId(device.address)
                 notifyConnectionState()
+                deviceMonitor.onDeviceDisconnected(device.address, status != BluetoothGatt.GATT_SUCCESS)
             }
         }
 
@@ -616,6 +638,7 @@ class BleManager(
             offset: Int,
             value: ByteArray
         ) {
+            deviceMonitor.onAnyPacketReceived(device.address)
             if (characteristic.uuid == Constants.PROTOCOL_CHAR_UUID) {
                 protocolCallback(value, device.address)
             } else {
@@ -964,6 +987,78 @@ class BleManager(
             }
         }
         return peerIds.toList().sorted()
+    }
+
+    fun bindPeerIdForAddress(address: String, peerIdHex: String) {
+        synchronized(addressPeerMap) {
+            addressPeerMap[address] = peerIdHex
+        }
+    }
+
+    fun onAnnounceReceived(address: String) {
+        deviceMonitor.onAnnounceReceived(address)
+    }
+
+    fun clearDeviceMonitoring() {
+        deviceMonitor.clearAll()
+    }
+
+    fun clearAllConnectionsAndMappings() {
+        deviceMonitor.clearAll()
+        synchronized(clientConnections) {
+            clientConnections.values.forEach { gatt ->
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
+            }
+            clientConnections.clear()
+        }
+        val serverDevices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
+        serverDevices.forEach { device ->
+            try {
+                gattServer?.cancelConnection(device)
+            } catch (_: Exception) {
+            }
+        }
+        synchronized(connectedPeers) {
+            connectedPeers.clear()
+        }
+        synchronized(addressPeerMap) {
+            addressPeerMap.clear()
+        }
+        synchronized(pendingPeerIds) {
+            pendingPeerIds.clear()
+        }
+        synchronized(pendingConnections) {
+            pendingConnections.clear()
+        }
+        synchronized(connectionAttempts) {
+            connectionAttempts.clear()
+        }
+        notifyConnectionState()
+    }
+
+    private fun disconnectAddress(address: String) {
+        synchronized(clientConnections) {
+            clientConnections[address]
+        }?.let { gatt ->
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            val device = bluetoothManager?.adapter?.getRemoteDevice(address)
+            if (device != null) {
+                gattServer?.cancelConnection(device)
+            }
+        } catch (_: Exception) {
+        }
     }
 
     private fun extractPeerId(result: ScanResult): String? {
