@@ -11,8 +11,11 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.lifesaiver.R
+import com.example.lifesaiver.ai.stt.EmergencyIntentClassifierKorean
+import com.example.lifesaiver.ai.stt.VoiceTriggerDetector
 import kotlin.math.sqrt
 
 class SensorService : Service(), SensorEventListener {
@@ -21,33 +24,92 @@ class SensorService : Service(), SensorEventListener {
         const val ACTION_SENSOR_TRIGGERED = "com.example.wakeup.ACTION_SENSOR_TRIGGERED"
     }
 
-    private lateinit var sensorManager: SensorManager
-    private var accelerometer: Sensor? = null
-
+    // 알림 채널 ID
     private val CHANNEL_ID_HIDDEN = "WAKEUP_HIDDEN_CHANNEL_V3"
     private val CHANNEL_ID_ALERT = "WAKEUP_ALERT_CHANNEL"
 
-    private val IMPACT_THRESHOLD = 40.0f // 충격 임계값
+    // 센서 관련 변수
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
 
-    private val MOTION_THRESHOLD = 2.0f // 움직임 임계값 (충격 이후 움직임 여부)
-
-    private val WAIT_TIME_MS = 5000L // 충격 이후 10초 동안 움직임 없을 시 알람
-
-    private val STABILIZATION_TIME_MS = 2000L // 충격 직후 2초 휴대폰 튀는 시간 고려
-    private var lastAlertTime: Long = 0 // 마지막 알람 시각 (중복 실행 방지용)
+    // 센서 임계값
+    private val IMPACT_THRESHOLD = 40.0f
+    private val MOTION_THRESHOLD = 2.0f
+    private val WAIT_TIME_MS = 5000L
+    private val STABILIZATION_TIME_MS = 2000L
 
     private var isWaitingForStillness = false
     private var impactTime: Long = 0
+    private var isAlertTriggered = false // 중복 실행 방지 플래그
+
+    // AI 관련 변수
+    private lateinit var intentClassifier: EmergencyIntentClassifierKorean
+    private lateinit var voiceDetector: VoiceTriggerDetector
 
     override fun onCreate() {
         super.onCreate()
-        // 알림 채널 생성
+        // 1. 알림 채널 생성 (오류 해결: 함수 호출)
         createNotificationChannels()
-        // 센서 매니저 및 가속도 센서 획득
+
+        // 2. 포그라운드 알림 표시 (오류 해결: 함수 호출)
+        startForegroundServiceNotification()
+
+        // 3. 센서 초기화
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        // 포그라운드 서비스 시작 알림 표시
-        startForegroundServiceNotification()
+
+        // 4. AI(음성+의도분석) 초기화 및 즉시 실행
+        initAndStartAI()
+    }
+
+    private fun initAndStartAI() {
+        intentClassifier = EmergencyIntentClassifierKorean(this)
+
+        voiceDetector = VoiceTriggerDetector(
+            context = this,
+            onStateChange = { Log.d("SaiviorVoice", "상태: $it") },
+            onDetected = { text ->
+                // 말이 들리면 즉시 분석
+                analyzeVoiceIntent(text)
+            },
+            onErrorOccurred = { error ->
+                Log.e("SaiviorVoice", "오류: $error")
+                // 에러가 나거나 말이 끊겨도, 죽지 않고 다시 듣게 만듦 (무한 루프)
+                restartVoiceListening()
+            }
+        )
+
+        // ★ 앱 켜지자마자 마이크 켜기 (상시 대기)
+        Log.d("Saivior", "음성 웨이크업 감시 시작")
+        voiceDetector.startListening()
+    }
+
+    private fun restartVoiceListening() {
+        if (isAlertTriggered) return // 이미 비상상황이면 재시작 안 함
+
+        // 잠시 텀을 두고 다시 켬 (CPU 과부하 방지)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try {
+                voiceDetector.startListening()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, 1000) // 1초 뒤 재시작
+    }
+
+    private fun analyzeVoiceIntent(text: String) {
+        if (isAlertTriggered) return
+
+        intentClassifier.checkIntent(text) { isEmergency, score, match ->
+            if (isEmergency) {
+                Log.w("Saivior", "🗣️ 음성 감지됨: $match (점수: $score)")
+                triggerAlert("음성 감지($match)")
+            } else {
+                Log.d("Saivior", "일상 대화: $match")
+                // 비상 상황 아니면 다시 듣기 모드
+                restartVoiceListening()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -57,8 +119,9 @@ class SensorService : Service(), SensorEventListener {
         return START_STICKY
     }
 
-    // 충격 임계치 설정
     override fun onSensorChanged(event: SensorEvent?) {
+        if (isAlertTriggered) return
+
         event?.let {
             if (it.sensor.type == Sensor.TYPE_ACCELEROMETER) {
                 val x = it.values[0]
@@ -69,52 +132,46 @@ class SensorService : Service(), SensorEventListener {
                 val currentTime = System.currentTimeMillis()
 
                 if (!isWaitingForStillness) {
-                    // [1단계] 큰 충격이 발생했는지 감시
                     if (gForce > IMPACT_THRESHOLD) {
                         isWaitingForStillness = true
                         impactTime = currentTime
-                        // 로그: "충격 감지! 움직임 감시 시작"
                     }
                 } else {
-                    // [2단계] 충격 이후 움직임이 있는지 감시
                     val timePassed = currentTime - impactTime
-
-                    // A. 충격 직후 2초간은 폰이 튕길 수 있으므로 무시 (Stabilization)
                     if (timePassed < STABILIZATION_TIME_MS) return
 
-                    // B. 2초가 지났는데, 사용자가 움직이는가?
-                    // 현재 gForce와 9.8(중력)의 차이가 크다면 움직이는 것임
                     if (Math.abs(gForce - 9.8f) > MOTION_THRESHOLD) {
-                        // 사용자가 움직임 -> 알람 취소 및 초기화
                         isWaitingForStillness = false
-                        // 로그: "움직임 감지됨. 알람 취소"
                         return
                     }
 
                     if (timePassed > WAIT_TIME_MS) {
-                        triggerAlert() // 알람 발동!
-                        isWaitingForStillness = false // 초기화
+                        Log.w("Saivior", "📉 낙상 감지됨!")
+                        triggerAlert("낙상 감지")
+                        isWaitingForStillness = false
                     }
                 }
-
             }
         }
     }
 
-    private fun triggerAlert() {
-        // 앱이 포그라운드일 때만 Standby 화면 이동 처리
-        sendBroadcast(Intent(ACTION_SENSOR_TRIGGERED).apply { setPackage(packageName) })
+    private fun triggerAlert(reason: String) {
+        if (isAlertTriggered) return
+        isAlertTriggered = true
+
+        Log.e("Saivior", "🚨 비상 알림 발동! 원인: $reason")
+
+        voiceDetector.stopListening()
+        sensorManager.unregisterListener(this)
 
         val intent = Intent(this, AlertActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        intent.putExtra("isFallDetected", true)
+        intent.putExtra("triggerReason", reason)
 
-        // 권한이 있으면 화면을 바로 띄워버림 (홈화면 상태 해결)
         if (Settings.canDrawOverlays(this)) {
             startActivity(intent)
         }
 
-        // 잠김 화면일 때를 대비해 기존 알림 로직도 유지
         val fullScreenPendingIntent = PendingIntent.getActivity(
             this,
             System.currentTimeMillis().toInt(),
@@ -124,8 +181,8 @@ class SensorService : Service(), SensorEventListener {
 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("재난 감지!")
-            .setContentText("터치하여 전체 화면 보기")
+            .setContentTitle("재난 감지! ($reason)")
+            .setContentText("터치하여 구조 요청 보내기")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setFullScreenIntent(fullScreenPendingIntent, true)
@@ -135,35 +192,45 @@ class SensorService : Service(), SensorEventListener {
         notificationManager.notify(9999, notificationBuilder.build())
     }
 
+    // [오류 해결] 알림 객체를 생성하고 포그라운드를 시작하는 전체 함수
     private fun startForegroundServiceNotification() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID_HIDDEN)
-            .setContentTitle("")
-            .setContentText("")
+            .setContentTitle("Saivior 감시 중")
+            .setContentText("넘어짐 및 구조 요청 대기 중...")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setShowWhen(false)
             .build()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            val serviceType = if (Build.VERSION.SDK_INT >= 34) {
+                // Android 14 이상: 마이크 권한 필수
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
+            startForeground(1, notification, serviceType)
         } else {
             startForeground(1, notification)
         }
     }
 
+    // [오류 해결] 채널 생성 전체 함수
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID_HIDDEN,
-                "백그라운드 감시 (숨김)",
+                "백그라운드 감시",
                 NotificationManager.IMPORTANCE_MIN
             ).apply {
                 setShowBadge(false)
                 enableVibration(false)
                 lockscreenVisibility = Notification.VISIBILITY_SECRET
             }
+
             val alertChannel = NotificationChannel(
                 CHANNEL_ID_ALERT, "재난 경보", NotificationManager.IMPORTANCE_HIGH
             ).apply {
@@ -176,10 +243,13 @@ class SensorService : Service(), SensorEventListener {
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-    override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
         super.onDestroy()
         sensorManager.unregisterListener(this)
+        voiceDetector.stopListening()
+        intentClassifier.close()
     }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    override fun onBind(intent: Intent?): IBinder? = null
 }
