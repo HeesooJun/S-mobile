@@ -29,6 +29,7 @@ import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
 import com.example.lifesaiver.protocol.mesh.GossipTlv
 import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
+import com.example.lifesaiver.protocol.mesh.PeerIdentityRegistry
 import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
 import com.example.lifesaiver.protocol.model.Packet
@@ -158,6 +159,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
     private val meshGraphRegistry = MeshGraphRegistry()
+    private val peerIdentityRegistry = PeerIdentityRegistry()
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
@@ -439,10 +441,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
-                    val age = System.currentTimeMillis() - packet.header.timestamp
+                    val now = System.currentTimeMillis()
+                    val age = now - packet.header.timestamp
                     if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
                     val peerHex = bytesToHex(packet.header.senderId)
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    val decision = peerIdentityRegistry.handleAnnounce(
+                        peerId = peerHex,
+                        nickname = announcement.nickname,
+                        noisePublicKey = announcement.noisePublicKey,
+                        now = now,
+                        duplicateNicknameStaleMs = ProtocolConstants.Mesh.DUPLICATE_NICKNAME_STALE_MS
+                    )
+                    if (!decision.accept) return@setOnPacketReceived
+                    decision.removedPeerIds.forEach { removedPeerId ->
+                        meshGraphRegistry.removePeer(removedPeerId)
+                        gossipSyncManager.removeAnnouncementForPeer(removedPeerId)
+                        announcedToPeers.remove(removedPeerId)
+                    }
                     val neighbors = GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload)
                     meshGraphRegistry.updateFromAnnouncement(
                         originPeerId = peerHex,
@@ -456,6 +472,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.LEAVE -> {
                     val peerHex = bytesToHex(packet.header.senderId)
                     meshGraphRegistry.removePeer(peerHex)
+                    peerIdentityRegistry.removePeer(peerHex)
+                    gossipSyncManager.removeAnnouncementForPeer(peerHex)
+                    announcedToPeers.remove(peerHex)
                     updateMeshCount()
                 }
                 PacketType.MESSAGE -> {
