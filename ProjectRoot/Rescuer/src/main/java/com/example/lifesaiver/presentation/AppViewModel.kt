@@ -45,6 +45,7 @@ import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
 import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -120,6 +121,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiEvents = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
     val uiEvents: SharedFlow<UiEvent> = _uiEvents.asSharedFlow()
+
+    private val _meshVisualEvents = MutableSharedFlow<MeshVisualEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val meshVisualEvents: SharedFlow<MeshVisualEvent> = _meshVisualEvents.asSharedFlow()
 
     // 권한 목록
     val requiredPermissions: Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -520,6 +527,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             val pathLabel = packetPathLabel(packet, relayAddress)
             val peerHex = bytesToHex(packet.header.senderId)
+            emitMeshActivity(peerHex)
             if (packet.header.type != PacketType.LEAVE && packet.header.type != PacketType.ANNOUNCE) {
                 meshGraphRegistry.touchPeer(peerHex, peerNicknames[peerHex], System.currentTimeMillis())
             }
@@ -645,6 +653,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun updateMeshCount() {
         val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
         _uiState.update { it.copy(meshPeerCount = meshCount) }
+    }
+
+    private fun emitMeshActivity(peerId: String) {
+        _meshVisualEvents.tryEmit(MeshVisualEvent.PacketActivity(peerId))
     }
 
     private fun refreshDirectPeers() {
