@@ -58,6 +58,7 @@ import com.example.lifesaiver.ui.components.BatteryIndicator
 import com.example.lifesaiver.ui.components.MeshMap
 import com.example.lifesaiver.ui.components.MeshNode
 import com.example.lifesaiver.ui.components.MicButton
+import com.example.lifesaiver.ui.components.tripleClickable
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SignalBars
 import com.example.lifesaiver.ui.components.SignalVariant
@@ -82,7 +83,8 @@ fun PTTLinkScreen(
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
-    onChat: () -> Unit
+    onChat: () -> Unit,
+    onPanicClear: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
@@ -183,6 +185,16 @@ fun PTTLinkScreen(
                 // 완전 해제 개념이 없으면 아래처럼 단순 처리해도 됨
                 isForceExit = !isPowerSaving,
                 onRequestExitPowerSaving = { setPowerSaving(false) }
+            )
+            Text(
+                text = "LIFESAIVER",
+                color = AppColors.Gray500,
+                fontSize = scaledSp(12, scale),
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
+                    .tripleClickable(onTripleClick = onPanicClear)
             )
             Column(
                 modifier = Modifier
