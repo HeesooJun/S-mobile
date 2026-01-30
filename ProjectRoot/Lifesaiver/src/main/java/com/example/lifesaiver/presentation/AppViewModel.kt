@@ -218,6 +218,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isRescueSignalActive = true) }
     }
 
+    fun pulseRescueSignal() {
+        if (!_uiState.value.hasPermissions) return
+        if (!::bleManager.isInitialized) return
+        bleManager.pulseEmergencyAdvertising()
+    }
+
     fun stopRescueSignal() {
         // 1. 신호 중단
         bleManager.stopAdvertising()
@@ -514,6 +520,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             val pathLabel = packetPathLabel(packet, relayAddress)
             val peerHex = bytesToHex(packet.header.senderId)
+            if (packet.header.type != PacketType.LEAVE && packet.header.type != PacketType.ANNOUNCE) {
+                meshGraphRegistry.touchPeer(peerHex, peerNicknames[peerHex], System.currentTimeMillis())
+            }
             if (relayAddress != null && pathLabel == "direct") {
                 bleManager.bindPeerIdForAddress(relayAddress, peerHex)
                 bleManager.onAnnounceReceived(relayAddress)
