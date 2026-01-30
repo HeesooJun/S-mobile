@@ -20,5 +20,8 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Lifesaiver"
-include(":app")
+include(":lifesaiver", ":rescuer")
+
+project(":lifesaiver").projectDir = file("Lifesaiver")
+project(":rescuer").projectDir = file("Rescuer")
  
