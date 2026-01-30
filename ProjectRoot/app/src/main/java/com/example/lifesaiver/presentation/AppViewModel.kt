@@ -34,8 +34,10 @@ import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
+import com.example.lifesaiver.protocol.model.RequestSyncPayload
 import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
+import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -131,6 +133,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
     private lateinit var signatureManager: SignatureManager
+    private lateinit var gossipSyncManager: GossipSyncManager
     private val signatureLogBuffer = ArrayDeque<SignatureLogEntry>()
 
     // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
@@ -338,7 +341,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onSendMessage(text: String) {
         if (text.isBlank()) return
-        protocolCore.broadcast(buildMessagePacket(text))
+        val packet = buildMessagePacket(text)
+        val signedPacket = signatureManager.sign(packet)
+        gossipSyncManager.onPublicPacketSeen(signedPacket)
+        protocolCore.broadcast(signedPacket)
         addMessage(ChatMessage(text = text, isMine = true))
     }
 
@@ -377,6 +383,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (newPeers.isNotEmpty()) {
                     sendAnnounce()
                     announcedToPeers.addAll(newPeers)
+                    newPeers.forEach { peerId ->
+                        gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
+                    }
                 }
                 announcedToPeers.retainAll(directPeerIds.toSet())
                 _uiState.update {
@@ -412,11 +421,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             myPeerId = senderId,
             signatureManager = signatureManager
         )
+        gossipSyncManager = GossipSyncManager(
+            myPeerId = senderId,
+            scope = viewModelScope,
+            sender = object : GossipSyncManager.Sender {
+                override fun broadcast(packet: Packet) {
+                    protocolCore.broadcast(packet)
+                }
+
+                override fun sendToPeer(peerId: ByteArray, packet: Packet) {
+                    protocolCore.send(packet)
+                }
+            }
+        )
         protocolCore.setOnPacketReceived { packet ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
+                    val age = System.currentTimeMillis() - packet.header.timestamp
+                    if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
                     val peerHex = bytesToHex(packet.header.senderId)
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     val neighbors = GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload)
@@ -427,6 +451,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         timestamp = packet.header.timestamp
                     )
                     updateMeshCount()
+                    gossipSyncManager.onPublicPacketSeen(packet)
                 }
                 PacketType.LEAVE -> {
                     val peerHex = bytesToHex(packet.header.senderId)
@@ -436,6 +461,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.MESSAGE -> {
                     val text = packet.payload.toString(Charsets.UTF_8)
                     addMessage(ChatMessage(text = text, isMine = false))
+                    if (packet.header.recipientId == null) {
+                        gossipSyncManager.onPublicPacketSeen(packet)
+                    }
                 }
                 PacketType.FILE_TRANSFER -> {
                     viewModelScope.launch(Dispatchers.IO) {
@@ -457,11 +485,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                PacketType.REQUEST_SYNC -> {
+                    val request = RequestSyncPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    gossipSyncManager.handleRequestSync(packet.header.senderId, request)
+                }
                 else -> Unit
             }
         }
         startAnnounceLoop()
         startMeshCleanupLoop()
+        gossipSyncManager.start()
     }
 
     private fun initBatteryMonitor() {
@@ -558,7 +591,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             ),
             payload = payload
         )
-        protocolCore.broadcast(packet)
+        val signedPacket = signatureManager.sign(packet)
+        gossipSyncManager.onPublicPacketSeen(signedPacket)
+        protocolCore.broadcast(signedPacket)
     }
 
     private fun observeProfileName() {
@@ -633,6 +668,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         announceJob?.cancel()
         meshCleanupJob?.cancel()
         bleDebugJob?.cancel()
+        if (::gossipSyncManager.isInitialized) {
+            gossipSyncManager.stop()
+        }
 
         // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {
