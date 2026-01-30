@@ -193,11 +193,17 @@ fun MeshMap(
                 )
                 val label = node.label
                 if (!label.isNullOrBlank()) {
+                    val shortId = if (node.id.length > 8) node.id.take(8) else node.id
+                    val displayLabel = if (label == node.id) {
+                        label
+                    } else {
+                        "$label ($shortId)"
+                    }
                     val color = if (node.isSelf) AppColors.Green else labelColor
                     labelPaint.color = color.toArgb()
                     labelPaint.textSize = labelTextSizePx
                     drawContext.canvas.nativeCanvas.drawText(
-                        label,
+                        displayLabel,
                         screenOffset.x,
                         screenOffset.y + nodeRadius + labelPaddingPx + labelTextSizePx,
                         labelPaint
@@ -256,6 +262,7 @@ private fun findNodeHit(
         val base = layoutPositions[node.id] ?: Offset.Zero
         val offset = manualOffsets[node.id] ?: base
         val distance = hypot(point.x - offset.x, point.y - offset.y)
+        if (node.isSelf) return@forEach
         if (distance <= radius && distance < closestDistance) {
             closestDistance = distance
             closestId = node.id

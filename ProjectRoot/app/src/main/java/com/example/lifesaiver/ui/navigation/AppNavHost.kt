@@ -30,6 +30,7 @@ import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
+import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.screen.mode.ModeGateScreen
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
@@ -52,12 +53,15 @@ fun AppNavHost(
     meshPeerCount: Int,
     directPeerIds: List<String>,
     myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>,
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
     messages: List<ChatMessage>,
     signatureLogs: List<SignatureLogEntry>,
+    profileLogs: List<ProfileSyncLogEntry>,
     onStartAutoConnect: () -> Unit,
     onStopAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
@@ -66,7 +70,10 @@ fun AppNavHost(
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
+    onSendProfileTest: () -> Unit,
+    onSendProfileUpdate: (SurvivorProfile) -> Unit,
     onClearSignatureLogs: () -> Unit,
+    onClearProfileLogs: () -> Unit,
     onClearDeviceMonitoring: () -> Unit,
     onRouteChanged: (String) -> Unit = {}
 ) {
@@ -218,11 +225,17 @@ fun AppNavHost(
             SurvivorProfileScreen(
                 profileStore = profileStore,
                 onSaved = {
-                    onStartAutoConnect()
-                    navController.navigate(AppRoute.SurvivorStandby.route) {
-                        popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+                    val prevRoute = navController.previousBackStackEntry?.destination?.route
+                    if (prevRoute == AppRoute.ModeGate.route || prevRoute == null) {
+                        onStartAutoConnect()
+                        navController.navigate(AppRoute.SurvivorStandby.route) {
+                            popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+                        }
+                    } else {
+                        navController.popBackStack()
                     }
                 },
+                onSendProfileUpdate = onSendProfileUpdate,
                 onBack = { navController.popBackStack() }
             )
         }
@@ -258,6 +271,8 @@ fun AppNavHost(
                 meshPeerCount = meshPeerCount,
                 directPeerIds = directPeerIds,
                 myPeerId = myPeerId,
+                myNickname = myNickname,
+                peerNicknames = peerNicknames,
                 bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
@@ -271,6 +286,7 @@ fun AppNavHost(
                     }
                 },
                 onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
+                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onPanicClear = onClearDeviceMonitoring
             )
         }
@@ -283,7 +299,10 @@ fun AppNavHost(
                 meshPeerCount = meshPeerCount,
                 messages = messages,
                 signatureLogs = signatureLogs,
+                profileLogs = profileLogs,
                 onClearSignatureLogs = onClearSignatureLogs,
+                onClearProfileLogs = onClearProfileLogs,
+                onSendProfileTest = onSendProfileTest,
                 onPrev = { navController.popBackStack() },
                 inputValue = chatState.inputValue,
                 onInputChange = { chatViewModel.onInputChange(it) },
@@ -340,7 +359,10 @@ fun AppNavHost(
                 meshPeerCount = meshPeerCount,
                 messages = messages,
                 signatureLogs = signatureLogs,
+                profileLogs = profileLogs,
                 onClearSignatureLogs = onClearSignatureLogs,
+                onClearProfileLogs = onClearProfileLogs,
+                onSendProfileTest = onSendProfileTest,
                 onPrev = { navController.popBackStack() },
                 onSend = onSendMessage
             )
