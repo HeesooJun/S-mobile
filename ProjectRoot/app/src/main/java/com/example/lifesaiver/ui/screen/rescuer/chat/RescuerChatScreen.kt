@@ -26,11 +26,13 @@ import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
+import com.example.lifesaiver.ui.components.DbLogDialog
 import com.example.lifesaiver.ui.components.SignatureLogDialog
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 
 @Composable
@@ -39,7 +41,10 @@ fun RescuerChatScreen(
     meshPeerCount: Int,
     messages: List<ChatMessage>,
     signatureLogs: List<SignatureLogEntry>,
+    profileLogs: List<ProfileSyncLogEntry>,
     onClearSignatureLogs: () -> Unit,
+    onClearProfileLogs: () -> Unit,
+    onSendProfileTest: () -> Unit,
     onPrev: () -> Unit,
     onSend: (String) -> Unit
 ) {
@@ -47,6 +52,7 @@ fun RescuerChatScreen(
     val scale = LocalAppScale.current
     val participantCount = meshPeerCount.coerceAtLeast(0)
     val (showSignatureLog, setShowSignatureLog) = remember { mutableStateOf(false) }
+    val (showDbLog, setShowDbLog) = remember { mutableStateOf(false) }
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -94,6 +100,32 @@ fun RescuerChatScreen(
                 ) {
                     Text(
                         text = "로그",
+                        color = AppColors.White,
+                        fontSize = scaledSp(10, scale),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .background(AppColors.Gray700, shape = RoundedCornerShape(scaledDp(12, scale)))
+                        .clickable { setShowDbLog(true) }
+                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                ) {
+                    Text(
+                        text = "DB 로그",
+                        color = AppColors.White,
+                        fontSize = scaledSp(10, scale),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .background(AppColors.Gray700, shape = RoundedCornerShape(scaledDp(12, scale)))
+                        .clickable { onSendProfileTest() }
+                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                ) {
+                    Text(
+                        text = "TLV 전송",
                         color = AppColors.White,
                         fontSize = scaledSp(10, scale),
                         fontWeight = FontWeight.SemiBold
@@ -187,6 +219,13 @@ fun RescuerChatScreen(
                 entries = signatureLogs,
                 onDismiss = { setShowSignatureLog(false) },
                 onClear = onClearSignatureLogs
+            )
+        }
+        if (showDbLog) {
+            DbLogDialog(
+                entries = profileLogs,
+                onDismiss = { setShowDbLog(false) },
+                onClear = onClearProfileLogs
             )
         }
     }

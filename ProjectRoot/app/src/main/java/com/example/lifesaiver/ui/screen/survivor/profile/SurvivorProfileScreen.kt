@@ -66,6 +66,7 @@ import kotlinx.coroutines.launch
 fun SurvivorProfileScreen(
     profileStore: ProfileStore,
     onSaved: () -> Unit,
+    onSendProfileUpdate: (SurvivorProfile) -> Unit,
     onBack: () -> Unit
 ) {
     val scale = LocalAppScale.current
@@ -76,11 +77,13 @@ fun SurvivorProfileScreen(
     var name by rememberSaveable { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("") }
     var birthDate by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(profileState) {
         name = profileState.name
         gender = profileState.gender
         birthDate = profileState.birthDate
+        notes = profileState.notes
 
         if (!profileState.isComplete) {
             name = name.ifBlank { "홍길동" }
@@ -167,14 +170,14 @@ fun SurvivorProfileScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(horizontal = scaledDp(35, scale)),
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(scaledDp(25, scale)))
-            Spacer(modifier = Modifier.weight(1f))
-            Column(modifier = formModifier)
-            {
-                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
+            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+            Column(
+                modifier = formModifier,
+                verticalArrangement = Arrangement.spacedBy(scaledDp(18, scale))
+            ) {
                 ProfileInputField(
                     label = "이름",
                     value = name,
@@ -182,7 +185,6 @@ fun SurvivorProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     onValueChange = { name = it }
                 )
-                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
                 ProfileExposedSelectField(
                     label = "성별",
                     value = gender,
@@ -191,7 +193,6 @@ fun SurvivorProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     onSelected = { gender = it }
                 )
-                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
                 ProfileDateField(
                     label = "생년월일",
                     value = birthDate,
@@ -203,9 +204,15 @@ fun SurvivorProfileScreen(
                         showDatePicker = true
                     }
                 )
+                ProfileInputField(
+                    label = "특이사항 (선택)",
+                    value = notes,
+                    placeholder = "알레르기, 지병 등",
+                    modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { notes = it }
+                )
             }
-            Spacer(modifier = Modifier.height(scaledDp(28, scale)))
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
         }
 
         Column(
@@ -228,7 +235,16 @@ fun SurvivorProfileScreen(
                                 SurvivorProfile(
                                     name = name,
                                     gender = gender,
-                                    birthDate = birthDate
+                                    birthDate = birthDate,
+                                    notes = notes
+                                )
+                            )
+                            onSendProfileUpdate(
+                                SurvivorProfile(
+                                    name = name,
+                                    gender = gender,
+                                    birthDate = birthDate,
+                                    notes = notes
                                 )
                             )
                             Toast.makeText(context, "저장 완료", Toast.LENGTH_SHORT).show()
