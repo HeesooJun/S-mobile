@@ -133,7 +133,6 @@ fun AppNavHost(
             currentRoute == AppRoute.SurvivorProfile.route &&
             navController.previousBackStackEntry == null
         ) {
-            onStartAutoConnect()
             navController.navigate(AppRoute.SurvivorStandby.route) {
                 popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
             }
@@ -189,7 +188,6 @@ fun AppNavHost(
                 onSaved = {
                     val prevRoute = navController.previousBackStackEntry?.destination?.route
                     if (prevRoute == null) {
-                        onStartAutoConnect()
                         navController.navigate(AppRoute.SurvivorStandby.route) {
                             popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
                         }
