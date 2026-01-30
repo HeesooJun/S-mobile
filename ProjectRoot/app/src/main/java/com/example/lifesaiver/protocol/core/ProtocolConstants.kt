@@ -8,6 +8,7 @@ object ProtocolConstants {
         const val ANNOUNCE_INITIAL_DELAY_MS: Long = 200L
         const val PEER_TIMEOUT_MS: Long = 180_000L
         const val PEER_CLEANUP_INTERVAL_MS: Long = 60_000L
+        const val DUPLICATE_NICKNAME_STALE_MS: Long = 10_000L
     }
 
     object Fragmentation {
