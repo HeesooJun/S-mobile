@@ -44,6 +44,7 @@ import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
 import com.example.lifesaiver.wakeup.SensorService
+import kotlinx.coroutines.delay
 
 @Composable
 fun AppNavHost(
@@ -71,6 +72,7 @@ fun AppNavHost(
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
+    onPulseRescueSignal: () -> Unit,
     onSendProfileTest: () -> Unit,
     onSendProfileUpdate: (SurvivorProfile) -> Unit,
     onClearSignatureLogs: () -> Unit,
@@ -86,9 +88,11 @@ fun AppNavHost(
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
+    var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var isSensorMonitoring by remember { mutableStateOf(false) }
     var sttEnabled by remember { mutableStateOf(false) }
+    val minSosDurationMs = 1_000L
 
     fun startSensorService() {
         val intent = Intent(appContext, SensorService::class.java)
@@ -159,8 +163,12 @@ fun AppNavHost(
         }
     }
 
-    LaunchedEffect(isConnected, pendingSosNavigation) {
+    LaunchedEffect(isConnected, pendingSosNavigation, sosStartedAt) {
         if (pendingSosNavigation && isConnected) {
+            val elapsed = System.currentTimeMillis() - sosStartedAt
+            if (elapsed < minSosDurationMs) {
+                delay(minSosDurationMs - elapsed)
+            }
             pendingSosNavigation = false
             navController.navigate(AppRoute.SurvivorPTT.route)
         }
@@ -216,6 +224,7 @@ fun AppNavHost(
                 onSos = {
                     onStartRescueSignal()
                     pendingSosNavigation = true
+                    sosStartedAt = System.currentTimeMillis()
                     onStartAutoConnect()
                     navController.navigate(AppRoute.SurvivorEmergency.route)
                 }
@@ -246,6 +255,12 @@ fun AppNavHost(
             val emergencyState by emergencyViewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
                 onStartAutoConnect()
+            }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    onPulseRescueSignal()
+                    delay(1_000L)
+                }
             }
             SurvivorEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,

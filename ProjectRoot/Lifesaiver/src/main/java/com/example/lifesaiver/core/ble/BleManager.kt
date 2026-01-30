@@ -207,6 +207,21 @@ class BleManager(
         startScan()
     }
 
+    fun pulseEmergencyAdvertising() {
+        if (adapter == null || !adapter.isEnabled) {
+            logCallback("Bluetooth is off.")
+            return
+        }
+        isHost = true
+        if (gattServer == null) {
+            setupGattServer()
+        }
+        stopAdvertising()
+        startAdvertisingInternal(isEmergencyMode = true)
+        startMaintenanceJobs()
+        startScan()
+    }
+
     // --------------------------------------------------------------------------
     // [자동 연결] Auto Connect 기능
     // --------------------------------------------------------------------------

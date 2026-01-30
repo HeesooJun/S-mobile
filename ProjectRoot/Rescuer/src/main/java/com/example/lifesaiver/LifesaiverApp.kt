@@ -69,6 +69,7 @@ fun LifesaiverApp(
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
+    onPulseRescueSignal: () -> Unit,
     onClearSignatureLogs: () -> Unit,
     onClearProfileLogs: () -> Unit,
     onClearDeviceMonitoring: () -> Unit
@@ -174,6 +175,7 @@ fun LifesaiverApp(
                 onDisconnect = onDisconnect,
                 onStartRescueSignal = onStartRescueSignal,
                 onStopRescueSignal = onStopRescueSignal,
+                onPulseRescueSignal = onPulseRescueSignal,
                 onClearDeviceMonitoring = onClearDeviceMonitoring,
                 onRouteChanged = { route -> currentRoute = route }
             )
