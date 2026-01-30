@@ -21,6 +21,7 @@ room = "2.6.1"
 ksp = "2.0.21-1.0.28"
 bouncycastle = "1.70"
 securityCrypto = "1.1.0"
+coroutines = "1.8.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -50,6 +51,7 @@ androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = 
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 bouncycastle-bcprov = { group = "org.bouncycastle", name = "bcprov-jdk15on", version.ref = "bouncycastle" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 
 
 [plugins]
