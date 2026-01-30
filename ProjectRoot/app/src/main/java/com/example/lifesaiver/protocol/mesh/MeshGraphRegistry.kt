@@ -18,13 +18,12 @@ class MeshGraphRegistry {
         neighborsOrNull: List<String>?,
         timestamp: Long
     ) {
-        if (originNickname != null) {
-            nicknames[originPeerId] = originNickname
-        }
-
         val previous = lastUpdate[originPeerId]
         if (previous != null && previous >= timestamp) return
         lastUpdate[originPeerId] = timestamp
+        if (originNickname != null) {
+            nicknames[originPeerId] = originNickname
+        }
 
         val neighbors = neighborsOrNull ?: emptyList()
         val newSet = neighbors.distinct().take(10).filter { it != originPeerId }.toSet()
