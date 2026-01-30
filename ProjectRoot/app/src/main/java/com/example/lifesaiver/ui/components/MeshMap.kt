@@ -41,9 +41,16 @@ data class MeshNode(
     val label: String? = null
 )
 
+data class MeshEdge(
+    val a: String,
+    val b: String,
+    val isConfirmed: Boolean = false
+)
+
 @Composable
 fun MeshMap(
     nodes: List<MeshNode>,
+    edges: List<MeshEdge> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val scaleFactor = LocalAppScale.current
@@ -154,18 +161,39 @@ fun MeshMap(
                 )
             }
 
-            nodes.filter { !it.isSelf && it.hop == 1 }.forEach { node ->
-                val nodeOffset = layoutPositions[node.id] ?: Offset.Zero
-                val draggedOffset = manualOffsets[node.id]
-                val graphOffset = draggedOffset ?: nodeOffset
-                val screenOffset = center + (graphOffset * zoom)
-                drawLine(
-                    color = edgeColor,
-                    start = center,
-                    end = screenOffset,
-                    strokeWidth = 1.3f * zoom,
-                    cap = StrokeCap.Round
-                )
+            if (edges.isNotEmpty()) {
+                edges.forEach { edge ->
+                    val aOffset = manualOffsets[edge.a] ?: layoutPositions[edge.a] ?: return@forEach
+                    val bOffset = manualOffsets[edge.b] ?: layoutPositions[edge.b] ?: return@forEach
+                    val aScreen = center + (aOffset * zoom)
+                    val bScreen = center + (bOffset * zoom)
+                    val color = if (edge.isConfirmed) {
+                        AppColors.Green.copy(alpha = 0.6f)
+                    } else {
+                        edgeColor
+                    }
+                    drawLine(
+                        color = color,
+                        start = aScreen,
+                        end = bScreen,
+                        strokeWidth = 1.3f * zoom,
+                        cap = StrokeCap.Round
+                    )
+                }
+            } else {
+                nodes.filter { !it.isSelf && it.hop == 1 }.forEach { node ->
+                    val nodeOffset = layoutPositions[node.id] ?: Offset.Zero
+                    val draggedOffset = manualOffsets[node.id]
+                    val graphOffset = draggedOffset ?: nodeOffset
+                    val screenOffset = center + (graphOffset * zoom)
+                    drawLine(
+                        color = edgeColor,
+                        start = center,
+                        end = screenOffset,
+                        strokeWidth = 1.3f * zoom,
+                        cap = StrokeCap.Round
+                    )
+                }
             }
 
             nodes.forEach { node ->

@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
                     myPeerId = uiState.myPeerId,
                     myNickname = uiState.myNickname,
                     peerNicknames = uiState.peerNicknames,
+                    meshGraphSnapshot = uiState.meshGraphSnapshot,
                     bleDebugStats = uiState.bleDebug,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
