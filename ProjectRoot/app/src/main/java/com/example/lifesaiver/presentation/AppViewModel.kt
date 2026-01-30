@@ -22,15 +22,22 @@ import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.media.FileTransferStorage
 import com.example.lifesaiver.core.model.ChatMessage
+import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.service.RescueService
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
-import com.example.lifesaiver.protocol.mesh.MeshPeerRegistry
+import com.example.lifesaiver.protocol.mesh.GossipTlv
+import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
 import com.example.lifesaiver.protocol.model.FileTransferPayload
+import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
+import com.example.lifesaiver.protocol.model.RequestSyncPayload
+import com.example.lifesaiver.protocol.security.SignatureManager
+import com.example.lifesaiver.protocol.security.SignatureLogEntry
+import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -40,6 +47,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -77,11 +85,13 @@ data class AppUiState(
     val connectedCount: Int = 0,
     val meshPeerCount: Int = 0,
     val directPeerIds: List<String> = emptyList(),
+    val myPeerId: String = "",
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
     val messages: List<ChatMessage> = emptyList(),
-    val bleDebug: BleDebugStats = BleDebugStats()
+    val bleDebug: BleDebugStats = BleDebugStats(),
+    val signatureLogs: List<SignatureLogEntry> = emptyList()
 )
 
 // UI 이벤트
@@ -122,6 +132,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var audioEngine: AudioEngine? = null
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
+    private lateinit var signatureManager: SignatureManager
+    private lateinit var gossipSyncManager: GossipSyncManager
+    private val signatureLogBuffer = ArrayDeque<SignatureLogEntry>()
 
     // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
@@ -138,10 +151,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             newId
         }
     }
+    private val profileStore = ProfileStore(app)
+    @Volatile private var cachedNickname: String = ""
+    private val announcedToPeers = mutableSetOf<String>()
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
-    private val meshRegistry = MeshPeerRegistry()
+    private val meshGraphRegistry = MeshGraphRegistry()
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
@@ -157,6 +173,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         initBle()
         initBatteryMonitor()
         refreshPermissions()
+        observeProfileName()
+        _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
     }
 
     // ------------------------------------------------------------------------
@@ -323,7 +341,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onSendMessage(text: String) {
         if (text.isBlank()) return
-        protocolCore.broadcast(buildMessagePacket(text))
+        val packet = buildMessagePacket(text)
+        val signedPacket = signatureManager.sign(packet)
+        gossipSyncManager.onPublicPacketSeen(signedPacket)
+        protocolCore.broadcast(signedPacket)
         addMessage(ChatMessage(text = text, isMine = true))
     }
 
@@ -358,11 +379,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             protocolCallback = { _, _ -> },
             connectionCallback = { connected, count ->
                 val directPeerIds = bleManager.getConnectedPeerIds()
+                val newPeers = directPeerIds.filterNot { announcedToPeers.contains(it) }
+                if (newPeers.isNotEmpty()) {
+                    sendAnnounce()
+                    announcedToPeers.addAll(newPeers)
+                    newPeers.forEach { peerId ->
+                        gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
+                    }
+                }
+                announcedToPeers.retainAll(directPeerIds.toSet())
                 _uiState.update {
+                    val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
                     it.copy(
                         isConnected = connected,
                         connectedCount = count,
-                        meshPeerCount = meshRegistry.count() + 1,
+                        meshPeerCount = meshCount,
                         directPeerIds = directPeerIds
                     )
                 }
@@ -383,24 +414,56 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
-        protocolCore = ProtocolCore(codec, codec, myPeerId = senderId)
+        signatureManager = SignatureManager(app, codec, ::appendSignatureLog)
+        protocolCore = ProtocolCore(
+            codec,
+            codec,
+            myPeerId = senderId,
+            signatureManager = signatureManager
+        )
+        gossipSyncManager = GossipSyncManager(
+            myPeerId = senderId,
+            scope = viewModelScope,
+            sender = object : GossipSyncManager.Sender {
+                override fun broadcast(packet: Packet) {
+                    protocolCore.broadcast(packet)
+                }
+
+                override fun sendToPeer(peerId: ByteArray, packet: Packet) {
+                    protocolCore.send(packet)
+                }
+            }
+        )
         protocolCore.setOnPacketReceived { packet ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
+                    val age = System.currentTimeMillis() - packet.header.timestamp
+                    if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
                     val peerHex = bytesToHex(packet.header.senderId)
-                    meshRegistry.markSeen(peerHex)
+                    val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    val neighbors = GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload)
+                    meshGraphRegistry.updateFromAnnouncement(
+                        originPeerId = peerHex,
+                        originNickname = announcement.nickname,
+                        neighborsOrNull = neighbors,
+                        timestamp = packet.header.timestamp
+                    )
                     updateMeshCount()
+                    gossipSyncManager.onPublicPacketSeen(packet)
                 }
                 PacketType.LEAVE -> {
                     val peerHex = bytesToHex(packet.header.senderId)
-                    meshRegistry.remove(peerHex)
+                    meshGraphRegistry.removePeer(peerHex)
                     updateMeshCount()
                 }
                 PacketType.MESSAGE -> {
                     val text = packet.payload.toString(Charsets.UTF_8)
                     addMessage(ChatMessage(text = text, isMine = false))
+                    if (packet.header.recipientId == null) {
+                        gossipSyncManager.onPublicPacketSeen(packet)
+                    }
                 }
                 PacketType.FILE_TRANSFER -> {
                     viewModelScope.launch(Dispatchers.IO) {
@@ -422,11 +485,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                PacketType.REQUEST_SYNC -> {
+                    val request = RequestSyncPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    gossipSyncManager.handleRequestSync(packet.header.senderId, request)
+                }
                 else -> Unit
             }
         }
         startAnnounceLoop()
         startMeshCleanupLoop()
+        gossipSyncManager.start()
     }
 
     private fun initBatteryMonitor() {
@@ -450,7 +518,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateMeshCount() {
-        val meshCount = meshRegistry.count() + 1
+        val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
         _uiState.update { it.copy(meshPeerCount = meshCount) }
     }
 
@@ -469,7 +537,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (meshCleanupJob?.isActive == true) return
         meshCleanupJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
-                meshRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
+                meshGraphRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
                 updateMeshCount()
                 delay(ProtocolConstants.Mesh.PEER_CLEANUP_INTERVAL_MS)
             }
@@ -488,19 +556,65 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun sendAnnounce() {
+        val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
+        val noisePublicKey = signatureManager.getNoisePublicKeyBytes()
+        val signingPublicKey = signatureManager.getPublicKeyBytes()
+        val announcement = IdentityAnnouncementPayload(
+            nickname = nickname,
+            noisePublicKey = noisePublicKey,
+            signingPublicKey = signingPublicKey
+        )
+        val basePayload = announcement.encode() ?: return
+        val directPeers = bleManager.getConnectedPeerIds()
+        val payload = if (directPeers.isNotEmpty()) {
+            basePayload + GossipTlv.encodeNeighbors(directPeers)
+        } else {
+            basePayload
+        }
+        val now = System.currentTimeMillis()
+        meshGraphRegistry.updateFromAnnouncement(
+            originPeerId = bytesToHex(senderId),
+            originNickname = nickname,
+            neighborsOrNull = directPeers,
+            timestamp = now
+        )
+        updateMeshCount()
         val packet = Packet(
             header = PacketHeader(
                 version = 2,
                 type = PacketType.ANNOUNCE,
                 ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
                 flags = 0,
-                length = 0,
-                timestamp = System.currentTimeMillis(),
+                length = payload.size,
+                timestamp = now,
                 senderId = senderId
             ),
-            payload = ByteArray(0)
+            payload = payload
         )
-        protocolCore.broadcast(packet)
+        val signedPacket = signatureManager.sign(packet)
+        gossipSyncManager.onPublicPacketSeen(signedPacket)
+        protocolCore.broadcast(signedPacket)
+    }
+
+    private fun observeProfileName() {
+        viewModelScope.launch {
+            profileStore.profileFlow.collect { profile ->
+                cachedNickname = profile.name.trim()
+            }
+        }
+    }
+
+    fun clearSignatureLogs() {
+        signatureLogBuffer.clear()
+        _uiState.update { it.copy(signatureLogs = emptyList()) }
+    }
+
+    private fun appendSignatureLog(entry: SignatureLogEntry) {
+        signatureLogBuffer.addLast(entry)
+        while (signatureLogBuffer.size > MAX_SIGNATURE_LOGS) {
+            signatureLogBuffer.removeFirst()
+        }
+        _uiState.update { it.copy(signatureLogs = signatureLogBuffer.toList()) }
     }
 
     private fun buildMessagePacket(text: String): Packet {
@@ -543,6 +657,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             .toByteArray()
     }
 
+    private companion object {
+        const val MAX_SIGNATURE_LOGS = 200
+    }
+
     override fun onCleared() {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
@@ -550,6 +668,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         announceJob?.cancel()
         meshCleanupJob?.cancel()
         bleDebugJob?.cancel()
+        if (::gossipSyncManager.isInitialized) {
+            gossipSyncManager.stop()
+        }
 
         // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {
