@@ -1,5 +1,6 @@
 package com.example.lifesaiver
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
@@ -14,10 +15,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
-import com.example.lifesaiver.presentation.AppShutdownCoordinator
 import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.UiEvent
 import com.example.lifesaiver.ui.theme.LifesaiverTheme
+import com.example.lifesaiver.core.service.RescueService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -123,10 +124,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (isFinishing) {
-            AppShutdownCoordinator.requestShutdown(
-                onSendLeave = { viewModel.sendLeaveOnShutdown() },
-                onStopServices = { viewModel.stopServicesForShutdown() }
-            )
+            val intent = Intent(this, RescueService::class.java).apply {
+                action = RescueService.ACTION_SHUTDOWN
+            }
+            startService(intent)
         }
         super.onDestroy()
     }

@@ -193,6 +193,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         observeProfileName()
         observeMeshGraph()
         _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
+        AppShutdownHooks.register(
+            onSendLeave = { sendLeaveOnShutdown() },
+            onStopServices = { stopServicesForShutdown() }
+        )
     }
 
     // ------------------------------------------------------------------------
@@ -211,7 +215,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 2. RescueService: 백그라운드 서비스 시작
         try {
             val intent = Intent(app, RescueService::class.java).apply {
-                action = "START_RESCUE"
+                action = RescueService.ACTION_START_RESCUE
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 app.startForegroundService(intent)
@@ -238,7 +242,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 2. 백그라운드 서비스 종료
         try {
             val intent = Intent(app, RescueService::class.java).apply {
-                action = "STOP_RESCUE"
+                action = RescueService.ACTION_STOP_RESCUE
             }
             app.startService(intent)
         } catch (e: Exception) {
@@ -449,7 +453,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         try {
             val intent = Intent(app, RescueService::class.java).apply {
-                action = "STOP_RESCUE"
+                action = RescueService.ACTION_STOP_RESCUE
             }
             app.startService(intent)
         } catch (e: Exception) {
@@ -924,6 +928,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        AppShutdownHooks.clear()
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
@@ -941,7 +946,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         // 앱 종료 시 서비스도 같이 종료
         val intent = Intent(app, RescueService::class.java).apply {
-            action = "STOP_RESCUE"
+            action = RescueService.ACTION_STOP_RESCUE
         }
         app.startService(intent)
 

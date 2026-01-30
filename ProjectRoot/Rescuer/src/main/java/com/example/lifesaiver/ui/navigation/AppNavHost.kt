@@ -202,7 +202,6 @@ fun AppNavHost(
                 onYes = {
                     sttEnabled = false
                     if (profileState.isComplete) {
-                        onStartAutoConnect()
                         navController.navigate(AppRoute.SurvivorStandby.route)
                     } else {
                         navController.navigate(AppRoute.SurvivorProfile.route)
@@ -211,7 +210,6 @@ fun AppNavHost(
                 onNo = { activity?.finish() },
                 onRescuerMode = {
                     sttEnabled = false
-                    onStartAutoConnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
                 onToggleSensorMonitor = {
@@ -251,7 +249,6 @@ fun AppNavHost(
                 onSaved = {
                     val prevRoute = navController.previousBackStackEntry?.destination?.route
                     if (prevRoute == AppRoute.ModeGate.route || prevRoute == null) {
-                        onStartAutoConnect()
                         navController.navigate(AppRoute.SurvivorStandby.route) {
                             popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
                         }
@@ -339,9 +336,6 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerStandby.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
-            }
             RescuerStandbyScreen(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
