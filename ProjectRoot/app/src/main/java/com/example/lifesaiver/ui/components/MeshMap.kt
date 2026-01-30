@@ -192,8 +192,9 @@ fun MeshMap(
                     style = Stroke(width = 1f * zoom)
                 )
                 val label = node.label
-                if (!label.isNullOrBlank() && !node.isSelf) {
-                    labelPaint.color = labelColor.toArgb()
+                if (!label.isNullOrBlank()) {
+                    val color = if (node.isSelf) AppColors.Green else labelColor
+                    labelPaint.color = color.toArgb()
                     labelPaint.textSize = labelTextSizePx
                     drawContext.canvas.nativeCanvas.drawText(
                         label,

@@ -12,6 +12,7 @@ import com.example.lifesaiver.protocol.relay.PacketRelayManager
 import com.example.lifesaiver.protocol.relay.PacketRelayManagerDelegate
 import com.example.lifesaiver.protocol.relay.PeerDirectory
 import com.example.lifesaiver.protocol.relay.RoutedPacket
+import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.storeforward.StoreForwardManager
 import com.example.lifesaiver.protocol.transport.Transport
 import com.example.lifesaiver.protocol.util.sha256Hex
@@ -33,7 +34,8 @@ class ProtocolCore(
     private val encoder: PacketEncoder,
     private val decoder: PacketDecoder,
     private val pipeline: PacketPipeline = PacketPipeline(encoder, decoder),
-    private val myPeerId: ByteArray
+    private val myPeerId: ByteArray,
+    private val signatureManager: SignatureManager? = null
 ) {
     private var transport: Transport? = null
     private var onPacket: ((Packet) -> Unit)? = null
@@ -82,44 +84,46 @@ class ProtocolCore(
     }
 
     fun send(packet: Packet) {
-        val recipientId = packet.header.recipientId
+        val signedPacket = signIfNeeded(packet)
+        val recipientId = signedPacket.header.recipientId
         if (recipientId != null) {
             val peerId = recipientId.toHexString()
-            if (packet.header.type == PacketType.FILE_ACK) {
-                storeForwardScope.launch { sendPacketToPeer(peerId, packet) }
+            if (signedPacket.header.type == PacketType.FILE_ACK) {
+                storeForwardScope.launch { sendPacketToPeer(peerId, signedPacket) }
                 return
             }
-            if (packet.header.type == PacketType.FILE_TRANSFER) {
+            if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
                 storeForwardScope.launch {
-                    val delivered = sendFileTransferWithAck(peerId, packet)
+                    val delivered = sendFileTransferWithAck(peerId, signedPacket)
                     if (!delivered) {
-                        storeForwardManager.cache(packet)
+                        storeForwardManager.cache(signedPacket)
                     }
                 }
                 return
             }
             storeForwardScope.launch {
-                val delivered = sendPacketToPeer(peerId, packet)
+                val delivered = sendPacketToPeer(peerId, signedPacket)
                 if (!delivered) {
-                    storeForwardManager.cache(packet)
+                    storeForwardManager.cache(signedPacket)
                 }
             }
             return
         }
-        if (packet.header.type == PacketType.FILE_TRANSFER) {
-            sendFileTransfer(packet, isBroadcast = false)
+        if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
+            sendFileTransfer(signedPacket, isBroadcast = false)
             return
         }
-        val packets = pipeline.prepareOutbound(packet)
+        val packets = pipeline.prepareOutbound(signedPacket)
         packets.forEach { transport?.send(encoder.encode(it)) }
     }
 
     fun broadcast(packet: Packet) {
-        if (packet.header.type == PacketType.FILE_TRANSFER) {
-            sendFileTransfer(packet, isBroadcast = true)
+        val signedPacket = signIfNeeded(packet)
+        if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
+            sendFileTransfer(signedPacket, isBroadcast = true)
             return
         }
-        val packets = pipeline.prepareOutbound(packet)
+        val packets = pipeline.prepareOutbound(signedPacket)
         packets.forEach { transport?.broadcast(encoder.encode(it)) }
     }
 
@@ -163,6 +167,10 @@ class ProtocolCore(
         }
 
         val inbound = pipeline.handleInbound(packet)
+        val candidateForVerification = inbound.packetForApp ?: inbound.packetForRelay
+        if (candidateForVerification != null && !verifyIfNeeded(candidateForVerification)) {
+            return
+        }
         inbound.packetForRelay?.let {
             relayManager.handlePacketRelay(RoutedPacket(it, peerId, relayAddress))
         }
@@ -170,7 +178,8 @@ class ProtocolCore(
     }
 
     private fun sendFileTransfer(packet: Packet, isBroadcast: Boolean) {
-        val transferId = packet.payload.sha256Hex()
+        val signedPacket = signIfNeeded(packet)
+        val transferId = signedPacket.payload.sha256Hex()
         fileTransferJobs.remove(transferId)?.cancel()
         val job = fileTransferScope.launch {
             val delayMs = ProtocolConstants.FileTransfer.FRAGMENT_DELAY_MS
@@ -183,7 +192,7 @@ class ProtocolCore(
                     true
                 }
             }
-            sendFragments(packet, delayMs, sender)
+            sendFragments(signedPacket, delayMs, sender)
         }
         fileTransferJobs[transferId] = job
         job.invokeOnCompletion { fileTransferJobs.remove(transferId) }
@@ -191,13 +200,14 @@ class ProtocolCore(
 
     private suspend fun sendPacketToPeer(peerId: String, packet: Packet): Boolean {
         val address = peerDirectory.getAddress(peerId) ?: return false
-        if (packet.header.type == PacketType.FILE_TRANSFER) {
+        val signedPacket = signIfNeeded(packet)
+        if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
             val delayMs = ProtocolConstants.FileTransfer.FRAGMENT_DELAY_MS
-            return sendFragments(packet, delayMs) { fragment ->
+            return sendFragments(signedPacket, delayMs) { fragment ->
                 transport?.sendToAddress(address, encoder.encode(fragment)) ?: false
             }
         }
-        val packets = pipeline.prepareOutbound(packet)
+        val packets = pipeline.prepareOutbound(signedPacket)
         for (fragment in packets) {
             val sent = transport?.sendToAddress(address, encoder.encode(fragment)) ?: false
             if (!sent) return false
@@ -259,6 +269,17 @@ class ProtocolCore(
         )
         val peerId = recipientId.toHexString()
         storeForwardScope.launch { sendPacketToPeer(peerId, packet) }
+    }
+
+    private fun signIfNeeded(packet: Packet): Packet {
+        val manager = signatureManager ?: return packet
+        if (packet.header.signature != null) return packet
+        return manager.sign(packet)
+    }
+
+    private fun verifyIfNeeded(packet: Packet): Boolean {
+        val manager = signatureManager ?: return true
+        return manager.verify(packet)
     }
 
     private fun handleFileAck(packet: Packet) {

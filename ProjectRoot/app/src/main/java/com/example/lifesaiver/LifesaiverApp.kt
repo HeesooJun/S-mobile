@@ -28,6 +28,7 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
+import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.navigation.AppRoute
 import com.example.lifesaiver.ui.theme.AppColors
@@ -45,11 +46,13 @@ fun LifesaiverApp(
     connectedCount: Int,
     meshPeerCount: Int,
     directPeerIds: List<String>,
+    myPeerId: String,
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
     messages: List<ChatMessage>,
+    signatureLogs: List<SignatureLogEntry>,
     onRequestPermissions: () -> Unit,
     onStartAutoConnect: () -> Unit,
     onStopAutoConnect: () -> Unit,
@@ -58,7 +61,8 @@ fun LifesaiverApp(
     onSendMessage: (String) -> Unit,
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
-    onStopRescueSignal: () -> Unit
+    onStopRescueSignal: () -> Unit,
+    onClearSignatureLogs: () -> Unit
 ) {
     val scale = rememberAppScale()
 
@@ -138,11 +142,14 @@ fun LifesaiverApp(
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
                 directPeerIds = directPeerIds,
+                myPeerId = myPeerId,
                 bleDebugStats = bleDebugStats,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
                 messages = messages,
+                signatureLogs = signatureLogs,
+                onClearSignatureLogs = onClearSignatureLogs,
                 onStartAutoConnect = onStartAutoConnect,
                 onStopAutoConnect = onStopAutoConnect,
                 onMicPress = onMicPress,

@@ -74,6 +74,7 @@ fun PTTLinkScreen(
     connectedCount: Int,
     meshPeerCount: Int,
     directPeerIds: List<String>,
+    myPeerId: String,
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
@@ -134,8 +135,8 @@ fun PTTLinkScreen(
     val displayConnectedCount = meshDisplayCount
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
-    val meshNodes = remember(directPeerIds, meshDisplayCount) {
-        buildMeshNodes(directPeerIds, meshDisplayCount)
+    val meshNodes = remember(directPeerIds, meshDisplayCount, myPeerId) {
+        buildMeshNodes(directPeerIds, meshDisplayCount, myPeerId)
     }
 
     LaunchedEffect(expandedAction) {
@@ -597,13 +598,19 @@ private fun sensorStatusColor(status: SensorStatus): Color {
     }
 }
 
-private fun buildMeshNodes(directPeerIds: List<String>, meshPeerCount: Int): List<MeshNode> {
+private fun buildMeshNodes(
+    directPeerIds: List<String>,
+    meshPeerCount: Int,
+    myPeerId: String
+): List<MeshNode> {
     val directIds = directPeerIds.distinct()
     val directCount = directIds.size.coerceAtLeast(0)
-    val total = meshPeerCount.coerceAtLeast(directCount)
+    val peerCount = (meshPeerCount - 1).coerceAtLeast(0)
+    val total = peerCount.coerceAtLeast(directCount)
     val indirectCount = (total - directCount).coerceAtLeast(0)
     val nodes = mutableListOf<MeshNode>()
-    nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true))
+    val selfLabel = myPeerId.trim().ifBlank { "self" }
+    nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true, label = selfLabel))
     directIds.forEachIndexed { index, peerId ->
         val signal = 0.55f + (index % 5) * 0.1f
         nodes.add(
