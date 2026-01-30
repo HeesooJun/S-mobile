@@ -1,5 +1,6 @@
 package com.example.lifesaiver
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
@@ -17,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.UiEvent
 import com.example.lifesaiver.ui.theme.LifesaiverTheme
+import com.example.lifesaiver.core.service.RescueService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -60,6 +62,7 @@ class MainActivity : ComponentActivity() {
                     myNickname = uiState.myNickname,
                     peerNicknames = uiState.peerNicknames,
                     meshGraphSnapshot = uiState.meshGraphSnapshot,
+                    meshVisualEvents = viewModel.meshVisualEvents,
                     bleDebugStats = uiState.bleDebug,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
@@ -78,6 +81,7 @@ class MainActivity : ComponentActivity() {
                     onDisconnect = { viewModel.onDisconnect() },
                     onStartRescueSignal = { viewModel.startRescueSignal() },
                     onStopRescueSignal = { viewModel.stopRescueSignal() },
+                    onPulseRescueSignal = { viewModel.pulseRescueSignal() },
                     onClearSignatureLogs = { viewModel.clearSignatureLogs() },
                     onClearProfileLogs = { viewModel.clearProfileLogs() },
                     onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() }
@@ -116,5 +120,15 @@ class MainActivity : ComponentActivity() {
             it == PackageManager.PERMISSION_GRANTED
         }
         viewModel.onPermissionsResult(granted)
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) {
+            val intent = Intent(this, RescueService::class.java).apply {
+                action = RescueService.ACTION_SHUTDOWN
+            }
+            startService(intent)
+        }
+        super.onDestroy()
     }
 }

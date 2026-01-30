@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
 import com.example.lifesaiver.presentation.BleDebugStats
+import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.ui.components.BatteryIndicator
 import com.example.lifesaiver.ui.components.MeshNode
 import com.example.lifesaiver.ui.components.MeshEdge
@@ -59,6 +60,7 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun PTTLinkScreen(
@@ -70,6 +72,7 @@ fun PTTLinkScreen(
     myNickname: String,
     peerNicknames: Map<String, String>,
     meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
+    meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
@@ -302,6 +305,7 @@ fun PTTLinkScreen(
                     MeshMap(
                         nodes = meshGraphState.nodes,
                         edges = meshGraphState.edges,
+                        visualEvents = meshVisualEvents,
                         modifier = Modifier.fillMaxSize()
                     )
                     TopIconButton(
@@ -538,7 +542,12 @@ private fun buildMeshGraphState(
     }
 
     val edges = snapshot.edges.map { edge ->
-        MeshEdge(a = edge.a, b = edge.b, isConfirmed = edge.isConfirmed)
+        MeshEdge(
+            a = edge.a,
+            b = edge.b,
+            isConfirmed = edge.isConfirmed,
+            confirmedBy = edge.confirmedBy
+        )
     }
 
     return MeshGraphUiState(nodes = nodes, edges = edges)

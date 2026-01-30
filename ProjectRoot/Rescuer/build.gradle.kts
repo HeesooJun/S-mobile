@@ -52,6 +52,7 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
+    implementation(project(":shared"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.uwb)
     implementation(libs.androidx.appcompat)

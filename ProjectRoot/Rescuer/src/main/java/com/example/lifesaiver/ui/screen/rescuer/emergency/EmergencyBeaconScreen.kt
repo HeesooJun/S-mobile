@@ -37,8 +37,7 @@ import com.example.lifesaiver.ui.theme.scaledSp
 @Composable
 fun EmergencyBeaconScreen(
     batteryLevel: Int,
-    onPrev: () -> Unit,
-    onNext: () -> Unit
+    onPrev: () -> Unit
 ) {
     val scale = LocalAppScale.current
     ScreenScaffold(
@@ -134,7 +133,6 @@ fun EmergencyBeaconScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SecondaryButton(label = "이전", variant = SecondaryButtonVariant.Gray, onClick = onPrev)
-                SecondaryButton(label = "다음", variant = SecondaryButtonVariant.Red, onClick = onNext)
             }
         }
     }

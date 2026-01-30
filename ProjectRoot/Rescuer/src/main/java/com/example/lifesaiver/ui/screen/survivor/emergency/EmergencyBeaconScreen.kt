@@ -39,8 +39,7 @@ import com.example.lifesaiver.ui.theme.scaledSp
 fun EmergencyBeaconScreen(
     batteryLevel: Int,
     uiState: EmergencyBeaconUiState,
-    onPrev: () -> Unit,
-    onNext: () -> Unit
+    onPrev: () -> Unit
 ) {
     val scale = LocalAppScale.current
     ScreenScaffold(
@@ -136,7 +135,6 @@ fun EmergencyBeaconScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SecondaryButton(label = uiState.prevLabel, variant = SecondaryButtonVariant.Gray, onClick = onPrev)
-                SecondaryButton(label = uiState.nextLabel, variant = SecondaryButtonVariant.Red, onClick = onNext)
             }
         }
     }
