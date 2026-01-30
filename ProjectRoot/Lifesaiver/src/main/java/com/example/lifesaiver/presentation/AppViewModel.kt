@@ -640,6 +640,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun refreshDirectPeers() {
         val directPeerIds = bleManager.getConnectedPeerIds()
+        val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
+        meshGraphRegistry.updateFromAnnouncement(
+            originPeerId = bytesToHex(senderId),
+            originNickname = nickname,
+            neighborsOrNull = directPeerIds,
+            timestamp = System.currentTimeMillis()
+        )
         val newPeers = directPeerIds.filterNot { announcedToPeers.contains(it) }
         if (newPeers.isNotEmpty()) {
             sendAnnounce()
