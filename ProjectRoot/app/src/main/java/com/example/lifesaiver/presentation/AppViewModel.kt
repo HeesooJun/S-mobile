@@ -20,9 +20,12 @@ import com.example.lifesaiver.core.audio.VoiceRecorder
 import com.example.lifesaiver.core.ble.BleDebugSnapshot
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
+import com.example.lifesaiver.core.database.AppDatabase
+import com.example.lifesaiver.core.database.entity.ProfileEntity
 import com.example.lifesaiver.core.media.FileTransferStorage
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
+import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.core.service.RescueService
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
@@ -36,6 +39,9 @@ import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketHeader
 import com.example.lifesaiver.protocol.model.PacketType
 import com.example.lifesaiver.protocol.model.RequestSyncPayload
+import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
+import com.example.lifesaiver.protocol.profile.ProfileSyncLogResult
+import com.example.lifesaiver.protocol.profile.ProfileTlv
 import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.protocol.sync.GossipSyncManager
@@ -87,12 +93,15 @@ data class AppUiState(
     val meshPeerCount: Int = 0,
     val directPeerIds: List<String> = emptyList(),
     val myPeerId: String = "",
+    val myNickname: String = "",
+    val peerNicknames: Map<String, String> = emptyMap(),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
     val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
     val messages: List<ChatMessage> = emptyList(),
     val bleDebug: BleDebugStats = BleDebugStats(),
-    val signatureLogs: List<SignatureLogEntry> = emptyList()
+    val signatureLogs: List<SignatureLogEntry> = emptyList(),
+    val profileLogs: List<ProfileSyncLogEntry> = emptyList()
 )
 
 // UI 이벤트
@@ -136,6 +145,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private lateinit var signatureManager: SignatureManager
     private lateinit var gossipSyncManager: GossipSyncManager
     private val signatureLogBuffer = ArrayDeque<SignatureLogEntry>()
+    private val profileLogBuffer = ArrayDeque<ProfileSyncLogEntry>()
+    private val profileDao by lazy { AppDatabase.getInstance(app).profileDao() }
 
     // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
@@ -155,6 +166,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedNickname: String = ""
     private val announcedToPeers = mutableSetOf<String>()
+    private val peerNicknames = mutableMapOf<String, String>()
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -350,6 +362,57 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         addMessage(ChatMessage(text = text, isMine = true))
     }
 
+    fun sendProfileTestPacket() {
+        val now = System.currentTimeMillis()
+        val payload = ProfileTlv.encodeUpdate(
+            name = cachedNickname.ifBlank { "debug-user" },
+            gender = 'U',
+            birthDate = "2000-01-01",
+            notes = "tlv-test",
+            updatedAt = now
+        )
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.MESSAGE,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = payload.size,
+                timestamp = now,
+                senderId = senderId
+            ),
+            payload = payload
+        )
+        gossipSyncManager.onPublicPacketSeen(packet)
+        protocolCore.broadcast(packet)
+        _uiEvents.tryEmit(UiEvent.Toast("TLV 테스트 패킷 전송"))
+    }
+
+    fun sendProfileUpdate(profile: SurvivorProfile) {
+        val now = System.currentTimeMillis()
+        val payload = ProfileTlv.encodeUpdate(
+            name = profile.name,
+            gender = mapGender(profile.gender),
+            birthDate = profile.birthDate,
+            notes = profile.notes,
+            updatedAt = now
+        )
+        val packet = Packet(
+            header = PacketHeader(
+                version = 2,
+                type = PacketType.MESSAGE,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = payload.size,
+                timestamp = now,
+                senderId = senderId
+            ),
+            payload = payload
+        )
+        gossipSyncManager.onPublicPacketSeen(packet)
+        protocolCore.broadcast(packet)
+    }
+
     fun onDisconnect() {
         if (_uiState.value.isDisconnecting) return
         _uiState.update { it.copy(isDisconnecting = true) }
@@ -458,6 +521,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         meshGraphRegistry.removePeer(removedPeerId)
                         gossipSyncManager.removeAnnouncementForPeer(removedPeerId)
                         announcedToPeers.remove(removedPeerId)
+                        peerNicknames.remove(removedPeerId)
+                    }
+                    if (announcement.nickname.isNotBlank()) {
+                        peerNicknames[peerHex] = announcement.nickname
+                        _uiState.update { it.copy(peerNicknames = peerNicknames.toMap()) }
                     }
                     if (relayAddress != null && packet.header.ttl >= ProtocolConstants.MESSAGE_TTL_HOPS) {
                         bleManager.bindPeerIdForAddress(relayAddress, peerHex)
@@ -479,13 +547,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     peerIdentityRegistry.removePeer(peerHex)
                     gossipSyncManager.removeAnnouncementForPeer(peerHex)
                     announcedToPeers.remove(peerHex)
+                    if (peerNicknames.remove(peerHex) != null) {
+                        _uiState.update { it.copy(peerNicknames = peerNicknames.toMap()) }
+                    }
                     updateMeshCount()
                 }
                 PacketType.MESSAGE -> {
-                    val text = packet.payload.toString(Charsets.UTF_8)
-                    addMessage(ChatMessage(text = text, isMine = false))
-                    if (packet.header.recipientId == null) {
-                        gossipSyncManager.onPublicPacketSeen(packet)
+                    val profileResult = ProfileTlv.decodeIfProfile(packet.payload)
+                    if (profileResult != null) {
+                        handleProfilePayload(packet, profileResult)
+                    } else {
+                        val text = packet.payload.toString(Charsets.UTF_8)
+                        addMessage(ChatMessage(text = text, isMine = false))
+                        if (packet.header.recipientId == null) {
+                            gossipSyncManager.onPublicPacketSeen(packet)
+                        }
                     }
                 }
                 PacketType.FILE_TRANSFER -> {
@@ -623,6 +699,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             profileStore.profileFlow.collect { profile ->
                 cachedNickname = profile.name.trim()
+                _uiState.update { it.copy(myNickname = cachedNickname) }
             }
         }
     }
@@ -630,6 +707,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSignatureLogs() {
         signatureLogBuffer.clear()
         _uiState.update { it.copy(signatureLogs = emptyList()) }
+    }
+
+    fun clearProfileLogs() {
+        profileLogBuffer.clear()
+        _uiState.update { it.copy(profileLogs = emptyList()) }
     }
 
     fun clearDeviceMonitoring() {
@@ -645,6 +727,136 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             signatureLogBuffer.removeFirst()
         }
         _uiState.update { it.copy(signatureLogs = signatureLogBuffer.toList()) }
+    }
+
+    private fun appendProfileLog(entry: ProfileSyncLogEntry) {
+        profileLogBuffer.addLast(entry)
+        while (profileLogBuffer.size > MAX_PROFILE_LOGS) {
+            profileLogBuffer.removeFirst()
+        }
+        _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) }
+    }
+
+    private fun handleProfilePayload(packet: Packet, result: ProfileTlv.DecodeResult) {
+        val peerHex = bytesToHex(packet.header.senderId)
+        val payloadSize = packet.payload.size
+        when (result) {
+            is ProfileTlv.DecodeResult.Failure -> {
+                appendProfileLog(
+                    ProfileSyncLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        peerId = peerHex,
+                        packetType = packet.header.type,
+                        result = ProfileSyncLogResult.TLV_PARSE_FAILED,
+                        detail = "len=$payloadSize reason=${result.reason}"
+                    )
+                )
+            }
+            is ProfileTlv.DecodeResult.Success -> {
+                val decoded = result.decoded
+                val updatedAt = decoded.updatedAt
+                val kind = decoded.kind
+                val schemaVersion = decoded.schemaVersion
+                if (kind == null || updatedAt == null) {
+                    appendProfileLog(
+                        ProfileSyncLogEntry(
+                            timestamp = System.currentTimeMillis(),
+                            peerId = peerHex,
+                            packetType = packet.header.type,
+                            result = ProfileSyncLogResult.MISSING_FIELD,
+                            detail = "len=$payloadSize missing=${missingFields(kind, updatedAt)}"
+                        )
+                    )
+                    return
+                }
+                if (schemaVersion != null && schemaVersion != 1) {
+                    appendProfileLog(
+                        ProfileSyncLogEntry(
+                            timestamp = System.currentTimeMillis(),
+                            peerId = peerHex,
+                            packetType = packet.header.type,
+                            result = ProfileSyncLogResult.UPSERT_SKIPPED,
+                            detail = "len=$payloadSize unsupported schema=$schemaVersion"
+                        )
+                    )
+                    return
+                }
+                appendProfileLog(
+                    ProfileSyncLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        peerId = peerHex,
+                        packetType = packet.header.type,
+                        result = ProfileSyncLogResult.RECEIVED,
+                        detail = "len=$payloadSize kind=$kind updatedAt=$updatedAt"
+                    )
+                )
+                if (kind == ProfileTlv.KIND_REQUEST) {
+                    appendProfileLog(
+                        ProfileSyncLogEntry(
+                            timestamp = System.currentTimeMillis(),
+                            peerId = peerHex,
+                            packetType = packet.header.type,
+                            result = ProfileSyncLogResult.UPSERT_SKIPPED,
+                            detail = "request packet"
+                        )
+                    )
+                    return
+                }
+                val entity = ProfileEntity(
+                    peerId = peerHex,
+                    name = decoded.name.orEmpty(),
+                    gender = decoded.gender?.toString().orEmpty(),
+                    birthDate = decoded.birthDate.orEmpty(),
+                    notes = decoded.notes.orEmpty(),
+                    updatedAt = updatedAt,
+                    sourcePeerId = peerHex,
+                    lastSeenAt = System.currentTimeMillis()
+                )
+                viewModelScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        profileDao.upsertIfNewer(entity)
+                    }.onSuccess { applied ->
+                        appendProfileLog(
+                            ProfileSyncLogEntry(
+                                timestamp = System.currentTimeMillis(),
+                                peerId = peerHex,
+                                packetType = packet.header.type,
+                                result = if (applied) {
+                                    ProfileSyncLogResult.UPSERT_OK
+                                } else {
+                                    ProfileSyncLogResult.UPSERT_SKIPPED
+                                },
+                                detail = if (applied) {
+                                    "updatedAt=$updatedAt"
+                                } else {
+                                    "stale updatedAt=$updatedAt"
+                                }
+                            )
+                        )
+                    }.onFailure { err ->
+                        appendProfileLog(
+                            ProfileSyncLogEntry(
+                                timestamp = System.currentTimeMillis(),
+                                peerId = peerHex,
+                                packetType = packet.header.type,
+                                result = ProfileSyncLogResult.UPSERT_FAILED,
+                                detail = "db error: ${err.message}"
+                            )
+                        )
+                    }
+                }
+                if (packet.header.recipientId == null) {
+                    gossipSyncManager.onPublicPacketSeen(packet)
+                }
+            }
+        }
+    }
+
+    private fun missingFields(kind: Int?, updatedAt: Long?): String {
+        val missing = mutableListOf<String>()
+        if (kind == null) missing.add("kind")
+        if (updatedAt == null) missing.add("updatedAt")
+        return missing.joinToString(",")
     }
 
     private fun buildMessagePacket(text: String): Packet {
@@ -687,8 +899,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             .toByteArray()
     }
 
+    private fun mapGender(raw: String): Char {
+        return when (raw.trim()) {
+            "남성", "M", "m", "male", "Male" -> 'M'
+            "여성", "F", "f", "female", "Female" -> 'F'
+            else -> 'U'
+        }
+    }
+
     private companion object {
         const val MAX_SIGNATURE_LOGS = 200
+        const val MAX_PROFILE_LOGS = 200
     }
 
     override fun onCleared() {

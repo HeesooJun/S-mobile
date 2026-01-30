@@ -1,10 +1,5 @@
 package com.example.lifesaiver.ui.screen.survivor.ptt
 
-import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,14 +23,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,11 +38,9 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
 import com.example.lifesaiver.presentation.BleDebugStats
@@ -76,6 +66,8 @@ fun PTTLinkScreen(
     meshPeerCount: Int,
     directPeerIds: List<String>,
     myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>,
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
@@ -84,50 +76,10 @@ fun PTTLinkScreen(
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
+    onProfile: () -> Unit,
     onPanicClear: () -> Unit
 ) {
     val scale = LocalAppScale.current
-    val context = LocalContext.current
-    val sensorManager = remember {
-        context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    }
-    val sensorItems = remember {
-        listOf(
-            SensorProbe("가속도", Sensor.TYPE_ACCELEROMETER),
-            SensorProbe("자이로", Sensor.TYPE_GYROSCOPE),
-            SensorProbe("지자기", Sensor.TYPE_MAGNETIC_FIELD),
-            SensorProbe("조도", Sensor.TYPE_LIGHT),
-            SensorProbe("근접", Sensor.TYPE_PROXIMITY)
-        )
-    }
-    val sensorStatus = remember { mutableStateMapOf<Int, SensorStatus>() }
-    var isSensorExpanded by remember { mutableStateOf(false) }
-    val sensorListener = remember {
-        object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent?) {
-                val type = event?.sensor?.type ?: return
-                if (sensorStatus[type] != SensorStatus.Active) {
-                    sensorStatus[type] = SensorStatus.Active
-                }
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-            }
-        }
-    }
-
-    DisposableEffect(isSensorExpanded) {
-        if (!isSensorExpanded) return@DisposableEffect onDispose { }
-        val activeSensors = sensorItems.mapNotNull { item ->
-            sensorManager.getDefaultSensor(item.type)
-        }
-        activeSensors.forEach { sensor ->
-            sensorManager.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-        }
-        onDispose {
-            sensorManager.unregisterListener(sensorListener)
-        }
-    }
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
@@ -138,7 +90,7 @@ fun PTTLinkScreen(
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
     val meshNodes = remember(directPeerIds, meshDisplayCount, myPeerId) {
-        buildMeshNodes(directPeerIds, meshDisplayCount, myPeerId)
+        buildMeshNodes(directPeerIds, meshDisplayCount, myPeerId, myNickname, peerNicknames)
     }
 
     LaunchedEffect(expandedAction) {
@@ -156,25 +108,6 @@ fun PTTLinkScreen(
         }
     }
 
-    LaunchedEffect(isSensorExpanded) {
-        if (!isSensorExpanded) return@LaunchedEffect
-        sensorItems.forEach { item ->
-            val sensor = sensorManager.getDefaultSensor(item.type)
-            sensorStatus[item.type] = if (sensor == null) {
-                SensorStatus.Unsupported
-            } else {
-                SensorStatus.Checking
-            }
-        }
-        delay(3000)
-        if (isSensorExpanded) {
-            sensorItems.forEach { item ->
-                if (sensorStatus[item.type] == SensorStatus.Checking) {
-                    sensorStatus[item.type] = SensorStatus.NoData
-                }
-            }
-        }
-    }
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
@@ -346,54 +279,10 @@ fun PTTLinkScreen(
                             modifier = Modifier.graphicsLayer(rotationX = 180f)
                         )
                     }
-                    Box {
-                        SensorStatusToggle(
-                            label = "센서 상태",
-                            isExpanded = isSensorExpanded,
-                            onToggle = { isSensorExpanded = !isSensorExpanded }
-                        )
-                        DropdownMenu(
-                            expanded = isSensorExpanded,
-                            onDismissRequest = { isSensorExpanded = false },
-                            offset = DpOffset(-scaledDp(4, scale), scaledDp(12, scale)),
-                            modifier = Modifier
-                                .widthIn(min = scaledDp(150, scale), max = scaledDp(190, scale))
-                                .background(
-                                    color = AppColors.Gray800,
-                                    shape = RoundedCornerShape(scaledDp(14, scale))
-                                )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(
-                                    horizontal = scaledDp(16, scale),
-                                    vertical = scaledDp(12, scale)
-                                )
-                            ) {
-                                sensorItems.forEach { item ->
-                                    val status = sensorStatus[item.type] ?: SensorStatus.Checking
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = scaledDp(4, scale)),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = item.label,
-                                            color = AppColors.White,
-                                            fontSize = scaledSp(12, scale)
-                                        )
-                                        Spacer(modifier = Modifier.weight(1f))
-                                        Text(
-                                            text = sensorStatusLabel(status),
-                                            color = sensorStatusColor(status),
-                                            fontSize = scaledSp(11, scale),
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ProfileActionButton(
+                        label = "내정보",
+                        onClick = onProfile
+                    )
                 }
             }
 
@@ -538,26 +427,12 @@ private enum class ActionType {
     Count
 }
 
-private data class SensorProbe(
-    val label: String,
-    val type: Int
-)
-
-private enum class SensorStatus {
-    Unsupported,
-    Checking,
-    Active,
-    NoData
-}
-
 @Composable
-private fun SensorStatusToggle(
+private fun ProfileActionButton(
     label: String,
-    isExpanded: Boolean,
-    onToggle: () -> Unit
+    onClick: () -> Unit
 ) {
     val scale = LocalAppScale.current
-    val arrowRotation = if (isExpanded) 180f else 0f
     Row(
         modifier = Modifier
             .background(
@@ -566,11 +441,11 @@ private fun SensorStatusToggle(
             )
             .padding(
                 start = scaledDp(12, scale),
-                end = scaledDp(10, scale),
+                end = scaledDp(12, scale),
                 top = scaledDp(8, scale),
                 bottom = scaledDp(8, scale)
             )
-            .clickable { onToggle() },
+            .clickable { onClick() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
     ) {
@@ -580,40 +455,15 @@ private fun SensorStatusToggle(
             fontSize = scaledSp(13, scale),
             fontWeight = FontWeight.Medium
         )
-        Image(
-            painter = painterResource(id = R.drawable.ic_arrow_up),
-            contentDescription = "센서 상태 펼침",
-            modifier = Modifier
-                .size(scaledDp(12, scale))
-                .rotate(arrowRotation),
-            colorFilter = ColorFilter.tint(AppColors.Gray400),
-            contentScale = ContentScale.Fit
-        )
-    }
-}
-
-private fun sensorStatusLabel(status: SensorStatus): String {
-    return when (status) {
-        SensorStatus.Unsupported -> "없음"
-        SensorStatus.Checking -> "확인 중"
-        SensorStatus.Active -> "정상"
-        SensorStatus.NoData -> "미탐지"
-    }
-}
-
-private fun sensorStatusColor(status: SensorStatus): Color {
-    return when (status) {
-        SensorStatus.Unsupported -> AppColors.Gray500
-        SensorStatus.Checking -> AppColors.Yellow
-        SensorStatus.Active -> AppColors.Green
-        SensorStatus.NoData -> AppColors.Red
     }
 }
 
 private fun buildMeshNodes(
     directPeerIds: List<String>,
     meshPeerCount: Int,
-    myPeerId: String
+    myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>
 ): List<MeshNode> {
     val directIds = directPeerIds.distinct()
     val directCount = directIds.size.coerceAtLeast(0)
@@ -621,7 +471,9 @@ private fun buildMeshNodes(
     val total = peerCount.coerceAtLeast(directCount)
     val indirectCount = (total - directCount).coerceAtLeast(0)
     val nodes = mutableListOf<MeshNode>()
-    val selfLabel = myPeerId.trim().ifBlank { "self" }
+    val selfLabel = myNickname.trim().ifBlank {
+        myPeerId.trim().ifBlank { "self" }
+    }
     nodes.add(MeshNode(id = "self", hop = 0, signal = 1f, isSelf = true, label = selfLabel))
     directIds.forEachIndexed { index, peerId ->
         val signal = 0.55f + (index % 5) * 0.1f
@@ -630,7 +482,7 @@ private fun buildMeshNodes(
                 id = peerId,
                 hop = 1,
                 signal = signal,
-                label = peerId
+                label = peerNicknames[peerId] ?: peerId
             )
         )
     }
