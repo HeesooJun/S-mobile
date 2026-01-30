@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
                     myNickname = uiState.myNickname,
                     peerNicknames = uiState.peerNicknames,
                     meshGraphSnapshot = uiState.meshGraphSnapshot,
+                    meshVisualEvents = viewModel.meshVisualEvents,
                     bleDebugStats = uiState.bleDebug,
                     isMicOn = uiState.isMicOn,
                     isDisconnecting = uiState.isDisconnecting,
