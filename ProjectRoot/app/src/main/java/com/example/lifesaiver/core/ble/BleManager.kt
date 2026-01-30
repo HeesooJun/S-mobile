@@ -1003,6 +1003,46 @@ class BleManager(
         deviceMonitor.clearAll()
     }
 
+    fun clearAllConnectionsAndMappings() {
+        deviceMonitor.clearAll()
+        synchronized(clientConnections) {
+            clientConnections.values.forEach { gatt ->
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
+            }
+            clientConnections.clear()
+        }
+        val serverDevices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
+        serverDevices.forEach { device ->
+            try {
+                gattServer?.cancelConnection(device)
+            } catch (_: Exception) {
+            }
+        }
+        synchronized(connectedPeers) {
+            connectedPeers.clear()
+        }
+        synchronized(addressPeerMap) {
+            addressPeerMap.clear()
+        }
+        synchronized(pendingPeerIds) {
+            pendingPeerIds.clear()
+        }
+        synchronized(pendingConnections) {
+            pendingConnections.clear()
+        }
+        synchronized(connectionAttempts) {
+            connectionAttempts.clear()
+        }
+        notifyConnectionState()
+    }
+
     private fun disconnectAddress(address: String) {
         synchronized(clientConnections) {
             clientConnections[address]
