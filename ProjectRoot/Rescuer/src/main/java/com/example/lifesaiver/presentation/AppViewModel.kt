@@ -762,7 +762,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeMeshGraph() {
         viewModelScope.launch {
             meshGraphRegistry.graphState.collect { snapshot ->
-                _uiState.update { it.copy(meshGraphSnapshot = snapshot) }
+                val meshCount = snapshot.nodes.size.coerceAtLeast(1)
+                _uiState.update {
+                    it.copy(
+                        meshGraphSnapshot = snapshot,
+                        meshPeerCount = meshCount
+                    )
+                }
             }
         }
     }
