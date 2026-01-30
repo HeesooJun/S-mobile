@@ -271,7 +271,7 @@ fun MeshMap(
                     )
                 }
         ) {
-            val _ = tick
+            val tickValue = tick
             val nodeMap = simulation.nodes
 
             simulation.edges.forEach { edge ->
@@ -363,9 +363,9 @@ fun MeshMap(
                     style = Stroke(width = 2f)
                 )
 
-                val labelColor = if (node.isSelf) AppColors.Green else AppColors.Gray300
+                val labelColor = if (node.isSelf) AppColors.Green else AppColors.Gray400
                 val idColor = if (node.isSelf) AppColors.Green.copy(alpha = 0.7f) else AppColors.Gray500
-                val labelText = node.label?.trim().takeIf { it.isNotEmpty() } ?: node.id
+                val labelText = node.label?.trim()?.takeIf { it.isNotEmpty() } ?: node.id
                 val shortId = node.id.take(8)
                 labelPaint.color = labelColor.toArgb()
                 drawContext.canvas.nativeCanvas.drawText(
