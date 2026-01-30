@@ -168,7 +168,9 @@ class ProtocolCore(
 
         val inbound = pipeline.handleInbound(packet)
         val candidateForVerification = inbound.packetForApp ?: inbound.packetForRelay
-        if (candidateForVerification != null && !verifyIfNeeded(candidateForVerification)) {
+        if (candidateForVerification != null &&
+            !verifyIfNeeded(candidateForVerification, relayAddress)
+        ) {
             return
         }
         inbound.packetForRelay?.let {
@@ -277,9 +279,19 @@ class ProtocolCore(
         return manager.sign(packet)
     }
 
-    private fun verifyIfNeeded(packet: Packet): Boolean {
+    private fun verifyIfNeeded(packet: Packet, relayAddress: String?): Boolean {
         val manager = signatureManager ?: return true
-        return manager.verify(packet)
+        return manager.verify(packet, pathLabelFor(packet, relayAddress))
+    }
+
+    private fun pathLabelFor(packet: Packet, relayAddress: String?): String? {
+        if (relayAddress == null) return null
+        val baseTtl = when (packet.header.type) {
+            PacketType.REQUEST_SYNC,
+            PacketType.FILE_ACK -> ProtocolConstants.SYNC_TTL_HOPS
+            else -> ProtocolConstants.MESSAGE_TTL_HOPS
+        }
+        return if (packet.header.ttl >= baseTtl) "direct" else "mesh"
     }
 
     private fun handleFileAck(packet: Packet) {
