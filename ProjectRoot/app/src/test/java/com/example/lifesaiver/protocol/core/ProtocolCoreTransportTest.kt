@@ -38,7 +38,7 @@ class ProtocolCoreTransportTest {
 
         var received: Packet? = null
         val latch = CountDownLatch(1)
-        core.setOnPacketReceived { packet ->
+        core.setOnPacketReceived { packet, _ ->
             received = packet
             latch.countDown()
         }

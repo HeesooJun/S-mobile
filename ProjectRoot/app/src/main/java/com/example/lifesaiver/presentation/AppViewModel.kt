@@ -436,7 +436,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         )
-        protocolCore.setOnPacketReceived { packet ->
+        protocolCore.setOnPacketReceived { packet, relayAddress ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             when (packet.header.type) {
@@ -458,6 +458,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         meshGraphRegistry.removePeer(removedPeerId)
                         gossipSyncManager.removeAnnouncementForPeer(removedPeerId)
                         announcedToPeers.remove(removedPeerId)
+                    }
+                    if (relayAddress != null && packet.header.ttl >= ProtocolConstants.MESSAGE_TTL_HOPS) {
+                        bleManager.bindPeerIdForAddress(relayAddress, peerHex)
+                        bleManager.onAnnounceReceived(relayAddress)
                     }
                     val neighbors = GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload)
                     meshGraphRegistry.updateFromAnnouncement(
@@ -626,6 +630,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSignatureLogs() {
         signatureLogBuffer.clear()
         _uiState.update { it.copy(signatureLogs = emptyList()) }
+    }
+
+    fun clearDeviceMonitoring() {
+        if (::bleManager.isInitialized) {
+            bleManager.clearDeviceMonitoring()
+            _uiEvents.tryEmit(UiEvent.Toast("연결 차단 목록 초기화됨"))
+        }
     }
 
     private fun appendSignatureLog(entry: SignatureLogEntry) {

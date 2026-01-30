@@ -72,7 +72,8 @@ class MainActivity : ComponentActivity() {
                     onDisconnect = { viewModel.onDisconnect() },
                     onStartRescueSignal = { viewModel.startRescueSignal() },
                     onStopRescueSignal = { viewModel.stopRescueSignal() },
-                    onClearSignatureLogs = { viewModel.clearSignatureLogs() }
+                    onClearSignatureLogs = { viewModel.clearSignatureLogs() },
+                    onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() }
                 )
             }
         }
