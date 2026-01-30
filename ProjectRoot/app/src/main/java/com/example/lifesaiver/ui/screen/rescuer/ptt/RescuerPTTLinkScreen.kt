@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -44,6 +45,7 @@ import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SignalBars
 import com.example.lifesaiver.ui.components.SignalVariant
+import com.example.lifesaiver.ui.components.tripleClickable
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
@@ -62,7 +64,8 @@ fun RescuerPTTLinkScreen(
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
-    onOpenSurvivorDb: () -> Unit
+    onOpenSurvivorDb: () -> Unit,
+    onPanicClear: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
@@ -92,148 +95,159 @@ fun RescuerPTTLinkScreen(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        PowerSavingLayer(
-            isPowerSaving = isPowerSaving,
-            // 절전 해제 컨텐츠가 없으면 원래처럼 단순 처리라도 유지
-            isForceExit = !isPowerSaving,
-            onRequestExitPowerSaving = { setPowerSaving(false) }
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = scaledDp(32, scale)),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // TODO: 거리 데이터 연동 시 실제 값으로 교체
-            val distanceMeters: Float? = null
-            // val distanceMeters: Float? = 12.4f
-            val trend: DistanceTrend = DistanceTrend.Approaching
-
-            Spacer(modifier = Modifier.height(scaledDp(30, scale)))
-            DistanceTrack(
-                distanceMeters = distanceMeters,
-                trend = trend,
-                maxMeters = 30f,
-                modifier = Modifier.padding(top = scaledDp(12, scale))
+        Box(modifier = Modifier.fillMaxWidth()) {
+            PowerSavingLayer(
+                isPowerSaving = isPowerSaving,
+                // 절전 해제 컨텐츠가 없으면 원래처럼 단순 처리라도 유지
+                isForceExit = !isPowerSaving,
+                onRequestExitPowerSaving = { setPowerSaving(false) }
             )
-
-            Spacer(modifier = Modifier.height(scaledDp(140, scale)))
-            MicButton(
-                isActive = isMicOn,
-                size = scaledDp(80, scale),
-                onPress = onMicPress,
-                onRelease = onMicRelease
-            )
-            Spacer(modifier = Modifier.height(scaledDp(20, scale)))
             Text(
-                text = when {
-                    hasMeshPeers -> "메쉬 연결됨"
-                    isConnected -> "생존자 연결됨"
-                    else -> "생존자 연결 대기 중"
-                },
-                color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
-                fontSize = scaledSp(14, scale),
-                fontWeight = FontWeight.SemiBold
+                text = "LIFESAIVER",
+                color = AppColors.Gray500,
+                fontSize = scaledSp(12, scale),
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
+                    .tripleClickable(onTripleClick = onPanicClear)
             )
-            Spacer(modifier = Modifier.height(scaledDp(36, scale)))
-            Spacer(modifier = Modifier.weight(0.6f))
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = scaledDp(32, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // TODO: 거리 데이터 연동 시 실제 값으로 교체
+                val distanceMeters: Float? = null
+                // val distanceMeters: Float? = 12.4f
+                val trend: DistanceTrend = DistanceTrend.Approaching
+
+                Spacer(modifier = Modifier.height(scaledDp(30, scale)))
+                DistanceTrack(
+                    distanceMeters = distanceMeters,
+                    trend = trend,
+                    maxMeters = 30f,
+                    modifier = Modifier.padding(top = scaledDp(12, scale))
+                )
+
+                Spacer(modifier = Modifier.height(scaledDp(140, scale)))
+                MicButton(
+                    isActive = isMicOn,
+                    size = scaledDp(80, scale),
+                    onPress = onMicPress,
+                    onRelease = onMicRelease
+                )
+                Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                Text(
+                    text = when {
+                        hasMeshPeers -> "메쉬 연결됨"
+                        isConnected -> "생존자 연결됨"
+                        else -> "생존자 연결 대기 중"
+                    },
+                    color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
+                    fontSize = scaledSp(14, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(scaledDp(36, scale)))
+                Spacer(modifier = Modifier.weight(0.6f))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(8, scale)),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ExpandableAction(
+                            iconRes = R.drawable.connection_lost,
+                            label = "연결 끊기",
+                            isExpanded = expandedAction == ActionType.Disconnect,
+                            iconSizeOverride = scaledDp(44, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                if (expandedAction == ActionType.Disconnect) {
+                                    setExpandedAction(null)
+                                    onDisconnect()
+                                } else {
+                                    setExpandedAction(ActionType.Disconnect)
+                                }
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.ic_chat,
+                            label = "채팅",
+                            isExpanded = expandedAction == ActionType.Chat,
+                            iconSizeOverride = scaledDp(38, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                if (expandedAction == ActionType.Chat) {
+                                    setExpandedAction(null)
+                                    onChat()
+                                } else {
+                                    setExpandedAction(ActionType.Chat)
+                                }
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.connection_filled,
+                            label = "사용자 DB $displayConnectedCount",
+                            isExpanded = expandedAction == ActionType.Count,
+                            iconSizeOverride = scaledDp(32, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                onOpenSurvivorDb()
+                            }
+                        )
+                    }
+                    Column(
+                        modifier = Modifier
+                            .height(scaledDp(32, scale))
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        AnimatedVisibility(
+                            visible = showDoubleTapHint,
+                            enter = fadeIn() + slideInVertically { it / 3 },
+                            exit = fadeOut() + slideOutVertically { it / 3 }
+                        ) {
+                            Text(
+                                text = "한번 더 눌러주세요",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.offset(y = scaledDp(6, scale))
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = scaledDp(8, scale)),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                        .padding(bottom = scaledDp(24, scale)),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ExpandableAction(
-                        iconRes = R.drawable.connection_lost,
-                        label = "연결 끊기",
-                        isExpanded = expandedAction == ActionType.Disconnect,
-                        iconSizeOverride = scaledDp(44, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            if (expandedAction == ActionType.Disconnect) {
-                                setExpandedAction(null)
-                                onDisconnect()
-                            } else {
-                                setExpandedAction(ActionType.Disconnect)
-                            }
-                        }
-                    )
-                    ExpandableAction(
-                        iconRes = R.drawable.ic_chat,
-                        label = "채팅",
-                        isExpanded = expandedAction == ActionType.Chat,
-                        iconSizeOverride = scaledDp(38, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            if (expandedAction == ActionType.Chat) {
-                                setExpandedAction(null)
-                                onChat()
-                            } else {
-                                setExpandedAction(ActionType.Chat)
-                            }
-                        }
-                    )
-                    ExpandableAction(
-                        iconRes = R.drawable.connection_filled,
-                        label = "사용자 DB $displayConnectedCount",
-                        isExpanded = expandedAction == ActionType.Count,
-                        iconSizeOverride = scaledDp(32, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            onOpenSurvivorDb()
-                        }
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .height(scaledDp(32, scale))
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    AnimatedVisibility(
-                        visible = showDoubleTapHint,
-                        enter = fadeIn() + slideInVertically { it / 3 },
-                        exit = fadeOut() + slideOutVertically { it / 3 }
+                    Box(
+                        modifier = Modifier
+                            .height(scaledDp(36, scale))
+                            .padding(start = scaledDp(14, scale)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "한번 더 눌러주세요",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(12, scale),
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.offset(y = scaledDp(6, scale))
+                        SignalBars(
+                            strength = if (isConnected) 4 else 1,
+                            variant = SignalVariant.Green,
+                            modifier = Modifier.graphicsLayer(rotationX = 180f)
                         )
                     }
+                    Spacer(modifier = Modifier.size(scaledDp(36, scale)))
                 }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = scaledDp(24, scale)),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .height(scaledDp(36, scale))
-                        .padding(start = scaledDp(14, scale)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    SignalBars(
-                        strength = if (isConnected) 4 else 1,
-                        variant = SignalVariant.Green,
-                        modifier = Modifier.graphicsLayer(rotationX = 180f)
-                    )
-                }
-                Spacer(modifier = Modifier.size(scaledDp(36, scale)))
             }
         }
     }

@@ -62,7 +62,8 @@ fun LifesaiverApp(
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
-    onClearSignatureLogs: () -> Unit
+    onClearSignatureLogs: () -> Unit,
+    onClearDeviceMonitoring: () -> Unit
 ) {
     val scale = rememberAppScale()
 
@@ -158,6 +159,7 @@ fun LifesaiverApp(
                 onDisconnect = onDisconnect,
                 onStartRescueSignal = onStartRescueSignal,
                 onStopRescueSignal = onStopRescueSignal,
+                onClearDeviceMonitoring = onClearDeviceMonitoring,
                 onRouteChanged = { route -> currentRoute = route }
             )
 
