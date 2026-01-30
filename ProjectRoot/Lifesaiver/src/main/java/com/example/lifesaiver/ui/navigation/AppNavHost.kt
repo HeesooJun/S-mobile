@@ -151,6 +151,17 @@ fun AppNavHost(
         }
     }
 
+    LaunchedEffect(isConnected, isRescueSignalActive, backStackEntry) {
+        val currentRoute = backStackEntry?.destination?.route
+        if (isRescueSignalActive && !isConnected && currentRoute == AppRoute.SurvivorPTT.route) {
+            pendingSosNavigation = true
+            sosStartedAt = System.currentTimeMillis()
+            navController.navigate(AppRoute.SurvivorEmergency.route) {
+                popUpTo(AppRoute.SurvivorPTT.route) { inclusive = true }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = AppRoute.SurvivorProfile.route
@@ -196,12 +207,6 @@ fun AppNavHost(
             val emergencyState by emergencyViewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
                 onStartAutoConnect()
-            }
-            LaunchedEffect(Unit) {
-                while (true) {
-                    onPulseRescueSignal()
-                    delay(1_000L)
-                }
             }
             SurvivorEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
