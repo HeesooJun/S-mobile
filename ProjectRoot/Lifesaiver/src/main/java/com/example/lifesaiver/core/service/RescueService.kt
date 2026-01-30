@@ -8,19 +8,37 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.lifesaiver.R
+import com.example.lifesaiver.presentation.AppShutdownHooks
 
 class RescueService : Service() {
+
+    companion object {
+        const val ACTION_START_RESCUE = "com.example.lifesaiver.action.START_RESCUE"
+        const val ACTION_STOP_RESCUE = "com.example.lifesaiver.action.STOP_RESCUE"
+        const val ACTION_SHUTDOWN = "com.example.lifesaiver.action.SHUTDOWN_APP"
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
 
-        if (action == "START_RESCUE") {
-            startForegroundService()
-        } else if (action == "STOP_RESCUE") {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        when (action) {
+            ACTION_START_RESCUE -> {
+                startForegroundService()
+                return START_STICKY
+            }
+            ACTION_STOP_RESCUE -> {
+                try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_SHUTDOWN -> {
+                try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
+                AppShutdownHooks.requestShutdown()
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         return START_STICKY // 앱이 강제 종료되어도 시스템이 다시 살려냄
