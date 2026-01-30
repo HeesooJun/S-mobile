@@ -507,6 +507,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         protocolCore.setOnPacketReceived { packet, relayAddress ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
+            val pathLabel = packetPathLabel(packet, relayAddress)
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
                     val now = System.currentTimeMillis()
@@ -560,10 +561,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.MESSAGE -> {
                     val profileResult = ProfileTlv.decodeIfProfile(packet.payload)
                     if (profileResult != null) {
-                        handleProfilePayload(packet, profileResult)
+                        handleProfilePayload(packet, profileResult, pathLabel)
                     } else {
                         val text = packet.payload.toString(Charsets.UTF_8)
-                        addMessage(ChatMessage(text = text, isMine = false))
+                        addMessage(ChatMessage(text = text, isMine = false, path = pathLabel))
                         if (packet.header.recipientId == null) {
                             gossipSyncManager.onPublicPacketSeen(packet)
                         }
@@ -580,7 +581,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         addMessage(
                             ChatMessage(
                                 text = FileTransferStorage.buildMarker(stored),
-                                isMine = false
+                                isMine = false,
+                                path = pathLabel
                             )
                         )
                         if (packet.header.recipientId != null) {
@@ -750,7 +752,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) }
     }
 
-    private fun handleProfilePayload(packet: Packet, result: ProfileTlv.DecodeResult) {
+    private fun handleProfilePayload(
+        packet: Packet,
+        result: ProfileTlv.DecodeResult,
+        pathLabel: String
+    ) {
         val peerHex = bytesToHex(packet.header.senderId)
         val payloadSize = packet.payload.size
         when (result) {
@@ -761,7 +767,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         peerId = peerHex,
                         packetType = packet.header.type,
                         result = ProfileSyncLogResult.TLV_PARSE_FAILED,
-                        detail = "len=$payloadSize reason=${result.reason}"
+                        detail = "len=$payloadSize path=$pathLabel reason=${result.reason}"
                     )
                 )
             }
@@ -777,7 +783,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             peerId = peerHex,
                             packetType = packet.header.type,
                             result = ProfileSyncLogResult.MISSING_FIELD,
-                            detail = "len=$payloadSize missing=${missingFields(kind, updatedAt)}"
+                            detail = "len=$payloadSize path=$pathLabel missing=${missingFields(kind, updatedAt)}"
                         )
                     )
                     return
@@ -789,7 +795,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             peerId = peerHex,
                             packetType = packet.header.type,
                             result = ProfileSyncLogResult.UPSERT_SKIPPED,
-                            detail = "len=$payloadSize unsupported schema=$schemaVersion"
+                            detail = "len=$payloadSize path=$pathLabel unsupported schema=$schemaVersion"
                         )
                     )
                     return
@@ -800,7 +806,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         peerId = peerHex,
                         packetType = packet.header.type,
                         result = ProfileSyncLogResult.RECEIVED,
-                        detail = "len=$payloadSize kind=$kind updatedAt=$updatedAt"
+                        detail = "len=$payloadSize path=$pathLabel kind=$kind updatedAt=$updatedAt"
                     )
                 )
                 if (kind == ProfileTlv.KIND_REQUEST) {
@@ -810,7 +816,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             peerId = peerHex,
                             packetType = packet.header.type,
                             result = ProfileSyncLogResult.UPSERT_SKIPPED,
-                            detail = "request packet"
+                            detail = "path=$pathLabel request packet"
                         )
                     )
                     return
@@ -840,9 +846,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                     ProfileSyncLogResult.UPSERT_SKIPPED
                                 },
                                 detail = if (applied) {
-                                    "updatedAt=$updatedAt"
+                                    "path=$pathLabel updatedAt=$updatedAt"
                                 } else {
-                                    "stale updatedAt=$updatedAt"
+                                    "path=$pathLabel stale updatedAt=$updatedAt"
                                 }
                             )
                         )
@@ -853,7 +859,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 peerId = peerHex,
                                 packetType = packet.header.type,
                                 result = ProfileSyncLogResult.UPSERT_FAILED,
-                                detail = "db error: ${err.message}"
+                                detail = "path=$pathLabel db error: ${err.message}"
                             )
                         )
                     }
@@ -918,6 +924,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             "여성", "F", "f", "female", "Female" -> 'F'
             else -> 'U'
         }
+    }
+
+    private fun packetPathLabel(packet: Packet, relayAddress: String?): String {
+        if (relayAddress == null) return "unknown"
+        val baseTtl = when (packet.header.type) {
+            PacketType.REQUEST_SYNC,
+            PacketType.FILE_ACK -> ProtocolConstants.SYNC_TTL_HOPS
+            else -> ProtocolConstants.MESSAGE_TTL_HOPS
+        }
+        return if (packet.header.ttl >= baseTtl) "direct" else "mesh"
     }
 
     private companion object {

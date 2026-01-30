@@ -236,16 +236,29 @@ private fun MessageBubble(message: ChatMessage) {
     val scale = LocalAppScale.current
     val background = if (message.isMine) AppColors.GreenSoft else AppColors.Gray800
     val textColor = if (message.isMine) AppColors.Green else AppColors.White
+    val pathLabel = message.path?.takeIf { it.isNotBlank() }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
     ) {
-        Box(
-            modifier = Modifier
-                .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
-                .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(8, scale))
+        Column(
+            horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start
         ) {
-            Text(text = message.text, color = textColor, fontSize = scaledSp(12, scale))
+            Box(
+                modifier = Modifier
+                    .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
+                    .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(8, scale))
+            ) {
+                Text(text = message.text, color = textColor, fontSize = scaledSp(12, scale))
+            }
+            if (pathLabel != null) {
+                Spacer(modifier = Modifier.height(scaledDp(4, scale)))
+                Text(
+                    text = "path=$pathLabel",
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(10, scale)
+                )
+            }
         }
     }
 }

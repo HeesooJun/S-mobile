@@ -246,19 +246,32 @@ private fun MessageBubble(message: ChatMessage) {
     val voicePath = message.text.takeIf { it.startsWith(VOICE_PREFIX) }
         ?.removePrefix(VOICE_PREFIX)
         ?.trim()
+    val pathLabel = message.path?.takeIf { it.isNotBlank() }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
     ) {
-        if (voicePath != null && voicePath.isNotBlank()) {
-            AudioMessageBubble(path = voicePath, isMine = message.isMine)
-        } else {
-            Box(
-                modifier = Modifier
-                    .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
-                    .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(8, scale))
-            ) {
-                Text(text = message.text, color = textColor, fontSize = scaledSp(12, scale))
+        Column(
+            horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start
+        ) {
+            if (voicePath != null && voicePath.isNotBlank()) {
+                AudioMessageBubble(path = voicePath, isMine = message.isMine)
+            } else {
+                Box(
+                    modifier = Modifier
+                        .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
+                        .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(8, scale))
+                ) {
+                    Text(text = message.text, color = textColor, fontSize = scaledSp(12, scale))
+                }
+            }
+            if (pathLabel != null) {
+                Spacer(modifier = Modifier.height(scaledDp(4, scale)))
+                Text(
+                    text = "path=$pathLabel",
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(10, scale)
+                )
             }
         }
     }
