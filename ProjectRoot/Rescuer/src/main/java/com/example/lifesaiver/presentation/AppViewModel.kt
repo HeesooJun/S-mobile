@@ -57,7 +57,6 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
-import kotlin.random.Random
 
 data class BleDebugStats(
     val scanRssiAvg: Int? = null,
@@ -157,16 +156,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-    private val senderId: ByteArray by lazy {
-        val savedHex = prefs.getString("sender_id", null)
-        if (savedHex != null) {
-            hexToBytes(savedHex)
-        } else {
-            val newId = ByteArray(8).also { Random.nextBytes(it) }
-            prefs.edit().putString("sender_id", bytesToHex(newId)).apply()
-            newId
-        }
-    }
+    private var senderId: ByteArray = ByteArray(0)
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedNickname: String = ""
     private val announcedToPeers = mutableSetOf<String>()
@@ -485,6 +475,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
         signatureManager = SignatureManager(app, codec, ::appendSignatureLog)
+        senderId = loadOrCreatePeerId(signatureManager)
         protocolCore = ProtocolCore(
             codec,
             codec,
@@ -756,6 +747,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             profileLogBuffer.removeFirst()
         }
         _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) }
+    }
+
+    private fun loadOrCreatePeerId(manager: SignatureManager): ByteArray {
+        val derived = derivePeerId(manager)
+        val savedHex = prefs.getString("sender_id", null)
+        if (savedHex != null) {
+            val saved = runCatching { hexToBytes(savedHex) }.getOrNull()
+            if (saved != null && saved.contentEquals(derived)) {
+                return saved
+            }
+            prefs.edit().putString("sender_id", bytesToHex(derived)).apply()
+            Log.w("AppViewModel", "sender_id mismatch; reset to derived id")
+            return derived
+        }
+        prefs.edit().putString("sender_id", bytesToHex(derived)).apply()
+        return derived
+    }
+
+    private fun derivePeerId(manager: SignatureManager): ByteArray {
+        val noiseKey = manager.getNoisePublicKeyBytes()
+        val hash = noiseKey.sha256Bytes()
+        return hash.copyOfRange(0, 8)
     }
 
     private fun buildMessagePacket(text: String): Packet {
