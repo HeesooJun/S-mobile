@@ -437,6 +437,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun sendLeaveOnShutdown() {
+        if (!::protocolCore.isInitialized) return
+        sendLeavePacket()
+    }
+
+    fun stopServicesForShutdown() {
+        if (::bleManager.isInitialized) {
+            bleManager.stopAdvertising()
+            bleManager.disconnect()
+        }
+        try {
+            val intent = Intent(app, RescueService::class.java).apply {
+                action = "STOP_RESCUE"
+            }
+            app.startService(intent)
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "서비스 종료 실패: ${e.message}")
+        }
+    }
+
     private fun initAudio() {
         try {
             audioEngine = AudioEngine()
