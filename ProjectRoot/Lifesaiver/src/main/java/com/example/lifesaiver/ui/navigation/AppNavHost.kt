@@ -5,10 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
-import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -28,11 +25,9 @@ import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
-import com.example.lifesaiver.presentation.screen.ModeGateViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
-import com.example.lifesaiver.ui.screen.mode.ModeGateScreen
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
 import com.example.lifesaiver.ui.screen.rescuer.db.RescuerSurvivorDbScreen
@@ -87,41 +82,7 @@ fun AppNavHost(
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var sttResetToken by remember { mutableStateOf(0L) }
-    var isSensorMonitoring by remember { mutableStateOf(false) }
     var sttEnabled by remember { mutableStateOf(false) }
-
-    fun startSensorService() {
-        val intent = Intent(appContext, SensorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            appContext.startForegroundService(intent)
-        } else {
-            appContext.startService(intent)
-        }
-    }
-
-    fun stopSensorService() {
-        val intent = Intent(appContext, SensorService::class.java)
-        appContext.stopService(intent)
-    }
-
-    fun requestOverlayPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        if (Settings.canDrawOverlays(appContext)) return
-
-        Toast.makeText(
-            appContext,
-            "화면 자동 켜짐을 위해 '다른 앱 위에 표시' 권한을 허용해주세요.",
-            Toast.LENGTH_LONG
-        ).show()
-
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:${appContext.packageName}")
-        ).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        appContext.startActivity(intent)
-    }
 
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
@@ -151,11 +112,24 @@ fun AppNavHost(
     }
 
     LaunchedEffect(backStackEntry) {
-        val route = backStackEntry?.destination?.route ?: AppRoute.ModeGate.route
+        val route = backStackEntry?.destination?.route ?: AppRoute.SurvivorProfile.route
         onRouteChanged(route)
         if (route == AppRoute.SurvivorStandby.route) {
             // 센서 트리거로 들어온 경우에만 STT를 켜기 위해 reset token만 갱신
             sttResetToken = System.currentTimeMillis()
+        }
+    }
+
+    LaunchedEffect(profileState.isComplete, backStackEntry) {
+        val currentRoute = backStackEntry?.destination?.route
+        if (profileState.isComplete &&
+            currentRoute == AppRoute.SurvivorProfile.route &&
+            navController.previousBackStackEntry == null
+        ) {
+            onStartAutoConnect()
+            navController.navigate(AppRoute.SurvivorStandby.route) {
+                popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+            }
         }
     }
 
@@ -168,44 +142,8 @@ fun AppNavHost(
 
     NavHost(
         navController = navController,
-        startDestination = AppRoute.ModeGate.route
+        startDestination = AppRoute.SurvivorProfile.route
     ) {
-        composable(AppRoute.ModeGate.route) {
-            val modeGateViewModel: ModeGateViewModel = viewModel()
-            val modeGateState by modeGateViewModel.uiState.collectAsState()
-            ModeGateScreen(
-                batteryLevel = batteryLevel,
-                uiState = modeGateState,
-                isSensorMonitoring = isSensorMonitoring,
-                onYes = {
-                    sttEnabled = false
-                    if (profileState.isComplete) {
-                        onStartAutoConnect()
-                        navController.navigate(AppRoute.SurvivorStandby.route)
-                    } else {
-                        navController.navigate(AppRoute.SurvivorProfile.route)
-                    }
-                },
-                onNo = { activity?.finish() },
-                onRescuerMode = {
-                    sttEnabled = false
-                    onStartAutoConnect()
-                    navController.navigate(AppRoute.RescuerStandby.route)
-                },
-                onToggleSensorMonitor = {
-                    if (isSensorMonitoring) {
-                        stopSensorService()
-                        isSensorMonitoring = false
-                    } else {
-                        startSensorService()
-                        requestOverlayPermissionIfNeeded()
-                        isSensorMonitoring = true
-                        activity?.moveTaskToBack(true)
-                    }
-                }
-            )
-        }
-
         composable(AppRoute.SurvivorStandby.route) {
             StandbyStatusScreen(
                 batteryLevel = batteryLevel,
@@ -227,7 +165,7 @@ fun AppNavHost(
                 profileStore = profileStore,
                 onSaved = {
                     val prevRoute = navController.previousBackStackEntry?.destination?.route
-                    if (prevRoute == AppRoute.ModeGate.route || prevRoute == null) {
+                    if (prevRoute == null) {
                         onStartAutoConnect()
                         navController.navigate(AppRoute.SurvivorStandby.route) {
                             popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
@@ -283,8 +221,8 @@ fun AppNavHost(
                 onBack = { navController.popBackStack() },
                 onDisconnect = {
                     onDisconnect()
-                    navController.navigate(AppRoute.ModeGate.route) {
-                        popUpTo(AppRoute.ModeGate.route) { inclusive = true }
+                    navController.navigate(AppRoute.SurvivorStandby.route) {
+                        popUpTo(AppRoute.SurvivorStandby.route) { inclusive = true }
                     }
                 },
                 onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
@@ -319,7 +257,7 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
                 connectedCount = connectedCount,
-                onPrev = { navController.navigate(AppRoute.ModeGate.route) },
+                onPrev = { activity?.finish() },
                 onGoPTT = { navController.navigate(AppRoute.RescuerPTT.route) },
                 onSos = { navController.navigate(AppRoute.RescuerEmergency.route) }
             )
