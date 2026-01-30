@@ -24,6 +24,7 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.presentation.BleDebugStats
+import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
@@ -40,6 +41,7 @@ import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun AppNavHost(
@@ -52,6 +54,7 @@ fun AppNavHost(
     myNickname: String,
     peerNicknames: Map<String, String>,
     meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
+    meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
@@ -228,6 +231,7 @@ fun AppNavHost(
                 myNickname = myNickname,
                 peerNicknames = peerNicknames,
                 meshGraphSnapshot = meshGraphSnapshot,
+                meshVisualEvents = meshVisualEvents,
                 bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
