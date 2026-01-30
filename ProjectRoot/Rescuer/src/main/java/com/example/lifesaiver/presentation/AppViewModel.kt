@@ -517,6 +517,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (relayAddress != null && pathLabel == "direct") {
                 bleManager.bindPeerIdForAddress(relayAddress, peerHex)
                 bleManager.onAnnounceReceived(relayAddress)
+                meshGraphRegistry.touchPeer(peerHex, peerNicknames[peerHex], System.currentTimeMillis())
                 refreshDirectPeers()
             }
             when (packet.header.type) {
@@ -647,6 +648,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
             }
         }
+        announcedToPeers.retainAll(directPeerIds.toSet())
         _uiState.update {
             val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
             it.copy(

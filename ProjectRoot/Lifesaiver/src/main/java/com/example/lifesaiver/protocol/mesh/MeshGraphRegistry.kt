@@ -37,6 +37,18 @@ class MeshGraphRegistry {
     }
 
     @Synchronized
+    fun touchPeer(peerId: String, nickname: String?, timestamp: Long) {
+        val previous = lastUpdate[peerId]
+        if (previous != null && previous >= timestamp) return
+        lastUpdate[peerId] = timestamp
+        if (!nickname.isNullOrBlank()) {
+            nicknames[peerId] = nickname
+        }
+        announcements.putIfAbsent(peerId, emptySet())
+        publishSnapshot()
+    }
+
+    @Synchronized
     fun removePeer(peerId: String) {
         nicknames.remove(peerId)
         announcements.remove(peerId)
