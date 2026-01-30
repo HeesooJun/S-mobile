@@ -11,6 +11,14 @@ object ProtocolConstants {
         const val DUPLICATE_NICKNAME_STALE_MS: Long = 10_000L
     }
 
+    object Ble {
+        const val ANNOUNCE_WAIT_MS: Long = 15_000L
+        const val INACTIVITY_TIMEOUT_MS: Long = 60_000L
+        const val BLOCKLIST_TTL_MS: Long = 900_000L
+        const val ERROR_DISCONNECT_WINDOW_MS: Long = 300_000L
+        const val ERROR_DISCONNECT_THRESHOLD: Int = 5
+    }
+
     object Fragmentation {
         const val FRAGMENT_SIZE_THRESHOLD: Int = 512
         const val MAX_FRAGMENT_SIZE: Int = 469

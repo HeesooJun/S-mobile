@@ -67,6 +67,7 @@ fun AppNavHost(
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
     onClearSignatureLogs: () -> Unit,
+    onClearDeviceMonitoring: () -> Unit,
     onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
@@ -269,7 +270,8 @@ fun AppNavHost(
                         popUpTo(AppRoute.ModeGate.route) { inclusive = true }
                     }
                 },
-                onChat = { navController.navigate(AppRoute.SurvivorChat.route) }
+                onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
+                onPanicClear = onClearDeviceMonitoring
             )
         }
 
@@ -320,7 +322,8 @@ fun AppNavHost(
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
                 onChat = { navController.navigate(AppRoute.RescuerChat.route) },
-                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) }
+                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) },
+                onPanicClear = onClearDeviceMonitoring
             )
         }
 
