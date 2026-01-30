@@ -28,6 +28,7 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
+import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.navigation.AppRoute
@@ -47,22 +48,29 @@ fun LifesaiverApp(
     meshPeerCount: Int,
     directPeerIds: List<String>,
     myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>,
+    meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean, // 구조 신호 상태
     messages: List<ChatMessage>,
     signatureLogs: List<SignatureLogEntry>,
+    profileLogs: List<ProfileSyncLogEntry>,
     onRequestPermissions: () -> Unit,
     onStartAutoConnect: () -> Unit,
     onStopAutoConnect: () -> Unit,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onSendMessage: (String) -> Unit,
+    onSendProfileTest: () -> Unit,
+    onSendProfileUpdate: (com.example.lifesaiver.core.profile.SurvivorProfile) -> Unit,
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
     onClearSignatureLogs: () -> Unit,
+    onClearProfileLogs: () -> Unit,
     onClearDeviceMonitoring: () -> Unit
 ) {
     val scale = rememberAppScale()
@@ -144,18 +152,25 @@ fun LifesaiverApp(
                 meshPeerCount = meshPeerCount,
                 directPeerIds = directPeerIds,
                 myPeerId = myPeerId,
+                myNickname = myNickname,
+                peerNicknames = peerNicknames,
+                meshGraphSnapshot = meshGraphSnapshot,
                 bleDebugStats = bleDebugStats,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
                 messages = messages,
                 signatureLogs = signatureLogs,
+                profileLogs = profileLogs,
                 onClearSignatureLogs = onClearSignatureLogs,
+                onClearProfileLogs = onClearProfileLogs,
                 onStartAutoConnect = onStartAutoConnect,
                 onStopAutoConnect = onStopAutoConnect,
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onSendMessage = onSendMessage,
+                onSendProfileTest = onSendProfileTest,
+                onSendProfileUpdate = onSendProfileUpdate,
                 onDisconnect = onDisconnect,
                 onStartRescueSignal = onStartRescueSignal,
                 onStopRescueSignal = onStopRescueSignal,

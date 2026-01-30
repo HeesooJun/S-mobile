@@ -1,6 +1,9 @@
 package com.example.lifesaiver.protocol.mesh
 
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class MeshGraphRegistry {
     data class GraphNode(val peerId: String, val nickname: String?)
@@ -10,6 +13,8 @@ class MeshGraphRegistry {
     private val nicknames = ConcurrentHashMap<String, String?>()
     private val announcements = ConcurrentHashMap<String, Set<String>>()
     private val lastUpdate = ConcurrentHashMap<String, Long>()
+    private val _graphState = MutableStateFlow(GraphSnapshot(emptyList(), emptyList()))
+    val graphState: StateFlow<GraphSnapshot> = _graphState.asStateFlow()
 
     @Synchronized
     fun updateFromAnnouncement(
@@ -28,6 +33,7 @@ class MeshGraphRegistry {
         val neighbors = neighborsOrNull ?: emptyList()
         val newSet = neighbors.distinct().take(10).filter { it != originPeerId }.toSet()
         announcements[originPeerId] = newSet
+        publishSnapshot()
     }
 
     @Synchronized
@@ -35,6 +41,8 @@ class MeshGraphRegistry {
         nicknames.remove(peerId)
         announcements.remove(peerId)
         lastUpdate.remove(peerId)
+        removePeerFromNeighbors(peerId)
+        publishSnapshot()
     }
 
     @Synchronized
@@ -87,5 +95,22 @@ class MeshGraphRegistry {
 
         val sortedEdges = edges.sortedWith(compareBy({ it.a }, { it.b }))
         return GraphSnapshot(nodes, sortedEdges)
+    }
+
+    private fun removePeerFromNeighbors(peerId: String) {
+        announcements.forEach { (origin, neighbors) ->
+            if (!neighbors.contains(peerId)) return@forEach
+            val updated = neighbors - peerId
+            if (updated.isEmpty()) {
+                announcements.remove(origin)
+            } else {
+                announcements[origin] = updated
+            }
+        }
+    }
+
+    @Synchronized
+    private fun publishSnapshot() {
+        _graphState.value = buildSnapshot()
     }
 }
