@@ -1,5 +1,6 @@
 package com.example.lifesaiver.presentation
 
+import android.os.Process
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,10 @@ object AppShutdownCoordinator {
             delay(200)
             if (!isActive || shutdownToken.get() != token) return@launch
             try { onStopServices() } catch (_: Exception) { }
+            delay(100)
+            if (!isActive || shutdownToken.get() != token) return@launch
+            try { Process.killProcess(Process.myPid()) } catch (_: Exception) { }
+            try { System.exit(0) } catch (_: Exception) { }
         }
         shutdownJob = job
         job.invokeOnCompletion {
