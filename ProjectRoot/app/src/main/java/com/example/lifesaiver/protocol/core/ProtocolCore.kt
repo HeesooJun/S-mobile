@@ -38,7 +38,7 @@ class ProtocolCore(
     private val signatureManager: SignatureManager? = null
 ) {
     private var transport: Transport? = null
-    private var onPacket: ((Packet) -> Unit)? = null
+    private var onPacket: ((Packet, String?) -> Unit)? = null
     private val peerDirectory = PeerDirectory()
     private val relayManager = PacketRelayManager(myPeerId)
     private val fileTransferScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -79,7 +79,7 @@ class ProtocolCore(
         transport.setOnReceive { bytes, address -> onBytesReceived(bytes, address) }
     }
 
-    fun setOnPacketReceived(handler: (Packet) -> Unit) {
+    fun setOnPacketReceived(handler: (Packet, String?) -> Unit) {
         onPacket = handler
     }
 
@@ -174,7 +174,7 @@ class ProtocolCore(
         inbound.packetForRelay?.let {
             relayManager.handlePacketRelay(RoutedPacket(it, peerId, relayAddress))
         }
-        inbound.packetForApp?.let { onPacket?.invoke(it) }
+        inbound.packetForApp?.let { onPacket?.invoke(it, relayAddress) }
     }
 
     private fun sendFileTransfer(packet: Packet, isBroadcast: Boolean) {
