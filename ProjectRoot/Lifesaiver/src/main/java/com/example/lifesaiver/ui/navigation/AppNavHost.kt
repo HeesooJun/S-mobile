@@ -233,6 +233,7 @@ fun AppNavHost(
                 onPrev = {
                     pendingSosNavigation = false
                     onStopAutoConnect()
+                    onStopRescueSignal()
                     navController.popBackStack()
                 },
                 onNext = {
@@ -354,7 +355,11 @@ fun AppNavHost(
         composable(AppRoute.RescuerEmergency.route) {
             RescuerEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
-                onPrev = { navController.popBackStack() },
+                onPrev = {
+                    onStopAutoConnect()
+                    onStopRescueSignal()
+                    navController.popBackStack()
+                },
                 onNext = { navController.navigate(AppRoute.RescuerPTT.route) }
             )
         }
