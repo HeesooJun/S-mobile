@@ -79,7 +79,7 @@ fun LifesaiverApp(
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     // [상태 2] 절전 화면 표시 여부
     var isSaverVisible by remember { mutableStateOf(false) }
-    var currentRoute by remember { mutableStateOf(AppRoute.ModeGate.route) }
+    var currentRoute by remember { mutableStateOf(AppRoute.SurvivorProfile.route) }
     val autoSaverEnabled =
         isRescueSignalActive && (
             currentRoute == AppRoute.SurvivorEmergency.route ||
