@@ -194,20 +194,25 @@ fun MeshMap(
                 val label = node.label
                 if (!label.isNullOrBlank()) {
                     val shortId = if (node.id.length > 8) node.id.take(8) else node.id
-                    val displayLabel = if (label == node.id) {
-                        label
-                    } else {
-                        "$label ($shortId)"
-                    }
                     val color = if (node.isSelf) AppColors.Green else labelColor
                     labelPaint.color = color.toArgb()
                     labelPaint.textSize = labelTextSizePx
+                    val line1Y = screenOffset.y + nodeRadius + labelPaddingPx + labelTextSizePx
                     drawContext.canvas.nativeCanvas.drawText(
-                        displayLabel,
+                        label,
                         screenOffset.x,
-                        screenOffset.y + nodeRadius + labelPaddingPx + labelTextSizePx,
+                        line1Y,
                         labelPaint
                     )
+                    if (label != node.id) {
+                        val line2Y = line1Y + labelTextSizePx + (labelPaddingPx * 0.6f)
+                        drawContext.canvas.nativeCanvas.drawText(
+                            shortId,
+                            screenOffset.x,
+                            line2Y,
+                            labelPaint
+                        )
+                    }
                 }
             }
         }
