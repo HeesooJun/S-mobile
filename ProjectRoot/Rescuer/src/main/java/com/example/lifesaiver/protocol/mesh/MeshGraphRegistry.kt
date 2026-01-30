@@ -1,5 +1,6 @@
 package com.example.lifesaiver.protocol.mesh
 
+import com.example.lifesaiver.protocol.core.ProtocolConstants
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,8 @@ class MeshGraphRegistry {
     private val nicknames = ConcurrentHashMap<String, String?>()
     private val announcements = ConcurrentHashMap<String, Set<String>>()
     private val lastUpdate = ConcurrentHashMap<String, Long>()
+    private val suppressedPeers = ConcurrentHashMap<String, Long>()
+    private val suppressionTtlMs: Long = ProtocolConstants.Mesh.PEER_TIMEOUT_MS
     private val _graphState = MutableStateFlow(GraphSnapshot(emptyList(), emptyList()))
     val graphState: StateFlow<GraphSnapshot> = _graphState.asStateFlow()
 
@@ -30,8 +33,15 @@ class MeshGraphRegistry {
             nicknames[originPeerId] = originNickname
         }
 
+        val now = System.currentTimeMillis()
+        if (isSuppressed(originPeerId, now)) {
+            suppressedPeers.remove(originPeerId)
+        }
         val neighbors = neighborsOrNull ?: emptyList()
-        val newSet = neighbors.distinct().take(10).filter { it != originPeerId }.toSet()
+        val newSet = neighbors.distinct()
+            .take(10)
+            .filter { it != originPeerId && !isSuppressed(it, now) }
+            .toSet()
         announcements[originPeerId] = newSet
         publishSnapshot()
     }
@@ -44,12 +54,16 @@ class MeshGraphRegistry {
         if (!nickname.isNullOrBlank()) {
             nicknames[peerId] = nickname
         }
+        if (isSuppressed(peerId, System.currentTimeMillis())) {
+            suppressedPeers.remove(peerId)
+        }
         announcements.putIfAbsent(peerId, emptySet())
         publishSnapshot()
     }
 
     @Synchronized
     fun removePeer(peerId: String) {
+        suppressPeer(peerId, System.currentTimeMillis())
         nicknames.remove(peerId)
         announcements.remove(peerId)
         lastUpdate.remove(peerId)
@@ -65,6 +79,7 @@ class MeshGraphRegistry {
         for (peerId in stale) {
             removePeer(peerId)
         }
+        cleanupSuppressed(now)
     }
 
     @Synchronized
@@ -124,5 +139,24 @@ class MeshGraphRegistry {
     @Synchronized
     private fun publishSnapshot() {
         _graphState.value = buildSnapshot()
+    }
+
+    private fun suppressPeer(peerId: String, now: Long) {
+        suppressedPeers[peerId] = now + suppressionTtlMs
+    }
+
+    private fun isSuppressed(peerId: String, now: Long): Boolean {
+        val expiresAt = suppressedPeers[peerId] ?: return false
+        if (expiresAt <= now) {
+            suppressedPeers.remove(peerId)
+            return false
+        }
+        return true
+    }
+
+    private fun cleanupSuppressed(now: Long) {
+        val expired = suppressedPeers.filterValues { it <= now }.keys
+        if (expired.isEmpty()) return
+        expired.forEach { suppressedPeers.remove(it) }
     }
 }
