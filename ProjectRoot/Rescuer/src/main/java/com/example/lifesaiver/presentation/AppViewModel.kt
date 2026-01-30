@@ -169,6 +169,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
+    private var lastConnectionAnnounceMs: Long = 0L
+    private val connectionAnnounceCooldownMs: Long = 3_000L
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -439,9 +441,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             protocolCallback = { _, _ -> },
             connectionCallback = { connected, count ->
                 val directPeerIds = bleManager.getConnectedPeerIds()
+                if (connected) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastConnectionAnnounceMs >= connectionAnnounceCooldownMs) {
+                        sendAnnounce()
+                        lastConnectionAnnounceMs = now
+                    }
+                }
                 val newPeers = directPeerIds.filterNot { announcedToPeers.contains(it) }
                 if (newPeers.isNotEmpty()) {
-                    sendAnnounce()
                     announcedToPeers.addAll(newPeers)
                     newPeers.forEach { peerId ->
                         gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
@@ -505,12 +513,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             val pathLabel = packetPathLabel(packet, relayAddress)
+            val peerHex = bytesToHex(packet.header.senderId)
+            if (relayAddress != null && pathLabel == "direct") {
+                bleManager.bindPeerIdForAddress(relayAddress, peerHex)
+                bleManager.onAnnounceReceived(relayAddress)
+            }
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
                     val now = System.currentTimeMillis()
                     val age = now - packet.header.timestamp
                     if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
-                    val peerHex = bytesToHex(packet.header.senderId)
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     val decision = peerIdentityRegistry.handleAnnounce(
                         peerId = peerHex,
@@ -545,7 +557,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     gossipSyncManager.onPublicPacketSeen(packet)
                 }
                 PacketType.LEAVE -> {
-                    val peerHex = bytesToHex(packet.header.senderId)
                     meshGraphRegistry.removePeer(peerHex)
                     peerIdentityRegistry.removePeer(peerHex)
                     gossipSyncManager.removeAnnouncementForPeer(peerHex)
