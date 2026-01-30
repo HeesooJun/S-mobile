@@ -14,6 +14,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.example.lifesaiver.presentation.AppShutdownCoordinator
 import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.UiEvent
 import com.example.lifesaiver.ui.theme.LifesaiverTheme
@@ -118,5 +119,15 @@ class MainActivity : ComponentActivity() {
             it == PackageManager.PERMISSION_GRANTED
         }
         viewModel.onPermissionsResult(granted)
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) {
+            AppShutdownCoordinator.requestShutdown(
+                onSendLeave = { viewModel.sendLeaveOnShutdown() },
+                onStopServices = { viewModel.stopServicesForShutdown() }
+            )
+        }
+        super.onDestroy()
     }
 }
