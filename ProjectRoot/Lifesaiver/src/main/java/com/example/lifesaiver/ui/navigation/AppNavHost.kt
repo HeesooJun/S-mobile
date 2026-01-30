@@ -173,10 +173,8 @@ fun AppNavHost(
                 onPrev = { navController.popBackStack() },
                 onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onSos = {
-                    onStartRescueSignal()
                     pendingSosNavigation = true
                     sosStartedAt = System.currentTimeMillis()
-                    onStartAutoConnect()
                     navController.navigate(AppRoute.SurvivorEmergency.route)
                 }
             )
@@ -204,6 +202,9 @@ fun AppNavHost(
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
             LaunchedEffect(Unit) {
+                if (!isRescueSignalActive) {
+                    onStartRescueSignal()
+                }
                 onStartAutoConnect()
             }
             SurvivorEmergencyBeaconScreen(
