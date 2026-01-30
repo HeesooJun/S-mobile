@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +25,7 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.presentation.BleDebugStats
+import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
@@ -39,6 +41,8 @@ import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
 import com.example.lifesaiver.wakeup.SensorService
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun AppNavHost(
@@ -51,6 +55,7 @@ fun AppNavHost(
     myNickname: String,
     peerNicknames: Map<String, String>,
     meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
+    meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
@@ -66,6 +71,7 @@ fun AppNavHost(
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
+    onPulseRescueSignal: () -> Unit,
     onSendProfileTest: () -> Unit,
     onSendProfileUpdate: (SurvivorProfile) -> Unit,
     onClearSignatureLogs: () -> Unit,
@@ -81,8 +87,10 @@ fun AppNavHost(
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
+    var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
+    val minSosDurationMs = 1_000L
 
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
@@ -126,17 +134,51 @@ fun AppNavHost(
             currentRoute == AppRoute.SurvivorProfile.route &&
             navController.previousBackStackEntry == null
         ) {
-            onStartAutoConnect()
             navController.navigate(AppRoute.SurvivorStandby.route) {
                 popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
             }
         }
     }
 
-    LaunchedEffect(isConnected, pendingSosNavigation) {
+    LaunchedEffect(isConnected, pendingSosNavigation, sosStartedAt) {
         if (pendingSosNavigation && isConnected) {
+            val elapsed = System.currentTimeMillis() - sosStartedAt
+            if (elapsed < minSosDurationMs) {
+                delay(minSosDurationMs - elapsed)
+            }
             pendingSosNavigation = false
             navController.navigate(AppRoute.SurvivorPTT.route)
+        }
+    }
+
+    LaunchedEffect(isConnected, isRescueSignalActive, backStackEntry) {
+        val currentRoute = backStackEntry?.destination?.route
+        if (isRescueSignalActive && !isConnected) {
+            val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
+                currentRoute == AppRoute.RescuerPTT.route ||
+                currentRoute == AppRoute.RescuerChat.route ||
+                currentRoute == AppRoute.RescuerEmergency.route ||
+                currentRoute == AppRoute.RescuerSurvivorDb.route
+            val targetRoute = if (isRescuerRoute) {
+                AppRoute.RescuerEmergency.route
+            } else {
+                AppRoute.SurvivorEmergency.route
+            }
+            if (!pendingSosNavigation) {
+                pendingSosNavigation = true
+                sosStartedAt = System.currentTimeMillis()
+            }
+            if (currentRoute != targetRoute) {
+                navController.navigate(targetRoute) {
+                    if (currentRoute == AppRoute.SurvivorPTT.route ||
+                        currentRoute == AppRoute.RescuerPTT.route
+                    ) {
+                        popUpTo(currentRoute) { inclusive = true }
+                    } else {
+                        launchSingleTop = true
+                    }
+                }
+            }
         }
     }
 
@@ -152,9 +194,8 @@ fun AppNavHost(
                 onPrev = { navController.popBackStack() },
                 onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onSos = {
-                    onStartRescueSignal()
                     pendingSosNavigation = true
-                    onStartAutoConnect()
+                    sosStartedAt = System.currentTimeMillis()
                     navController.navigate(AppRoute.SurvivorEmergency.route)
                 }
             )
@@ -166,7 +207,6 @@ fun AppNavHost(
                 onSaved = {
                     val prevRoute = navController.previousBackStackEntry?.destination?.route
                     if (prevRoute == null) {
-                        onStartAutoConnect()
                         navController.navigate(AppRoute.SurvivorStandby.route) {
                             popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
                         }
@@ -182,21 +222,26 @@ fun AppNavHost(
         composable(AppRoute.SurvivorEmergency.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
+            val stopAndBack = {
+                pendingSosNavigation = false
+                onStopAutoConnect()
+                onStopRescueSignal()
+                navController.popBackStack()
+                Unit
+            }
             LaunchedEffect(Unit) {
+                if (!isRescueSignalActive) {
+                    onStartRescueSignal()
+                }
                 onStartAutoConnect()
+            }
+            BackHandler {
+                stopAndBack()
             }
             SurvivorEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
-                onPrev = {
-                    pendingSosNavigation = false
-                    onStopAutoConnect()
-                    navController.popBackStack()
-                },
-                onNext = {
-                    pendingSosNavigation = false
-                    navController.navigate(AppRoute.SurvivorPTT.route)
-                }
+                onPrev = stopAndBack,
             )
         }
 
@@ -213,6 +258,7 @@ fun AppNavHost(
                 myNickname = myNickname,
                 peerNicknames = peerNicknames,
                 meshGraphSnapshot = meshGraphSnapshot,
+                meshVisualEvents = meshVisualEvents,
                 bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
@@ -309,11 +355,19 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerEmergency.route) {
+            val stopAndBack = {
+                onStopAutoConnect()
+                onStopRescueSignal()
+                navController.popBackStack()
+                Unit
+            }
             RescuerEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
-                onPrev = { navController.popBackStack() },
-                onNext = { navController.navigate(AppRoute.RescuerPTT.route) }
+                onPrev = stopAndBack,
             )
+            BackHandler {
+                stopAndBack()
+            }
         }
     }
 }
