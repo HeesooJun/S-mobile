@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -282,20 +283,26 @@ fun AppNavHost(
         composable(AppRoute.SurvivorEmergency.route) {
             val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
             val emergencyState by emergencyViewModel.uiState.collectAsState()
+            val stopAndBack = {
+                pendingSosNavigation = false
+                onStopAutoConnect()
+                onStopRescueSignal()
+                navController.popBackStack()
+                Unit
+            }
             LaunchedEffect(Unit) {
                 if (!isRescueSignalActive) {
                     onStartRescueSignal()
                 }
                 onStartAutoConnect()
             }
+            BackHandler {
+                stopAndBack()
+            }
             SurvivorEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
-                onPrev = {
-                    pendingSosNavigation = false
-                    onStopAutoConnect()
-                    navController.popBackStack()
-                },
+                onPrev = stopAndBack,
                 onNext = {
                     pendingSosNavigation = false
                     navController.navigate(AppRoute.SurvivorPTT.route)
@@ -413,19 +420,24 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerEmergency.route) {
+            val stopAndBack = {
+                onStopAutoConnect()
+                onStopRescueSignal()
+                navController.popBackStack()
+                Unit
+            }
             LaunchedEffect(Unit) {
                 if (!isRescueSignalActive) {
                     onStartRescueSignal()
                 }
                 onStartAutoConnect()
             }
+            BackHandler {
+                stopAndBack()
+            }
             RescuerEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
-                onPrev = {
-                    onStopAutoConnect()
-                    onStopRescueSignal()
-                    navController.popBackStack()
-                },
+                onPrev = stopAndBack,
                 onNext = { navController.navigate(AppRoute.RescuerPTT.route) }
             )
         }
