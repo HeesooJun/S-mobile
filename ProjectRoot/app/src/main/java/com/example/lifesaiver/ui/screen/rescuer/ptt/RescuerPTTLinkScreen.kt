@@ -192,61 +192,62 @@ fun RescuerPTTLinkScreen(
                                 }
                             }
                         )
-                    ExpandableAction(
-                        iconRes = R.drawable.connection_filled,
-                        label = "사용자 DB $displayConnectedCount",
-                        isExpanded = expandedAction == ActionType.Count,
-                        iconSizeOverride = scaledDp(32, scale),
-                        showLabelAlways = showActionLabelsAlways,
-                        onClick = {
-                            onOpenSurvivorDb()
-                        }
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .height(scaledDp(32, scale))
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    AnimatedVisibility(
-                        visible = showDoubleTapHint,
-                        enter = fadeIn() + slideInVertically { it / 3 },
-                        exit = fadeOut() + slideOutVertically { it / 3 }
-                    ) {
-                        Text(
-                            text = "한번 더 눌러주세요",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(12, scale),
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.offset(y = scaledDp(6, scale))
+                        ExpandableAction(
+                            iconRes = R.drawable.connection_filled,
+                            label = "사용자 DB $displayConnectedCount",
+                            isExpanded = expandedAction == ActionType.Count,
+                            iconSizeOverride = scaledDp(32, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                onOpenSurvivorDb()
+                            }
                         )
                     }
+                    Column(
+                        modifier = Modifier
+                            .height(scaledDp(32, scale))
+                            .fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        AnimatedVisibility(
+                            visible = showDoubleTapHint,
+                            enter = fadeIn() + slideInVertically { it / 3 },
+                            exit = fadeOut() + slideOutVertically { it / 3 }
+                        ) {
+                            Text(
+                                text = "한번 더 눌러주세요",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.offset(y = scaledDp(6, scale))
+                            )
+                        }
+                    }
                 }
-            }
 
-            Spacer(modifier = Modifier.weight(1f))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = scaledDp(24, scale)),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
+                Spacer(modifier = Modifier.weight(1f))
+                Row(
                     modifier = Modifier
-                        .height(scaledDp(36, scale))
-                        .padding(start = scaledDp(14, scale)),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(bottom = scaledDp(24, scale)),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SignalBars(
-                        strength = if (isConnected) 4 else 1,
-                        variant = SignalVariant.Green,
-                        modifier = Modifier.graphicsLayer(rotationX = 180f)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .height(scaledDp(36, scale))
+                            .padding(start = scaledDp(14, scale)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SignalBars(
+                            strength = if (isConnected) 4 else 1,
+                            variant = SignalVariant.Green,
+                            modifier = Modifier.graphicsLayer(rotationX = 180f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.size(scaledDp(36, scale)))
                 }
-                Spacer(modifier = Modifier.size(scaledDp(36, scale)))
             }
         }
     }
