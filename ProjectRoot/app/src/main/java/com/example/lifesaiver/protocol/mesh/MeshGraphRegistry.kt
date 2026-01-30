@@ -41,6 +41,7 @@ class MeshGraphRegistry {
         nicknames.remove(peerId)
         announcements.remove(peerId)
         lastUpdate.remove(peerId)
+        removePeerFromNeighbors(peerId)
         publishSnapshot()
     }
 
@@ -94,6 +95,18 @@ class MeshGraphRegistry {
 
         val sortedEdges = edges.sortedWith(compareBy({ it.a }, { it.b }))
         return GraphSnapshot(nodes, sortedEdges)
+    }
+
+    private fun removePeerFromNeighbors(peerId: String) {
+        announcements.forEach { (origin, neighbors) ->
+            if (!neighbors.contains(peerId)) return@forEach
+            val updated = neighbors - peerId
+            if (updated.isEmpty()) {
+                announcements.remove(origin)
+            } else {
+                announcements[origin] = updated
+            }
+        }
     }
 
     @Synchronized
