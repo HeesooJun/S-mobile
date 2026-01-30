@@ -45,6 +45,7 @@ import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
 import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -57,7 +58,6 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
-import kotlin.random.Random
 
 data class BleDebugStats(
     val scanRssiAvg: Int? = null,
@@ -122,6 +122,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiEvents = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
     val uiEvents: SharedFlow<UiEvent> = _uiEvents.asSharedFlow()
 
+    private val _meshVisualEvents = MutableSharedFlow<MeshVisualEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val meshVisualEvents: SharedFlow<MeshVisualEvent> = _meshVisualEvents.asSharedFlow()
+
     // 권한 목록
     val requiredPermissions: Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         arrayOf(
@@ -157,16 +163,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-    private val senderId: ByteArray by lazy {
-        val savedHex = prefs.getString("sender_id", null)
-        if (savedHex != null) {
-            hexToBytes(savedHex)
-        } else {
-            val newId = ByteArray(8).also { Random.nextBytes(it) }
-            prefs.edit().putString("sender_id", bytesToHex(newId)).apply()
-            newId
-        }
-    }
+    private var senderId: ByteArray = ByteArray(0)
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedNickname: String = ""
     private val announcedToPeers = mutableSetOf<String>()
@@ -179,6 +176,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
+    private var lastConnectionAnnounceMs: Long = 0L
+    private val connectionAnnounceCooldownMs: Long = 3_000L
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -194,6 +193,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         observeProfileName()
         observeMeshGraph()
         _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
+        AppShutdownHooks.register(
+            onSendLeave = { sendLeaveOnShutdown() },
+            onStopServices = { stopServicesForShutdown() }
+        )
     }
 
     // ------------------------------------------------------------------------
@@ -212,7 +215,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 2. RescueService: 백그라운드 서비스 시작
         try {
             val intent = Intent(app, RescueService::class.java).apply {
-                action = "START_RESCUE"
+                action = RescueService.ACTION_START_RESCUE
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 app.startForegroundService(intent)
@@ -226,6 +229,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isRescueSignalActive = true) }
     }
 
+    fun pulseRescueSignal() {
+        if (!_uiState.value.hasPermissions) return
+        if (!::bleManager.isInitialized) return
+        bleManager.pulseEmergencyAdvertising()
+    }
+
     fun stopRescueSignal() {
         // 1. 신호 중단
         bleManager.stopAdvertising()
@@ -233,7 +242,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 2. 백그라운드 서비스 종료
         try {
             val intent = Intent(app, RescueService::class.java).apply {
-                action = "STOP_RESCUE"
+                action = RescueService.ACTION_STOP_RESCUE
             }
             app.startService(intent)
         } catch (e: Exception) {
@@ -432,6 +441,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun sendLeaveOnShutdown() {
+        if (!::protocolCore.isInitialized) return
+        sendLeavePacket()
+    }
+
+    fun stopServicesForShutdown() {
+        if (::bleManager.isInitialized) {
+            bleManager.stopAdvertising()
+            bleManager.disconnect()
+        }
+        try {
+            val intent = Intent(app, RescueService::class.java).apply {
+                action = RescueService.ACTION_STOP_RESCUE
+            }
+            app.startService(intent)
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "서비스 종료 실패: ${e.message}")
+        }
+    }
+
     private fun initAudio() {
         try {
             audioEngine = AudioEngine()
@@ -449,9 +478,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             protocolCallback = { _, _ -> },
             connectionCallback = { connected, count ->
                 val directPeerIds = bleManager.getConnectedPeerIds()
+                if (connected) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastConnectionAnnounceMs >= connectionAnnounceCooldownMs) {
+                        sendAnnounce()
+                        lastConnectionAnnounceMs = now
+                    }
+                }
                 val newPeers = directPeerIds.filterNot { announcedToPeers.contains(it) }
                 if (newPeers.isNotEmpty()) {
-                    sendAnnounce()
                     announcedToPeers.addAll(newPeers)
                     newPeers.forEach { peerId ->
                         gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
@@ -485,6 +520,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun initProtocol() {
         val codec = BinaryPacketCodec()
         signatureManager = SignatureManager(app, codec, ::appendSignatureLog)
+        senderId = loadOrCreatePeerId(signatureManager)
         protocolCore = ProtocolCore(
             codec,
             codec,
@@ -514,12 +550,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
 
             val pathLabel = packetPathLabel(packet, relayAddress)
+            val peerHex = bytesToHex(packet.header.senderId)
+            emitMeshActivity(peerHex)
+            if (packet.header.type != PacketType.LEAVE && packet.header.type != PacketType.ANNOUNCE) {
+                meshGraphRegistry.touchPeer(peerHex, peerNicknames[peerHex], System.currentTimeMillis())
+            }
+            if (relayAddress != null && pathLabel == "direct") {
+                bleManager.bindPeerIdForAddress(relayAddress, peerHex)
+                bleManager.onAnnounceReceived(relayAddress)
+                meshGraphRegistry.touchPeer(peerHex, peerNicknames[peerHex], System.currentTimeMillis())
+                refreshDirectPeers()
+            }
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
                     val now = System.currentTimeMillis()
                     val age = now - packet.header.timestamp
                     if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
-                    val peerHex = bytesToHex(packet.header.senderId)
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     val decision = peerIdentityRegistry.handleAnnounce(
                         peerId = peerHex,
@@ -554,7 +600,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     gossipSyncManager.onPublicPacketSeen(packet)
                 }
                 PacketType.LEAVE -> {
-                    val peerHex = bytesToHex(packet.header.senderId)
                     meshGraphRegistry.removePeer(peerHex)
                     peerIdentityRegistry.removePeer(peerHex)
                     gossipSyncManager.removeAnnouncementForPeer(peerHex)
@@ -632,6 +677,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun updateMeshCount() {
         val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
         _uiState.update { it.copy(meshPeerCount = meshCount) }
+    }
+
+    private fun emitMeshActivity(peerId: String) {
+        _meshVisualEvents.tryEmit(MeshVisualEvent.PacketActivity(peerId))
+    }
+
+    private fun refreshDirectPeers() {
+        val directPeerIds = bleManager.getConnectedPeerIds()
+        val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
+        meshGraphRegistry.updateFromAnnouncement(
+            originPeerId = bytesToHex(senderId),
+            originNickname = nickname,
+            neighborsOrNull = directPeerIds,
+            timestamp = System.currentTimeMillis()
+        )
+        val newPeers = directPeerIds.filterNot { announcedToPeers.contains(it) }
+        if (newPeers.isNotEmpty()) {
+            sendAnnounce()
+            announcedToPeers.addAll(newPeers)
+            newPeers.forEach { peerId ->
+                gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
+            }
+        }
+        announcedToPeers.retainAll(directPeerIds.toSet())
+        _uiState.update {
+            val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
+            it.copy(
+                isConnected = directPeerIds.isNotEmpty(),
+                connectedCount = directPeerIds.size,
+                meshPeerCount = meshCount,
+                directPeerIds = directPeerIds
+            )
+        }
     }
 
     private fun startAnnounceLoop() {
@@ -720,7 +798,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeMeshGraph() {
         viewModelScope.launch {
             meshGraphRegistry.graphState.collect { snapshot ->
-                _uiState.update { it.copy(meshGraphSnapshot = snapshot) }
+                val meshCount = snapshot.nodes.size.coerceAtLeast(1)
+                _uiState.update {
+                    it.copy(
+                        meshGraphSnapshot = snapshot,
+                        meshPeerCount = meshCount
+                    )
+                }
             }
         }
     }
@@ -756,6 +840,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             profileLogBuffer.removeFirst()
         }
         _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) }
+    }
+
+    private fun loadOrCreatePeerId(manager: SignatureManager): ByteArray {
+        val derived = derivePeerId(manager)
+        val savedHex = prefs.getString("sender_id", null)
+        if (savedHex != null) {
+            val saved = runCatching { hexToBytes(savedHex) }.getOrNull()
+            if (saved != null && saved.contentEquals(derived)) {
+                return saved
+            }
+            prefs.edit().putString("sender_id", bytesToHex(derived)).apply()
+            Log.w("AppViewModel", "sender_id mismatch; reset to derived id")
+            return derived
+        }
+        prefs.edit().putString("sender_id", bytesToHex(derived)).apply()
+        return derived
+    }
+
+    private fun derivePeerId(manager: SignatureManager): ByteArray {
+        val noiseKey = manager.getNoisePublicKeyBytes()
+        val hash = noiseKey.sha256Bytes()
+        return hash.copyOfRange(0, 8)
     }
 
     private fun buildMessagePacket(text: String): Packet {
@@ -822,6 +928,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        AppShutdownHooks.clear()
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
@@ -839,7 +946,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         // 앱 종료 시 서비스도 같이 종료
         val intent = Intent(app, RescueService::class.java).apply {
-            action = "STOP_RESCUE"
+            action = RescueService.ACTION_STOP_RESCUE
         }
         app.startService(intent)
 

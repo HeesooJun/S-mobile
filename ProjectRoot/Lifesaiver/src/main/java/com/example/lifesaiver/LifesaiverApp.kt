@@ -30,6 +30,7 @@ import com.example.lifesaiver.presentation.screen.BlackSaverScreen
 import com.example.lifesaiver.presentation.screen.PermissionViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
+import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.navigation.AppRoute
 import com.example.lifesaiver.ui.theme.AppColors
@@ -38,6 +39,7 @@ import com.example.lifesaiver.ui.theme.rememberAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun LifesaiverApp(
@@ -51,6 +53,7 @@ fun LifesaiverApp(
     myNickname: String,
     peerNicknames: Map<String, String>,
     meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
+    meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
@@ -69,6 +72,7 @@ fun LifesaiverApp(
     onDisconnect: () -> Unit,
     onStartRescueSignal: () -> Unit,
     onStopRescueSignal: () -> Unit,
+    onPulseRescueSignal: () -> Unit,
     onClearSignatureLogs: () -> Unit,
     onClearProfileLogs: () -> Unit,
     onClearDeviceMonitoring: () -> Unit
@@ -155,6 +159,7 @@ fun LifesaiverApp(
                 myNickname = myNickname,
                 peerNicknames = peerNicknames,
                 meshGraphSnapshot = meshGraphSnapshot,
+                meshVisualEvents = meshVisualEvents,
                 bleDebugStats = bleDebugStats,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
@@ -174,6 +179,7 @@ fun LifesaiverApp(
                 onDisconnect = onDisconnect,
                 onStartRescueSignal = onStartRescueSignal,
                 onStopRescueSignal = onStopRescueSignal,
+                onPulseRescueSignal = onPulseRescueSignal,
                 onClearDeviceMonitoring = onClearDeviceMonitoring,
                 onRouteChanged = { route -> currentRoute = route }
             )
