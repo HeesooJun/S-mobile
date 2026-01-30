@@ -81,6 +81,10 @@ class GossipSyncManager(
         }
     }
 
+    fun removeAnnouncementForPeer(peerIdHex: String) {
+        latestAnnouncementByPeer.remove(peerIdHex)
+    }
+
     fun onPublicPacketSeen(packet: Packet) {
         val type = packet.header.type
         val isBroadcastMessage = type == PacketType.MESSAGE && packet.header.recipientId == null
