@@ -152,11 +152,31 @@ fun AppNavHost(
 
     LaunchedEffect(isConnected, isRescueSignalActive, backStackEntry) {
         val currentRoute = backStackEntry?.destination?.route
-        if (isRescueSignalActive && !isConnected && currentRoute == AppRoute.SurvivorPTT.route) {
-            pendingSosNavigation = true
-            sosStartedAt = System.currentTimeMillis()
-            navController.navigate(AppRoute.SurvivorEmergency.route) {
-                popUpTo(AppRoute.SurvivorPTT.route) { inclusive = true }
+        if (isRescueSignalActive && !isConnected) {
+            val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
+                currentRoute == AppRoute.RescuerPTT.route ||
+                currentRoute == AppRoute.RescuerChat.route ||
+                currentRoute == AppRoute.RescuerEmergency.route ||
+                currentRoute == AppRoute.RescuerSurvivorDb.route
+            val targetRoute = if (isRescuerRoute) {
+                AppRoute.RescuerEmergency.route
+            } else {
+                AppRoute.SurvivorEmergency.route
+            }
+            if (!pendingSosNavigation) {
+                pendingSosNavigation = true
+                sosStartedAt = System.currentTimeMillis()
+            }
+            if (currentRoute != targetRoute) {
+                navController.navigate(targetRoute) {
+                    if (currentRoute == AppRoute.SurvivorPTT.route ||
+                        currentRoute == AppRoute.RescuerPTT.route
+                    ) {
+                        popUpTo(currentRoute) { inclusive = true }
+                    } else {
+                        launchSingleTop = true
+                    }
+                }
             }
         }
     }
