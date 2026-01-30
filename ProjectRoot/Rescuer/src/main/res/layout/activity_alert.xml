@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/alert_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center"
+    android:background="#000000">
+
+    <TextView
+        android:id="@+id/alert_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="재난 감지됨"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#FF4D4D" />
+
+    <TextView
+        android:id="@+id/alert_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="구조 신호 전송 중입니다"
+        android:textSize="14sp"
+        android:textColor="#CCCCCC" />
+
+    <TextView
+        android:id="@+id/alert_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="상황이 괜찮아졌다면 알람을 종료하세요."
+        android:textSize="12sp"
+        android:textColor="#888888" />
+
+    <Button
+        android:id="@+id/btn_stop_alarm"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="알람 종료"
+        android:textAllCaps="false" />
+
+</LinearLayout>
