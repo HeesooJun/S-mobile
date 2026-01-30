@@ -634,8 +634,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearDeviceMonitoring() {
         if (::bleManager.isInitialized) {
-            bleManager.clearDeviceMonitoring()
-            _uiEvents.tryEmit(UiEvent.Toast("연결 차단 목록 초기화됨"))
+            bleManager.clearAllConnectionsAndMappings()
+            _uiEvents.tryEmit(UiEvent.Toast("연결/차단 목록 초기화됨"))
         }
     }
 
