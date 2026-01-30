@@ -242,10 +242,6 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 uiState = emergencyState,
                 onPrev = stopAndBack,
-                onNext = {
-                    pendingSosNavigation = false
-                    navController.navigate(AppRoute.SurvivorPTT.route)
-                }
             )
         }
 
@@ -368,7 +364,6 @@ fun AppNavHost(
             RescuerEmergencyBeaconScreen(
                 batteryLevel = batteryLevel,
                 onPrev = stopAndBack,
-                onNext = { navController.navigate(AppRoute.RescuerPTT.route) }
             )
             BackHandler {
                 stopAndBack()
