@@ -17,15 +17,13 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.lifesaiver.R
-import com.example.lifesaiver.ai.stt.EmergencyIntentClassifierKorean
-import com.example.lifesaiver.ai.stt.VoiceTriggerDetector
 import kotlin.math.sqrt
 
 class SensorService : Service(), SensorEventListener {
 
     companion object {
         const val ACTION_SENSOR_TRIGGERED = "com.example.wakeup.ACTION_SENSOR_TRIGGERED"
-        const val NOTIFICATION_ID = 101 // VoiceService(102)와 ID가 달라야 함
+        const val NOTIFICATION_ID = 101
 
         // 알림 채널 ID
         private const val CHANNEL_ID_HIDDEN = "WAKEUP_HIDDEN_CHANNEL_V3"
@@ -46,10 +44,6 @@ class SensorService : Service(), SensorEventListener {
     private var impactTime: Long = 0
     private var isAlertTriggered = false
 
-    // AI 관련 변수
-    private lateinit var intentClassifier: EmergencyIntentClassifierKorean
-    private lateinit var voiceDetector: VoiceTriggerDetector
-
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
@@ -57,42 +51,6 @@ class SensorService : Service(), SensorEventListener {
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-
-        initAndStartAI()
-    }
-
-    private fun initAndStartAI() {
-        intentClassifier = EmergencyIntentClassifierKorean(this)
-        voiceDetector = VoiceTriggerDetector(
-            context = this,
-            onStateChange = { Log.d("SensorService", "음성 상태: $it") },
-            onDetected = { text -> analyzeVoiceIntent(text) },
-            onErrorOccurred = { restartVoiceListening() }
-        )
-        // 충격 감지와 별개로 소리도 같이 듣기 시작
-        voiceDetector.startListening()
-    }
-
-    private fun restartVoiceListening() {
-        if (isAlertTriggered) return
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            try {
-                voiceDetector.startListening()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }, 1000)
-    }
-
-    private fun analyzeVoiceIntent(text: String) {
-        if (isAlertTriggered) return
-        intentClassifier.checkIntent(text) { isEmergency, score, match ->
-            if (isEmergency) {
-                triggerAlert("음성 감지($match)")
-            } else {
-                restartVoiceListening()
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -136,20 +94,19 @@ class SensorService : Service(), SensorEventListener {
         }
     }
 
-    // ▼▼▼ [핵심 수정] 앱 깨우기 로직 강화 ▼▼▼
+    // 앱 깨우기 및 알림 로직
     private fun triggerAlert(reason: String) {
         if (isAlertTriggered) return
         isAlertTriggered = true
 
         Log.e("SensorService", "🚨 비상 알림 발동! 원인: $reason")
 
-        // 1. 센서 및 마이크 해제 (중복 감지 방지)
-        voiceDetector.stopListening()
+        // 1. 센서 해제 (중복 감지 방지)
         sensorManager.unregisterListener(this)
 
-        // 2. [추가] 네비게이션용 브로드캐스트 전송 (앱이 이미 켜져 있을 때 화면 전환용)
+        // 2. 네비게이션용 브로드캐스트 전송
         val broadcastIntent = Intent(ACTION_SENSOR_TRIGGERED).apply {
-            setPackage(packageName) // 내 앱에만 전송
+            setPackage(packageName)
             putExtra("triggerReason", reason)
         }
         sendBroadcast(broadcastIntent)
@@ -162,7 +119,7 @@ class SensorService : Service(), SensorEventListener {
         }
 
         if (activityIntent != null) {
-            // 4. [핵심] 화면이 켜져 있을 때 앱 강제 실행 (권한 필요)
+            // 4. 화면이 켜져 있을 때 앱 강제 실행 (권한 필요)
             if (Settings.canDrawOverlays(this)) {
                 startActivity(activityIntent)
                 Log.d("SensorService", "🚀 비상 상황! 앱 강제 실행됨")
@@ -191,7 +148,6 @@ class SensorService : Service(), SensorEventListener {
             notificationManager.notify(9999, notificationBuilder.build())
         }
     }
-    // ▲▲▲ 수정 끝 ▲▲▲
 
     private fun startForegroundServiceNotification() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID_HIDDEN)
@@ -204,11 +160,8 @@ class SensorService : Service(), SensorEventListener {
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val serviceType = if (Build.VERSION.SDK_INT >= 34) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            }
+            // 센서 서비스는 데이터 싱크 타입으로 설정 (마이크 권한 불필요)
+            val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             startForeground(NOTIFICATION_ID, notification, serviceType)
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -236,7 +189,7 @@ class SensorService : Service(), SensorEventListener {
             ).apply {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 enableVibration(true)
-                setBypassDnd(true) // 방해금지 모드 무시
+                setBypassDnd(true)
             }
 
             manager.createNotificationChannel(serviceChannel)
@@ -247,8 +200,6 @@ class SensorService : Service(), SensorEventListener {
     override fun onDestroy() {
         super.onDestroy()
         sensorManager.unregisterListener(this)
-        voiceDetector.stopListening()
-        intentClassifier.close()
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
