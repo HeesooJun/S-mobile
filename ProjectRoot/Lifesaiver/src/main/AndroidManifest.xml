@@ -37,6 +37,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
@@ -72,10 +75,14 @@
             android:theme="@style/Theme.Lifesaiver" />
 
         <service
-            android:name="com.example.lifesaiver.wakeup.SensorService"
-            android:exported="false"
-            android:foregroundServiceType="microphone|dataSync"
-            />
+            android:name=".wakeup.SensorService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <service
+            android:name=".wakeup.VoiceService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
     </application>
 
 </manifest>

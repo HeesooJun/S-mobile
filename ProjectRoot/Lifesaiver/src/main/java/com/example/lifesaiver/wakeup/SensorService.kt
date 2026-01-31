@@ -1,6 +1,9 @@
 package com.example.lifesaiver.wakeup
 
-import android.app.*
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -22,11 +25,12 @@ class SensorService : Service(), SensorEventListener {
 
     companion object {
         const val ACTION_SENSOR_TRIGGERED = "com.example.wakeup.ACTION_SENSOR_TRIGGERED"
-    }
+        const val NOTIFICATION_ID = 101 // VoiceService(102)와 ID가 달라야 함
 
-    // 알림 채널 ID
-    private val CHANNEL_ID_HIDDEN = "WAKEUP_HIDDEN_CHANNEL_V3"
-    private val CHANNEL_ID_ALERT = "WAKEUP_ALERT_CHANNEL"
+        // 알림 채널 ID
+        private const val CHANNEL_ID_HIDDEN = "WAKEUP_HIDDEN_CHANNEL_V3"
+        private const val CHANNEL_ID_ALERT = "WAKEUP_ALERT_CHANNEL"
+    }
 
     // 센서 관련 변수
     private lateinit var sensorManager: SensorManager
@@ -40,7 +44,7 @@ class SensorService : Service(), SensorEventListener {
 
     private var isWaitingForStillness = false
     private var impactTime: Long = 0
-    private var isAlertTriggered = false // 중복 실행 방지 플래그
+    private var isAlertTriggered = false
 
     // AI 관련 변수
     private lateinit var intentClassifier: EmergencyIntentClassifierKorean
@@ -48,65 +52,44 @@ class SensorService : Service(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
-        // 1. 알림 채널 생성 (오류 해결: 함수 호출)
         createNotificationChannels()
-
-        // 2. 포그라운드 알림 표시 (오류 해결: 함수 호출)
         startForegroundServiceNotification()
 
-        // 3. 센서 초기화
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
-        // 4. AI(음성+의도분석) 초기화 및 즉시 실행
         initAndStartAI()
     }
 
     private fun initAndStartAI() {
         intentClassifier = EmergencyIntentClassifierKorean(this)
-
         voiceDetector = VoiceTriggerDetector(
             context = this,
-            onStateChange = { Log.d("SaiviorVoice", "상태: $it") },
-            onDetected = { text ->
-                // 말이 들리면 즉시 분석
-                analyzeVoiceIntent(text)
-            },
-            onErrorOccurred = { error ->
-                Log.e("SaiviorVoice", "오류: $error")
-                // 에러가 나거나 말이 끊겨도, 죽지 않고 다시 듣게 만듦 (무한 루프)
-                restartVoiceListening()
-            }
+            onStateChange = { Log.d("SensorService", "음성 상태: $it") },
+            onDetected = { text -> analyzeVoiceIntent(text) },
+            onErrorOccurred = { restartVoiceListening() }
         )
-
-        // ★ 앱 켜지자마자 마이크 켜기 (상시 대기)
-        Log.d("Saivior", "음성 웨이크업 감시 시작")
+        // 충격 감지와 별개로 소리도 같이 듣기 시작
         voiceDetector.startListening()
     }
 
     private fun restartVoiceListening() {
-        if (isAlertTriggered) return // 이미 비상상황이면 재시작 안 함
-
-        // 잠시 텀을 두고 다시 켬 (CPU 과부하 방지)
+        if (isAlertTriggered) return
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             try {
                 voiceDetector.startListening()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        }, 1000) // 1초 뒤 재시작
+        }, 1000)
     }
 
     private fun analyzeVoiceIntent(text: String) {
         if (isAlertTriggered) return
-
         intentClassifier.checkIntent(text) { isEmergency, score, match ->
             if (isEmergency) {
-                Log.w("Saivior", "🗣️ 음성 감지됨: $match (점수: $score)")
                 triggerAlert("음성 감지($match)")
             } else {
-                Log.d("Saivior", "일상 대화: $match")
-                // 비상 상황 아니면 다시 듣기 모드
                 restartVoiceListening()
             }
         }
@@ -128,7 +111,6 @@ class SensorService : Service(), SensorEventListener {
                 val y = it.values[1]
                 val z = it.values[2]
                 val gForce = sqrt(x * x + y * y + z * z)
-
                 val currentTime = System.currentTimeMillis()
 
                 if (!isWaitingForStillness) {
@@ -146,7 +128,6 @@ class SensorService : Service(), SensorEventListener {
                     }
 
                     if (timePassed > WAIT_TIME_MS) {
-                        Log.w("Saivior", "📉 낙상 감지됨!")
                         triggerAlert("낙상 감지")
                         isWaitingForStillness = false
                     }
@@ -155,49 +136,68 @@ class SensorService : Service(), SensorEventListener {
         }
     }
 
+    // ▼▼▼ [핵심 수정] 앱 깨우기 로직 강화 ▼▼▼
     private fun triggerAlert(reason: String) {
         if (isAlertTriggered) return
         isAlertTriggered = true
 
-        Log.e("Saivior", "🚨 비상 알림 발동! 원인: $reason")
+        Log.e("SensorService", "🚨 비상 알림 발동! 원인: $reason")
 
+        // 1. 센서 및 마이크 해제 (중복 감지 방지)
         voiceDetector.stopListening()
         sensorManager.unregisterListener(this)
 
-        val intent = Intent(this, AlertActivity::class.java)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        intent.putExtra("triggerReason", reason)
+        // 2. [추가] 네비게이션용 브로드캐스트 전송 (앱이 이미 켜져 있을 때 화면 전환용)
+        val broadcastIntent = Intent(ACTION_SENSOR_TRIGGERED).apply {
+            setPackage(packageName) // 내 앱에만 전송
+            putExtra("triggerReason", reason)
+        }
+        sendBroadcast(broadcastIntent)
 
-        if (Settings.canDrawOverlays(this)) {
-            startActivity(intent)
+        // 3. 실행할 액티비티 인텐트 준비
+        val activityIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            action = ACTION_SENSOR_TRIGGERED
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("triggerReason", reason)
         }
 
-        val fullScreenPendingIntent = PendingIntent.getActivity(
-            this,
-            System.currentTimeMillis().toInt(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        if (activityIntent != null) {
+            // 4. [핵심] 화면이 켜져 있을 때 앱 강제 실행 (권한 필요)
+            if (Settings.canDrawOverlays(this)) {
+                startActivity(activityIntent)
+                Log.d("SensorService", "🚀 비상 상황! 앱 강제 실행됨")
+            }
 
-        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("재난 감지! ($reason)")
-            .setContentText("터치하여 구조 요청 보내기")
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
-            .setAutoCancel(true)
+            // 5. 잠금 화면 깨우기용 PendingIntent
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                System.currentTimeMillis().toInt(),
+                activityIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(9999, notificationBuilder.build())
+            // 6. 전체 화면 알림 표시
+            val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
+                .setSmallIcon(R.drawable.ic_launcher_foreground) // 아이콘 리소스 확인 필요
+                .setContentTitle("재난 감지! ($reason)")
+                .setContentText("터치하여 구조 요청 보내기")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setFullScreenIntent(pendingIntent, true) // 잠금 화면 깨우기
+                .setAutoCancel(true)
+
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(9999, notificationBuilder.build())
+        }
     }
+    // ▲▲▲ 수정 끝 ▲▲▲
 
-    // [오류 해결] 알림 객체를 생성하고 포그라운드를 시작하는 전체 함수
     private fun startForegroundServiceNotification() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID_HIDDEN)
             .setContentTitle("Saivior 감시 중")
             .setContentText("넘어짐 및 구조 요청 대기 중...")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setShowWhen(false)
@@ -205,18 +205,16 @@ class SensorService : Service(), SensorEventListener {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val serviceType = if (Build.VERSION.SDK_INT >= 34) {
-                // Android 14 이상: 마이크 권한 필수
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             } else {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             }
-            startForeground(1, notification, serviceType)
+            startForeground(NOTIFICATION_ID, notification, serviceType)
         } else {
-            startForeground(1, notification)
+            startForeground(NOTIFICATION_ID, notification)
         }
     }
 
-    // [오류 해결] 채널 생성 전체 함수
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -228,14 +226,17 @@ class SensorService : Service(), SensorEventListener {
             ).apply {
                 setShowBadge(false)
                 enableVibration(false)
-                lockscreenVisibility = Notification.VISIBILITY_SECRET
+                lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
             }
 
             val alertChannel = NotificationChannel(
-                CHANNEL_ID_ALERT, "재난 경보", NotificationManager.IMPORTANCE_HIGH
+                CHANNEL_ID_ALERT,
+                "재난 경보",
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 enableVibration(true)
+                setBypassDnd(true) // 방해금지 모드 무시
             }
 
             manager.createNotificationChannel(serviceChannel)
