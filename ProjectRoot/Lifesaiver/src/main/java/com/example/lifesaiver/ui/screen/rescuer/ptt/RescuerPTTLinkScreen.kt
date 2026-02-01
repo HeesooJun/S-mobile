@@ -59,6 +59,9 @@ fun RescuerPTTLinkScreen(
     meshPeerCount: Int,
     isConnected: Boolean,
     isMicOn: Boolean,
+    distanceMeters: Float?,
+    distanceTrend: DistanceTrend,
+    isPrecisionMode: Boolean,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
@@ -118,18 +121,14 @@ fun RescuerPTTLinkScreen(
                     .padding(horizontal = scaledDp(32, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // TODO: 거리 데이터 연동 시 실제 값으로 교체
-                val distanceMeters: Float? = null
-                // val distanceMeters: Float? = 12.4f
-                val trend: DistanceTrend = DistanceTrend.Approaching
-
-                Spacer(modifier = Modifier.height(scaledDp(30, scale)))
-                DistanceTrack(
-                    distanceMeters = distanceMeters,
-                    trend = trend,
-                    maxMeters = 30f,
-                    modifier = Modifier.padding(top = scaledDp(12, scale))
-                )
+            Spacer(modifier = Modifier.height(scaledDp(30, scale)))
+            DistanceTrack(
+                distanceMeters = distanceMeters,
+                trend = distanceTrend,
+                maxMeters = 30f,
+                isPrecisionMode = isPrecisionMode,
+                modifier = Modifier.padding(top = scaledDp(12, scale))
+            )
 
                 Spacer(modifier = Modifier.height(scaledDp(140, scale)))
                 MicButton(

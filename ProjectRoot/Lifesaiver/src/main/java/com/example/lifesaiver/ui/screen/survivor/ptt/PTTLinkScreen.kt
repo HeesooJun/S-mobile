@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,6 +42,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
@@ -76,13 +79,19 @@ fun PTTLinkScreen(
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
+    isCallConnected: Boolean,
+    isInCall: Boolean,
+    callPeerName: String? = null,
+    pendingCall: SurvivorCallRequest? = null,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
     onProfile: () -> Unit,
-    onPanicClear: () -> Unit
+    onPanicClear: () -> Unit,
+    onAcceptCall: () -> Unit = {},
+    onDeclineCall: () -> Unit = {}
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
@@ -161,22 +170,39 @@ fun PTTLinkScreen(
                 )
                 Spacer(modifier = Modifier.height(scaledDp(80, scale)))
                 MicButton(
-                    isActive = isMicOn,
+                    isActive = isMicOn && !isInCall,
                     size = scaledDp(80, scale),
-                    onPress = onMicPress,
-                    onRelease = onMicRelease
+                    onPress = { if (!isInCall) onMicPress() },
+                    onRelease = { if (!isInCall) onMicRelease() }
                 )
                 Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                val callLabel = callPeerName?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                 Text(
-                    text = when {
-                        hasMeshPeers -> "메쉬 연결됨"
-                        isConnected -> "구조자 연결됨"
-                        else -> "구조자 연결 대기 중"
+                    text = if (isInCall) {
+                        if (isCallConnected) "실시간 통화 연결됨$callLabel" else "실시간 통화 연결 중$callLabel"
+                    } else {
+                        when {
+                            hasMeshPeers -> "메쉬 연결됨"
+                            isConnected -> "구조자 연결됨"
+                            else -> "구조자 연결 대기 중"
+                        }
                     },
-                    color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
+                    color = if (isInCall) {
+                        if (isCallConnected) AppColors.Green else AppColors.Yellow
+                    } else {
+                        if (isLinkActive) AppColors.Green else AppColors.Gray500
+                    },
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
+                if (!isInCall && pendingCall != null) {
+                    Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                    CallRequestCard(
+                        callerName = pendingCall.callerName,
+                        onAccept = onAcceptCall,
+                        onDecline = onDeclineCall
+                    )
+                }
                 Spacer(modifier = Modifier.height(scaledDp(18, scale)))
                 Spacer(modifier = Modifier.weight(0.6f))
                 Column(
@@ -440,6 +466,52 @@ private enum class ActionType {
     Disconnect,
     Chat,
     Count
+}
+
+data class SurvivorCallRequest(
+    val callerName: String,
+    val wifiAware: Boolean,
+    val wifiDirect: Boolean,
+    val useOpus: Boolean
+)
+
+@Composable
+private fun CallRequestCard(
+    callerName: String,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    val scale = LocalAppScale.current
+    Surface(
+        color = AppColors.Gray900,
+        shape = RoundedCornerShape(scaledDp(18, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(14, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "$callerName 님이 통화를 요청했습니다.",
+                color = AppColors.White,
+                fontSize = scaledSp(14, scale),
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(12, scale))
+            ) {
+                OutlinedButton(onClick = onDecline) {
+                    Text("거절")
+                }
+                Button(onClick = onAccept) {
+                    Text("수락")
+                }
+            }
+        }
+    }
 }
 
 @Composable
