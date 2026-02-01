@@ -1,48 +1,35 @@
 package com.example.lifesaiver
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.screen.BlackSaverScreen
-import com.example.lifesaiver.presentation.screen.PermissionViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.ui.navigation.AppNavHost
 import com.example.lifesaiver.ui.navigation.AppRoute
-import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.rememberAppScale
-import com.example.lifesaiver.ui.theme.scaledDp
-import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun LifesaiverApp(
+    // hasPermissions 변수는 이제 화면 분기용이 아니라, 단순히 상태 표시용(예: 설정 화면에서 스위치 상태)으로만 씁니다.
     hasPermissions: Boolean,
     batteryLevel: Int,
     isConnected: Boolean,
@@ -57,7 +44,7 @@ fun LifesaiverApp(
     bleDebugStats: BleDebugStats,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
-    isRescueSignalActive: Boolean, // 구조 신호 상태
+    isRescueSignalActive: Boolean,
     messages: List<ChatMessage>,
     signatureLogs: List<SignatureLogEntry>,
     profileLogs: List<ProfileSyncLogEntry>,
@@ -79,31 +66,32 @@ fun LifesaiverApp(
 ) {
     val scale = rememberAppScale()
 
-    // [상태 1] 마지막으로 화면을 터치한 시간 저장
+    // [상태 1] 마지막 터치 시간 (절전 모드용)
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    // [상태 2] 절전 화면 표시 여부
+    // [상태 2] 절전 화면 활성화 여부
     var isSaverVisible by remember { mutableStateOf(false) }
+
+    // 현재 보고 있는 화면 경로 추적 (SOS 화면일 때만 절전 모드 작동)
     var currentRoute by remember { mutableStateOf(AppRoute.SurvivorProfile.route) }
+
     val autoSaverEnabled =
         isRescueSignalActive && (
             currentRoute == AppRoute.SurvivorEmergency.route ||
                 currentRoute == AppRoute.RescuerEmergency.route
             )
-    val autoSaverTimeoutMs = 60_000L
+    val autoSaverTimeoutMs = 60_000L // 60초
 
-    // [로직 1] SOS가 켜져 있고, 화면이 켜져있다면(절전X) -> 타이머 체크
+    // [로직 1] 절전 타이머 로직
     LaunchedEffect(autoSaverEnabled, isSaverVisible, autoSaverTimeoutMs) {
         if (autoSaverEnabled && !isSaverVisible) {
             while (true) {
                 val currentTime = System.currentTimeMillis()
-                // 마지막 터치로부터 일정 시간이 지났는지 확인
                 if (currentTime - lastInteractionTime >= autoSaverTimeoutMs) {
-                    isSaverVisible = true // 절전 모드 진입
+                    isSaverVisible = true
                 }
-                delay(1000L) // 1초마다 검사
+                delay(1000L)
             }
         } else if (!autoSaverEnabled) {
-            // SOS 끄면 절전 모드도 해제
             isSaverVisible = false
         }
     }
@@ -117,29 +105,15 @@ fun LifesaiverApp(
     }
 
     CompositionLocalProvider(LocalAppScale provides scale) {
-        if (!hasPermissions) {
-            val permissionViewModel: PermissionViewModel = viewModel()
-            val permissionState by permissionViewModel.uiState.collectAsState()
-            PermissionRequiredScreen(
-                uiState = permissionState,
-                onRequestPermissions = onRequestPermissions
-            )
-            return@CompositionLocalProvider
-        }
-
-        // [전역 터치 감지] Box에 pointerInput을 달아서 모든 터치를 감시
+        // [전역 터치 감지]
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     awaitPointerEventScope {
                         while (true) {
-                            // 자식 뷰(버튼 등)가 터치를 가져가기 전에 먼저 감지 (Initial 패스)
                             val event = awaitPointerEvent(PointerEventPass.Initial)
-
-                            // 화면을 누르는 동작이 발생하면
                             if (event.changes.any { it.changedToDown() }) {
-                                // 절전 화면이 꺼져있을 때만 타이머 갱신 (절전 중일 땐 더블탭으로만 해제)
                                 if (!isSaverVisible) {
                                     lastInteractionTime = System.currentTimeMillis()
                                 }
@@ -148,7 +122,7 @@ fun LifesaiverApp(
                     }
                 }
         ) {
-            // 1. 메인 앱 화면
+            // 1. 메인 앱 네비게이션
             AppNavHost(
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
@@ -184,48 +158,15 @@ fun LifesaiverApp(
                 onRouteChanged = { route -> currentRoute = route }
             )
 
-            // 2. 절전 모드 오버레이 (SOS 켜짐 + 10초간 터치 없음)
+            // 2. 절전 모드 오버레이 (조건 충족 시 최상단에 표시)
             if (autoSaverEnabled && isSaverVisible) {
                 BlackSaverScreen(
                     onUnlock = {
-                        // 더블 탭 시: 터치 시간 갱신 + 화면 켜기
                         lastInteractionTime = System.currentTimeMillis()
                         isSaverVisible = false
                     }
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun PermissionRequiredScreen(
-    uiState: com.example.lifesaiver.presentation.screen.PermissionUiState,
-    onRequestPermissions: () -> Unit
-) {
-    val scale = LocalAppScale.current
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppColors.Black)
-            .padding(scaledDp(24, scale)),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = uiState.title,
-            color = AppColors.White,
-            fontSize = scaledSp(20, scale),
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = uiState.description,
-            color = AppColors.Gray500,
-            fontSize = scaledSp(14, scale),
-            modifier = Modifier.padding(top = scaledDp(8, scale), bottom = scaledDp(16, scale))
-        )
-        Button(onClick = onRequestPermissions) {
-            Text(text = uiState.actionLabel)
         }
     }
 }
