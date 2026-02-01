@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -14,20 +15,34 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.lifesaiver.core.audio.RealtimeAudioStreamEngine
+import com.example.lifesaiver.core.call.RealTimeCallManager
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
+import com.example.lifesaiver.core.service.CallAudioService
+import com.example.lifesaiver.core.ble.BleRSSILocating
+import com.example.lifesaiver.core.location.HybridDistanceManager
+import com.example.lifesaiver.core.wifi.WifiAwareRanger
+import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
+import com.example.lifesaiver.presentation.screen.CallViewModel
+import com.example.lifesaiver.presentation.screen.DistanceViewModel
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
+import com.example.lifesaiver.protocol.model.CallHandshakeAction
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
@@ -40,6 +55,7 @@ import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
+import com.example.lifesaiver.ui.screen.survivor.ptt.SurvivorCallRequest
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
@@ -84,13 +100,72 @@ fun AppNavHost(
     val context = LocalContext.current
     val activity = context as? Activity
     val appContext = context.applicationContext
+    val appViewModel: AppViewModel = viewModel(
+        viewModelStoreOwner = context as ViewModelStoreOwner
+    )
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
+    val appState by appViewModel.uiState.collectAsState()
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
     val minSosDurationMs = 1_000L
+    val audioEngine = remember(appContext) { RealtimeAudioStreamEngine(appContext) }
+    val localOpusSupported = remember(audioEngine) { audioEngine.isOpusSupported() }
+    val callManager = remember(appViewModel) {
+        RealTimeCallManager(
+            audioEngine,
+            appViewModel.wifiAwareRanger,
+            appViewModel.wifiDirectRanger
+        )
+    }
+    val callViewModel: CallViewModel = viewModel(
+        viewModelStoreOwner = context as ViewModelStoreOwner,
+        factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return CallViewModel(callManager) as T
+            }
+        }
+    )
+    val isInCall by callViewModel.isInCall.collectAsState()
+    val targetSurvivor by callViewModel.targetSurvivor.collectAsState()
+    val pendingTarget by callViewModel.pendingTarget.collectAsState()
+    var selectedTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
+    val distanceViewModelFactory = remember(appContext) {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                val wifiRanger = WifiAwareRanger(appContext)
+                val bleLocating = BleRSSILocating(appContext, targetPeerIdHex = null)
+                val hybridManager = HybridDistanceManager(appContext, bleLocating, wifiRanger)
+                return DistanceViewModel(hybridManager) as T
+            }
+        }
+    }
+    val distanceViewModel: DistanceViewModel = viewModel(
+        viewModelStoreOwner = context as ViewModelStoreOwner,
+        factory = distanceViewModelFactory
+    )
+
+    fun startCallAudioService() {
+        val intent = Intent(appContext, CallAudioService::class.java).apply {
+            action = CallAudioService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            appContext.startForegroundService(intent)
+        } else {
+            appContext.startService(intent)
+        }
+    }
+
+    fun stopCallAudioService() {
+        val intent = Intent(appContext, CallAudioService::class.java).apply {
+            action = CallAudioService.ACTION_STOP
+        }
+        appContext.startService(intent)
+    }
 
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
@@ -170,6 +245,69 @@ fun AppNavHost(
         }
     }
 
+    LaunchedEffect(selectedTargetPeerId) {
+        distanceViewModel.setTargetPeerId(selectedTargetPeerId)
+    }
+
+    LaunchedEffect(appState.survivors) {
+        val selected = selectedTargetPeerId
+        if (selected != null && appState.survivors.none { it.peerId == selected }) {
+            selectedTargetPeerId = null
+        }
+    }
+
+    LaunchedEffect(isInCall) {
+        if (isInCall) {
+            appViewModel.refreshPermissions()
+            if (!appState.hasPermissions) {
+                appViewModel.onPermissionsResult(false)
+                return@LaunchedEffect
+            }
+            startCallAudioService()
+        } else {
+            stopCallAudioService()
+        }
+    }
+
+    LaunchedEffect(appState.callPeerId, isInCall) {
+        if (appState.callPeerId == null && isInCall) {
+            callViewModel.endCall()
+        }
+    }
+
+    LaunchedEffect(
+        appState.callPeerWifiAware,
+        appState.callPeerWifiDirect,
+        appState.callPeerUseOpus,
+        appState.callPeerId,
+        pendingTarget,
+        isInCall
+    ) {
+        val pending = pendingTarget ?: return@LaunchedEffect
+        if (isInCall) return@LaunchedEffect
+        val peerId = appState.callPeerId ?: return@LaunchedEffect
+        if (peerId != pending.peerId) return@LaunchedEffect
+        if (!appViewModel.ensureWifiAwarePermissions()) return@LaunchedEffect
+        val peerAware = appState.callPeerWifiAware ?: pending.isWifiAware
+        val peerDirect = appState.callPeerWifiDirect ?: pending.isWifiDirect
+        val localAware = appViewModel.isWifiAwareSupportedLocally()
+        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+        val useOpus = localOpusSupported && (appState.callPeerUseOpus ?: false)
+        val started = callViewModel.startRealTimeCall(
+            survivor = pending,
+            localWifiAwareSupported = localAware,
+            localWifiDirectSupported = localDirect,
+            peerWifiAwareSupported = peerAware,
+            peerWifiDirectSupported = peerDirect,
+            isServer = true,
+            useOpus = useOpus
+        )
+        if (!started) {
+            Toast.makeText(context, "Wi-Fi Direct 미지원: 통화 불가", Toast.LENGTH_SHORT).show()
+        }
+        callViewModel.clearPendingCall()
+    }
+
     NavHost(
         navController = navController,
         startDestination = AppRoute.RescuerStandby.route
@@ -237,6 +375,15 @@ fun AppNavHost(
             LaunchedEffect(Unit) {
                 onStartAutoConnect()
             }
+            val pendingRequest = appState.incomingCallPeerId?.let { peerId ->
+                val name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자"
+                SurvivorCallRequest(
+                    callerName = name,
+                    wifiAware = appState.incomingCallWifiAware,
+                    wifiDirect = appState.incomingCallWifiDirect,
+                    useOpus = appState.incomingCallUseOpus
+                )
+            }
             PTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
@@ -250,16 +397,107 @@ fun AppNavHost(
                 bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
+                isCallConnected = appState.isCallConnected,
+                isInCall = isInCall,
+                callPeerName = targetSurvivor?.name,
+                pendingCall = pendingRequest,
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
                 onDisconnect = {
+                    if (isInCall) {
+                        val targetPeerId = targetSurvivor?.peerId.orEmpty()
+                        if (targetPeerId.isNotBlank()) {
+                            val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                            appViewModel.sendCallHandshake(
+                                targetPeerIdHex = targetPeerId,
+                                action = CallHandshakeAction.END,
+                                callerName = profileState.name.ifBlank { "생존자" },
+                                wifiAwareSupported = localWifiAware,
+                                wifiDirectSupported = localWifiDirect,
+                                useOpus = localOpusSupported
+                            )
+                        }
+                        callViewModel.endCall()
+                    }
                     onDisconnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
                 onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
                 onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
-                onPanicClear = onClearDeviceMonitoring
+                onPanicClear = onClearDeviceMonitoring,
+                onAcceptCall = {
+                    val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
+                    if (!appViewModel.ensureWifiAwarePermissions()) return@PTTLinkScreen
+                    val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                    val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                    val peerWifiAware = appState.incomingCallWifiAware
+                    val peerWifiDirect = appState.incomingCallWifiDirect
+                    val canUseDirect = localWifiDirect && peerWifiDirect
+                    if (!canUseDirect) {
+                        Toast.makeText(context, "통화 불가: Wi-Fi Direct 미지원", Toast.LENGTH_SHORT).show()
+                        appViewModel.sendCallHandshake(
+                            targetPeerIdHex = peerId,
+                            action = CallHandshakeAction.END,
+                            callerName = profileState.name.ifBlank { "생존자" },
+                            wifiAwareSupported = localWifiAware,
+                            wifiDirectSupported = localWifiDirect,
+                            useOpus = localOpusSupported
+                        )
+                        appViewModel.clearIncomingCall(peerId)
+                        return@PTTLinkScreen
+                    }
+                    appViewModel.sendCallHandshake(
+                        targetPeerIdHex = peerId,
+                        action = CallHandshakeAction.ACK,
+                        callerName = profileState.name.ifBlank { "생존자" },
+                        wifiAwareSupported = localWifiAware,
+                        wifiDirectSupported = localWifiDirect,
+                        useOpus = localOpusSupported
+                    )
+                    val useOpus = localOpusSupported && appState.incomingCallUseOpus
+                    val started = callViewModel.startRealTimeCall(
+                        survivor = SurvivorProfile(
+                            name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자",
+                            isWifiAware = peerWifiAware,
+                            isWifiDirect = peerWifiDirect,
+                            peerId = peerId
+                        ),
+                        localWifiAwareSupported = localWifiAware,
+                        localWifiDirectSupported = localWifiDirect,
+                        peerWifiAwareSupported = peerWifiAware,
+                        peerWifiDirectSupported = peerWifiDirect,
+                        isServer = false,
+                        useOpus = useOpus
+                    )
+                    if (!started) {
+                        Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
+                        appViewModel.sendCallHandshake(
+                            targetPeerIdHex = peerId,
+                            action = CallHandshakeAction.END,
+                            callerName = profileState.name.ifBlank { "생존자" },
+                            wifiAwareSupported = localWifiAware,
+                            wifiDirectSupported = localWifiDirect,
+                            useOpus = localOpusSupported
+                        )
+                        appViewModel.clearIncomingCall(peerId)
+                    }
+                },
+                onDeclineCall = {
+                    val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
+                    val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                    val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                    appViewModel.sendCallHandshake(
+                        targetPeerIdHex = peerId,
+                        action = CallHandshakeAction.END,
+                        callerName = profileState.name.ifBlank { "생존자" },
+                        wifiAwareSupported = localWifiAware,
+                        wifiDirectSupported = localWifiDirect,
+                        useOpus = localOpusSupported
+                    )
+                    appViewModel.clearIncomingCall(peerId)
+                }
             )
         }
 
@@ -299,16 +537,42 @@ fun AppNavHost(
             LaunchedEffect(Unit) {
                 onStartAutoConnect()
             }
+            val distanceState by distanceViewModel.uiState.collectAsState()
+            DisposableEffect(Unit) {
+                distanceViewModel.start()
+                onDispose {
+                    distanceViewModel.stop()
+                }
+            }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
+                distanceMeters = distanceState.distanceMeters,
+                distanceTrend = distanceState.trend,
+                isPrecisionMode = distanceState.isPrecisionMode,
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
                 onDisconnect = {
+                    if (isInCall) {
+                        val targetPeerId = targetSurvivor?.peerId.orEmpty()
+                        if (targetPeerId.isNotBlank()) {
+                            val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                            appViewModel.sendCallHandshake(
+                                targetPeerIdHex = targetPeerId,
+                                action = CallHandshakeAction.END,
+                                callerName = profileState.name.ifBlank { "구조자" },
+                                wifiAwareSupported = localWifiAware,
+                                wifiDirectSupported = localWifiDirect,
+                                useOpus = localOpusSupported
+                            )
+                        }
+                        callViewModel.endCall()
+                    }
                     onDisconnect()
                     navController.navigate(AppRoute.RescuerStandby.route)
                 },
@@ -320,8 +584,87 @@ fun AppNavHost(
 
         composable(AppRoute.RescuerSurvivorDb.route) {
             RescuerSurvivorDbScreen(
-                survivors = emptyList(),
-                onBack = { navController.popBackStack() }
+                survivors = appState.survivors,
+                onBack = { navController.popBackStack() },
+                onCallClick = { survivor ->
+                    val currentPeerId = targetSurvivor?.peerId.orEmpty()
+                    if (isInCall) {
+                        if (currentPeerId.isNotBlank() && currentPeerId != survivor.peerId) {
+                            val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                            appViewModel.sendCallHandshake(
+                                targetPeerIdHex = currentPeerId,
+                                action = CallHandshakeAction.END,
+                                callerName = profileState.name.ifBlank { "구조자" },
+                                wifiAwareSupported = localWifiAware,
+                                wifiDirectSupported = localWifiDirect,
+                                useOpus = localOpusSupported
+                            )
+                            callViewModel.endCall()
+                        } else {
+                            Toast.makeText(context, "이미 통화 중입니다.", Toast.LENGTH_SHORT).show()
+                            return@RescuerSurvivorDbScreen
+                        }
+                    }
+                    if (!appViewModel.ensureWifiAwarePermissions()) return@RescuerSurvivorDbScreen
+                    val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                    val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                    val targetPeerId = survivor.peerId.ifBlank { directPeerIds.firstOrNull().orEmpty() }
+                    if (targetPeerId.isBlank()) {
+                        Toast.makeText(context, "연결된 BLE 피어가 없습니다.", Toast.LENGTH_SHORT).show()
+                        return@RescuerSurvivorDbScreen
+                    }
+                    val hasBleLink = directPeerIds.contains(targetPeerId)
+                    val peerWifiAware = survivor.isWifiAware || hasBleLink
+                    val peerWifiDirect = survivor.isWifiDirect || hasBleLink
+                    val canUseDirect = localWifiDirect && peerWifiDirect
+                    if (!canUseDirect) {
+                        Toast.makeText(context, "Wi-Fi Direct 미지원: 통화 불가", Toast.LENGTH_SHORT).show()
+                        return@RescuerSurvivorDbScreen
+                    }
+                    appViewModel.sendCallHandshake(
+                        targetPeerIdHex = targetPeerId,
+                        action = CallHandshakeAction.START,
+                        callerName = profileState.name.ifBlank { "구조자" },
+                        wifiAwareSupported = localWifiAware,
+                        wifiDirectSupported = localWifiDirect,
+                        useOpus = localOpusSupported
+                    )
+                    callViewModel.requestCall(
+                        survivor.copy(
+                            peerId = targetPeerId,
+                            isWifiAware = peerWifiAware,
+                            isWifiDirect = peerWifiDirect
+                        )
+                    )
+                    Toast.makeText(context, "통화 요청 전송됨", Toast.LENGTH_SHORT).show()
+                },
+                onEndCall = {
+                    val targetPeerId = targetSurvivor?.peerId.orEmpty()
+                    if (targetPeerId.isNotBlank()) {
+                        val localWifiAware = appViewModel.isWifiAwareSupportedLocally()
+                        val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                        appViewModel.sendCallHandshake(
+                            targetPeerIdHex = targetPeerId,
+                            action = CallHandshakeAction.END,
+                            callerName = profileState.name.ifBlank { "구조자" },
+                            wifiAwareSupported = localWifiAware,
+                            wifiDirectSupported = localWifiDirect,
+                            useOpus = localOpusSupported
+                        )
+                    }
+                    callViewModel.endCall()
+                },
+                selectedTargetPeerId = selectedTargetPeerId,
+                onSelectTarget = { survivor ->
+                    selectedTargetPeerId = if (selectedTargetPeerId == survivor.peerId) {
+                        null
+                    } else {
+                        survivor.peerId
+                    }
+                },
+                activeSurvivor = targetSurvivor,
+                isInCall = isInCall
             )
         }
 

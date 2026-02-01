@@ -38,6 +38,7 @@ fun DistanceTrack(
     modifier: Modifier = Modifier,          // ✅ modifier를 첫 optional로
     trend: DistanceTrend = DistanceTrend.Unknown,
     maxMeters: Float = 30f,
+    isPrecisionMode: Boolean = false,
 ) {
     val scale = LocalAppScale.current
     val density = LocalDensity.current
@@ -188,8 +189,9 @@ fun DistanceTrack(
                 DistanceTrend.Receding -> "멀어지는 중"
                 DistanceTrend.Unknown -> "거리 측정 중"
             }
+            val techSuffix = if (isPrecisionMode) " (RTT)" else " (BLE)"
             Text(
-                text = sub,
+                text = "$sub$techSuffix",
                 color = AppColors.Gray500,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.SemiBold
