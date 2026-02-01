@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: AppViewModel by viewModels()
 
-    // 앱 준비 상태 (로딩 화면 제어용)
+    // 앱 준비 상태 (true가 되면 LifesaiverApp을 보여줌)
     private var isReady by mutableStateOf(false)
 
     private val bluetoothManager by lazy { getSystemService(BluetoothManager::class.java) }
@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
+        // 거부했더라도 일단 다음 단계(오버레이)로 진행 (필수 안내는 나중에)
         checkOverlayPermission()
     }
 
@@ -64,16 +65,12 @@ class MainActivity : ComponentActivity() {
         checkAndEnableBluetooth()
     }
 
-    // [3단계 결과] 블루투스 켜기 -> 서비스 시작(완료)으로 이동
+    // [3단계 결과] 블루투스 켜기 -> 준비 완료(User Info)로 이동
     private val enableBluetoothLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            Toast.makeText(this, "블루투스가 활성화되었습니다.", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "재난 통신을 위해 블루투스가 필요합니다.", Toast.LENGTH_LONG).show()
-        }
-        refreshServices()
+        // 블루투스 결과와 상관없이 설정 종료 처리
+        finishSetup()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,12 +103,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // [시작] 권한 체크 로직 실행
+        // [핵심] 앱 켜자마자 권한 체크 시작 (PermissionViewModel UI 없음)
         checkAllPermissions()
 
         setContent {
             LifesaiverTheme(darkTheme = true, dynamicColor = false) {
-                // 준비 완료(isReady = true)일 때만 메인 앱 화면 표시
+                // 권한/블루투스 체크가 다 끝나면 isReady = true가 되고
+                // LifesaiverApp이 실행됨. (닉네임 설정 안 되어있으면 거기서 입력창이 뜸)
                 if (isReady) {
                     val uiState by viewModel.uiState.collectAsState()
 
@@ -134,6 +132,7 @@ class MainActivity : ComponentActivity() {
                         messages = uiState.messages,
                         signatureLogs = uiState.signatureLogs,
                         profileLogs = uiState.profileLogs,
+                        // 권한 재요청이 필요할 때 호출될 함수
                         onRequestPermissions = { checkAllPermissions() },
                         onStartAutoConnect = { viewModel.onStartAutoConnect() },
                         onStopAutoConnect = { viewModel.onStopAutoConnect() },
@@ -151,7 +150,7 @@ class MainActivity : ComponentActivity() {
                         onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() }
                     )
                 } else {
-                    // [로딩 화면] 준비 중일 때 검은 화면에 로딩바
+                    // [로딩 화면] 체크하는 동안 검은 화면에 로딩바 (이 위로 팝업들이 뜸)
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -175,22 +174,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 앱 복귀 시 서비스 상태 재확인 (이미 완료된 경우에만)
+        // 이미 준비 완료된 상태면 서비스 상태만 리프레시
         if (isReady) {
             refreshServices()
         }
     }
 
-    private fun toast(message: String) {
-        runOnUiThread {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-        }
-    }
-    // --- [순차 권한 체크 로직] ---
+    // --- [자동 권한 체크 로직] ---
 
     // 1단계: 필수 권한 체크
     private fun checkAllPermissions() {
-        isReady = false // 재검사 시 로딩 상태로
+        isReady = false // 체크 중엔 로딩 상태
 
         val permissions = viewModel.requiredPermissions.toMutableList()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -204,8 +198,10 @@ class MainActivity : ComponentActivity() {
         }.toTypedArray()
 
         if (notGranted.isNotEmpty()) {
+            // 권한 없으면 바로 시스템 팝업 띄움
             requestPermissionLauncher.launch(notGranted)
         } else {
+            // 권한 있으면 다음 단계(오버레이)로
             viewModel.onPermissionsResult(true)
             checkOverlayPermission()
         }
@@ -215,7 +211,7 @@ class MainActivity : ComponentActivity() {
     private fun checkOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "비상 알림을 위해 '다른 앱 위에 표시' 권한을 허용해주세요.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "비상 알림을 위해 '다른 앱 위에 표시' 설정이 필요합니다.", Toast.LENGTH_LONG).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
@@ -232,32 +228,37 @@ class MainActivity : ComponentActivity() {
     // 3단계: 블루투스 활성화 체크
     private fun checkAndEnableBluetooth() {
         if (bluetoothAdapter == null) {
-            // 미지원 기기는 통과
-            refreshServices()
+            finishSetup()
             return
         }
 
         if (!bluetoothAdapter!!.isEnabled) {
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             try {
-                // 시스템 팝업 ("블루투스를 켜시겠습니까?") 호출
+                // 블루투스 켜기 팝업 띄움
                 enableBluetoothLauncher.launch(enableBtIntent)
             } catch (e: SecurityException) {
                 Log.e("Bluetooth", "Permission error", e)
-                refreshServices()
+                finishSetup()
             }
         } else {
-            refreshServices()
+            finishSetup()
         }
     }
 
-    // 4단계: 최종 완료 (서비스 시작 & 화면 표시)
+    // 4단계: 최종 완료 (서비스 시작 & LifesaiverApp 표시)
+    private fun finishSetup() {
+        refreshServices()
+        // [중요] 여기서 true가 되면 LifesaiverApp이 렌더링됨
+        // LifesaiverApp 내부에서 닉네임 유무에 따라 '정보 입력' vs '대기 화면' 분기 처리
+        isReady = true
+    }
+
     private fun refreshServices() {
         val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         val isVoiceOn = prefs.getBoolean("voice_detection", false)
         val isShockOn = prefs.getBoolean("shock_detection", false)
 
-        // 음성 감지 서비스
         if (isVoiceOn) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 startServiceSafe(VoiceService::class.java)
@@ -266,15 +267,11 @@ class MainActivity : ComponentActivity() {
             stopService(Intent(this, VoiceService::class.java))
         }
 
-        // 충격 감지 서비스
         if (isShockOn) {
             startServiceSafe(SensorService::class.java)
         } else {
             stopService(Intent(this, SensorService::class.java))
         }
-
-        // [완료] 화면 표시 시작
-        isReady = true
     }
 
     private fun startServiceSafe(serviceClass: Class<*>) {
