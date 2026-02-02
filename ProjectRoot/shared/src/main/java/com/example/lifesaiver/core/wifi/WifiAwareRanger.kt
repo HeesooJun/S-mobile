@@ -36,6 +36,7 @@ import kotlin.collections.firstOrNull
  * * [수정 사항]: 외부(ViewModel)에서 상대방의 지원 여부를 알려줘야만 동작하도록 변경
  */
 class WifiAwareRanger(private val context: Context) {
+    private val awareDisabledForDirectTest = true
 
     // --- StateFlows ---
     // 거리 정보 (Meter 단위)
@@ -137,6 +138,10 @@ class WifiAwareRanger(private val context: Context) {
      * 시작 시도 (조건: 하드웨어 지원 + 권한 + 상대방 지원)
      */
     fun start() {
+        if (awareDisabledForDirectTest) {
+            ConnectionLog.add("Aware", "disabled for direct test")
+            return
+        }
         startIfReady()
     }
 

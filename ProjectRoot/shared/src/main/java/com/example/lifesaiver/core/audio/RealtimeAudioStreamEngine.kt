@@ -102,6 +102,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
      * 통화 시작 (마이크 입력 -> 콜백으로 PCM 데이터 전달)
      * @param onAudioDataAvailable: 네트워크로 전송할 PCM 바이트 배열
      */
+    @Synchronized
     fun startStreaming(onAudioDataAvailable: (ByteArray) -> Unit) {
         if (isStreaming) return
 
@@ -166,22 +167,42 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             if (audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
                 val sessionId = audioRecord!!.audioSessionId
                 if (AcousticEchoCanceler.isAvailable()) {
-                    echoCanceler = AcousticEchoCanceler.create(sessionId).apply {
-                        enabled = true
+                    val aec = AcousticEchoCanceler.create(sessionId)
+                    if (aec != null) {
+                        echoCanceler = aec
+                        try {
+                            aec.enabled = true
+                            Log.d("AudioEngine", "AEC Enabled")
+                        } catch (e: Exception) {
+                            Log.w("AudioEngine", "AEC enable failed: ${e.message}")
+                        }
+                    } else {
+                        Log.w("AudioEngine", "AEC create returned null")
                     }
-                    Log.d("AudioEngine", "AEC Enabled")
                 }
                 if (AutomaticGainControl.isAvailable()) {
-                    automaticGainControl = AutomaticGainControl.create(sessionId).apply {
-                        enabled = true
+                    val agc = AutomaticGainControl.create(sessionId)
+                    if (agc != null) {
+                        automaticGainControl = agc
+                        try {
+                            agc.enabled = true
+                            Log.d("AudioEngine", "AGC Enabled")
+                        } catch (e: Exception) {
+                            Log.w("AudioEngine", "AGC enable failed: ${e.message}")
+                        }
                     }
-                    Log.d("AudioEngine", "AGC Enabled")
                 }
                 if (NoiseSuppressor.isAvailable()) {
-                    noiseSuppressor = NoiseSuppressor.create(sessionId).apply {
-                        enabled = true
+                    val ns = NoiseSuppressor.create(sessionId)
+                    if (ns != null) {
+                        noiseSuppressor = ns
+                        try {
+                            ns.enabled = true
+                            Log.d("AudioEngine", "NS Enabled")
+                        } catch (e: Exception) {
+                            Log.w("AudioEngine", "NS enable failed: ${e.message}")
+                        }
                     }
-                    Log.d("AudioEngine", "NS Enabled")
                 }
             } else {
                 audioRecord?.release()
@@ -302,6 +323,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     /**
      * 스트리밍 종료 및 자원 해제
      */
+    @Synchronized
     fun stopStreaming() {
         if (!isStreaming) return
 
