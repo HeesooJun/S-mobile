@@ -53,13 +53,16 @@ import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import kotlin.math.pow
 
 @Composable
 fun RescuerSurvivorDbScreen(
     survivors: List<SurvivorProfile>,
+    peerRssiMap: Map<String, Int> = emptyMap(),
     onBack: () -> Unit,
     onCallClick: (SurvivorProfile) -> Unit,
     onEndCall: () -> Unit,
+    onOpenMeshMap: () -> Unit,
     selectedTargetPeerId: String? = null,
     onSelectTarget: (SurvivorProfile) -> Unit = {},
     isLive: Boolean = true,
@@ -129,18 +132,32 @@ fun RescuerSurvivorDbScreen(
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(neonGreen.copy(alpha = 0.10f))
-                                .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
-                        ) {
-                            Text(
-                                text = liveLabel,
-                                color = neonGreen,
-                                fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.Bold
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(neonGreen.copy(alpha = 0.10f))
+                                    .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
+                            ) {
+                                Text(
+                                    text = liveLabel,
+                                    color = neonGreen,
+                                    fontSize = scaledSp(12, scale),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(scaledDp(8, scale)))
+                            TextButton(
+                                onClick = onOpenMeshMap,
+                                contentPadding = PaddingValues(horizontal = scaledDp(10, scale), vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text = "메쉬 망",
+                                    color = neonGreen,
+                                    fontSize = scaledSp(11, scale),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                         if (isInCall && activeCallName != null) {
                             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
@@ -263,6 +280,7 @@ fun RescuerSurvivorDbScreen(
                                 border = border,
                                 neonGreen = neonGreen,
                                 neonRed = neonRed,
+                                peerRssiMap = peerRssiMap,
                                 isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
                                 onSelectTarget = onSelectTarget,
                                 onCallClick = onCallClick
@@ -283,6 +301,7 @@ private fun SurvivorCard(
     border: Color,
     neonGreen: Color,
     neonRed: Color,
+    peerRssiMap: Map<String, Int>,
     isSelected: Boolean,
     onSelectTarget: (SurvivorProfile) -> Unit,
     onCallClick: (SurvivorProfile) -> Unit
@@ -338,6 +357,17 @@ private fun SurvivorCard(
                     fontWeight = FontWeight.Medium
                 )
 
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                val rssi = peerRssiMap[survivor.peerId]
+                val rssiText = rssi?.let { "${it} dBm" } ?: "-"
+                val distanceText = rssi?.let { String.format("%.1f", estimateDistanceMeters(it)) } ?: "-"
+                Text(
+                    text = "RSSI $rssiText · 약 ${distanceText}m",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Medium
+                )
+
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))) {
@@ -386,6 +416,12 @@ private fun SurvivorCard(
             }
         }
     }
+}
+
+private fun estimateDistanceMeters(rssi: Int): Float {
+    val txPower = -59
+    val pathLossExponent = 2.0
+    return 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
 }
 
 @Composable

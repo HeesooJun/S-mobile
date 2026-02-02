@@ -12,7 +12,7 @@ object ProtocolConstants {
     }
 
     object Ble {
-        const val ANNOUNCE_WAIT_MS: Long = 15_000L
+        const val ANNOUNCE_WAIT_MS: Long = 60_000L
         const val INACTIVITY_TIMEOUT_MS: Long = 60_000L
         const val BLOCKLIST_TTL_MS: Long = 900_000L
         const val ERROR_DISCONNECT_WINDOW_MS: Long = 300_000L
