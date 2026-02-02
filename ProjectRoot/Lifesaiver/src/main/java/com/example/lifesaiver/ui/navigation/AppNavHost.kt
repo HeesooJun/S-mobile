@@ -359,6 +359,8 @@ fun AppNavHost(
                     onClearSignatureLogs = onClearSignatureLogs,
                     onClearProfileLogs = onClearProfileLogs,
                     onSendProfileTest = onSendProfileTest,
+                    onPrev = { navController.popBackStack() },
+                    onSettings = { navigateBottomTab(AppRoute.Settings.route) },
                     inputValue = chatState.inputValue,
                     onInputChange = { chatViewModel.onInputChange(it) },
                     onSendClick = {
