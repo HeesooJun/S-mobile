@@ -244,17 +244,13 @@ fun AppNavHost(
         ) {
             composable(AppRoute.SurvivorStandby.route) {
                 StandbyStatusScreen(
-                    batteryLevel = batteryLevel,
                     sttResetToken = sttResetToken,
                     sttEnabled = sttEnabled,
-                    onPrev = { navController.popBackStack() },
-                    onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                     onSos = {
                         pendingSosNavigation = true
                         sosStartedAt = System.currentTimeMillis()
                         navController.navigate(AppRoute.SurvivorEmergency.route)
                     },
-                    onSettings = { navController.navigate(AppRoute.Settings.route) }
                 )
             }
 
