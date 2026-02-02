@@ -62,7 +62,9 @@ fun SettingsScreen(
         modifier = Modifier.fillMaxSize().background(ColorBackground)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = scaledDp(16, scale)),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = scaledDp(16, scale)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             HeaderSection(scale, onBack)
