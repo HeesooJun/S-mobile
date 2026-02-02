@@ -10,7 +10,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -214,7 +213,7 @@ fun AppNavHost(
             startDestination = AppRoute.SurvivorProfile.route,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = if (shouldShowFooter) scaledDp(96, scale) else scaledDp(0, scale))
+                .padding(bottom = if (shouldShowFooter) scaledDp(58, scale) else scaledDp(0, scale))
                 .pointerInput(shouldShowFooter, currentRoute) {
                     if (!shouldShowFooter) return@pointerInput
                     var totalDragX = 0f
@@ -348,10 +347,15 @@ fun AppNavHost(
                     messages = messages,
                     signatureLogs = signatureLogs,
                     profileLogs = profileLogs,
+                    peerNodes = meshGraphSnapshot.nodes,
+                    isMicOn = isMicOn,
+                    onMicPress = onMicPress,
+                    onMicRelease = onMicRelease,
                     onClearSignatureLogs = onClearSignatureLogs,
                     onClearProfileLogs = onClearProfileLogs,
                     onSendProfileTest = onSendProfileTest,
                     onPrev = { navController.popBackStack() },
+                    onSettings = { navigateBottomTab(AppRoute.Settings.route) },
                     inputValue = chatState.inputValue,
                     onInputChange = { chatViewModel.onInputChange(it) },
                     onSendClick = {
@@ -375,7 +379,7 @@ fun AppNavHost(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
+                    .padding(bottom = scaledDp(2, scale))
             )
         }
     }
