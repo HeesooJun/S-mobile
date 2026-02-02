@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +58,8 @@ fun RescueChatContent(
     roomTitle: String,
     participants: List<Pair<String, String>>,
     messages: List<ChatMessage>,
+    onPrev: () -> Unit,
+    onSettings: () -> Unit,
     onShowSignatureLog: () -> Unit,
     onShowDbLog: () -> Unit,
     onSendProfileTest: () -> Unit,
@@ -72,7 +75,6 @@ fun RescueChatContent(
     val coroutineScope = rememberCoroutineScope()
     var currentRecordingJob by remember { mutableStateOf<Job?>(null) }
 
-    // 디버깅 모드 진입을 위한 상태
     var debugClickCount by remember { mutableStateOf(0) }
     var isDebugMode by remember { mutableStateOf(false) }
 
@@ -81,161 +83,207 @@ fun RescueChatContent(
             .fillMaxSize()
             .clip(RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp))
             .background(Color.Black.copy(alpha = 0.95f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                // 인원 목록이 열려있으면 인원 목록을 닫고, 아니면 모달 자체를 닫음
+                if (showInwon) showInwon = false else onPrev()
+            }
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-            ) {
-                // Header
-                Row(
+            // 메인 채팅 영역
+            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .fillMaxSize()
+                        .clickable(enabled = false) { } // 자식 영역 클릭 전파 방지 (기본)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = roomTitle,
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable {
-                                debugClickCount++
-                                if (debugClickCount >= 5) {
-                                    isDebugMode = true
+                    // Header
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .padding(horizontal = 24.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onPrev() }, // 헤더 빈 공간 클릭 시 모달 닫기
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = roomTitle,
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    debugClickCount++
+                                    if (debugClickCount >= 5) isDebugMode = true
+                                }
+                            )
+                            AnimatedVisibility(
+                                visible = isDebugMode,
+                                enter = expandVertically(),
+                                exit = shrinkVertically()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    DebugBadge(text = "보안", onClick = onShowSignatureLog)
+                                    DebugBadge(text = "DB", onClick = onShowDbLog)
+                                    DebugBadge(text = "TLV", onClick = onSendProfileTest)
                                 }
                             }
-                        )
-
-                        // 디버깅 모드일 때만 배지 표시
-                        AnimatedVisibility(
-                            visible = isDebugMode,
-                            enter = expandVertically(),
-                            exit = shrinkVertically()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                DebugBadge(text = "보안", onClick = onShowSignatureLog)
-                                DebugBadge(text = "DB", onClick = onShowDbLog)
-                                DebugBadge(text = "TLV", onClick = onSendProfileTest)
-                            }
                         }
+
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "People",
+                            tint = if (showInwon) Color(0xFF3BBF8C) else Color.White,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { showInwon = !showInwon }
+                        )
                     }
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "People",
-                        tint = Color.White,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clickable { showInwon = !showInwon }
-                    )
-                }
 
-                // Chat List
-                AutoScrollChatList(
-                    messages = messages,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    listModifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalSpacing = 8.dp
-                ) { message ->
-                    ChatMessageBubble(message = message)
-                }
-
-                // Input Area
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                    // Chat List
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
-                            .background(Color(0xFF2B2F33), RoundedCornerShape(26.dp))
-                            .padding(horizontal = 20.dp),
-                        contentAlignment = Alignment.CenterStart
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onPrev() } // 채팅 목록 배경 클릭 시 모달 닫기
                     ) {
-                        if (inputValue.isEmpty()) {
-                            Text("메세지 입력...", color = Color.Gray, fontSize = 15.sp)
+                        AutoScrollChatList(
+                            messages = messages,
+                            modifier = Modifier.fillMaxSize(),
+                            listModifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            verticalSpacing = 8.dp
+                        ) { message ->
+                            // 메시지 버블 자체는 클릭 시 닫히지 않도록 내부 처리
+                            Box(modifier = Modifier.clickable(enabled = false) { }) {
+                                ChatMessageBubble(message = message)
+                            }
                         }
-                        BasicTextField(
-                            value = inputValue,
-                            onValueChange = onInputChange,
-                            modifier = Modifier.fillMaxWidth(),
-                            textStyle = LocalTextStyle.current.copy(
-                                color = Color.White,
-                                fontSize = 15.sp
-                            ),
-                            cursorBrush = SolidColor(Color(0xFF3BBF8C)),
-                            singleLine = true
-                        )
                     }
 
-                    val isTyping = inputValue.isNotBlank()
-                    Box(
+                    // Input Area
+                    Row(
                         modifier = Modifier
-                            .size(48.dp)
-                            .background(
-                                if (isTyping || isMicOn) Color(0xFF3BBF8C) else Color(0xFF2B2F33),
-                                CircleShape
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 16.dp)
+                            .clickable(enabled = false) { }, // 입력창 영역은 닫기 방지
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .background(Color(0xFF2B2F33), RoundedCornerShape(26.dp))
+                                .padding(horizontal = 20.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (inputValue.isEmpty()) {
+                                Text("메세지 입력...", color = Color.Gray, fontSize = 15.sp)
+                            }
+                            BasicTextField(
+                                value = inputValue,
+                                onValueChange = onInputChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = LocalTextStyle.current.copy(
+                                    color = Color.White,
+                                    fontSize = 15.sp
+                                ),
+                                cursorBrush = SolidColor(Color(0xFF3BBF8C)),
+                                singleLine = true
                             )
-                            .clickable {
-                                if (isTyping) {
-                                    onSendClick()
-                                } else {
-                                    if (isMicOn) {
-                                        currentRecordingJob?.cancel()
-                                        onMicRelease()
-                                        currentRecordingJob = null
+                        }
+
+                        val isTyping = inputValue.isNotBlank()
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(
+                                    if (isTyping || isMicOn) Color(0xFF3BBF8C) else Color(0xFF2B2F33),
+                                    CircleShape
+                                )
+                                .clickable {
+                                    if (isTyping) {
+                                        onSendClick()
                                     } else {
-                                        currentRecordingJob = coroutineScope.launch {
-                                            onMicPress()
-                                            delay(AUTO_RECORDING_DURATION_MS)
+                                        if (isMicOn) {
+                                            currentRecordingJob?.cancel()
                                             onMicRelease()
                                             currentRecordingJob = null
+                                        } else {
+                                            currentRecordingJob = coroutineScope.launch {
+                                                onMicPress()
+                                                delay(AUTO_RECORDING_DURATION_MS)
+                                                onMicRelease()
+                                                currentRecordingJob = null
+                                            }
                                         }
                                     }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isTyping) {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = "Send",
-                                tint = Color.Black,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = if (isMicOn) R.drawable.ic_common_mic_active else R.drawable.ic_common_mic_inactive),
-                                contentDescription = "Mic",
-                                tint = if (isMicOn) Color.Black else Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isTyping) {
+                                Icon(
+                                    imageVector = Icons.Default.Send,
+                                    contentDescription = "Send",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            } else {
+                                Icon(
+                                    painter = painterResource(id = if (isMicOn) R.drawable.ic_common_mic_active else R.drawable.ic_common_mic_inactive),
+                                    contentDescription = "Mic",
+                                    tint = if (isMicOn) Color.Black else Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
                 }
+
+                // 인원 목록 오버레이 (열려 있을 때만 활성화)
+                if (showInwon) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { showInwon = false }
+                    )
+                }
             }
 
-            // 우측 인원 목록
+            // 우측 인원 목록 (사이드바)
             if (showInwon) {
                 Column(
                     modifier = Modifier
                         .width(160.dp)
                         .fillMaxHeight()
                         .background(Color(0xFF1E1E1E).copy(alpha = 0.95f))
-                        .padding(top = 24.dp),
+                        .padding(top = 24.dp)
+                        .clickable(enabled = false) { }, // 사이드바 내부 클릭 시 닫기 방지
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("현재 인원", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
