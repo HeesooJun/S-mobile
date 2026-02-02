@@ -61,6 +61,7 @@ import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
+import androidx.compose.material3.Icon
 
 @Composable
 fun PTTLinkScreen(
@@ -82,7 +83,8 @@ fun PTTLinkScreen(
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
     onProfile: () -> Unit,
-    onPanicClear: () -> Unit
+    onPanicClear: () -> Unit,
+    onSettings: () -> Unit
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
@@ -138,6 +140,17 @@ fun PTTLinkScreen(
                     .align(Alignment.TopStart)
                     .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
                     .tripleClickable(onTripleClick = onPanicClear)
+            )
+            Icon(
+                // 프로젝트에 ic_settings 아이콘이 없다면 추가하거나, R.drawable.ic_gear 등으로 변경하세요.
+                painter = painterResource(id = R.drawable.ic_settings),
+                contentDescription = "설정",
+                tint = AppColors.Gray500, // 로고 텍스트와 톤을 맞춰 자연스럽게 배치
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = scaledDp(20, scale), top = scaledDp(18, scale))
+                    .size(scaledDp(24, scale)) // 터치 영역 확보를 위해 padding을 줄이고 size를 키워도 됨
+                    .clickable { onSettings() }
             )
             Column(
                 modifier = Modifier

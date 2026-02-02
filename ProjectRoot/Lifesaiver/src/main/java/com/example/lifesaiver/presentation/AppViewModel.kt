@@ -26,36 +26,26 @@ import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.core.service.RescueService
+import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
 import com.example.lifesaiver.protocol.mesh.GossipTlv
 import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
 import com.example.lifesaiver.protocol.mesh.PeerIdentityRegistry
-import com.example.lifesaiver.protocol.model.FileTransferPayload
-import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
-import com.example.lifesaiver.protocol.model.Packet
-import com.example.lifesaiver.protocol.model.PacketHeader
-import com.example.lifesaiver.protocol.model.PacketType
-import com.example.lifesaiver.protocol.model.RequestSyncPayload
+import com.example.lifesaiver.protocol.model.*
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.profile.ProfileTlv
-import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
+import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
-import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
-import kotlinx.coroutines.channels.BufferOverflow
+import com.example.lifesaiver.wakeup.SensorService
+import com.example.lifesaiver.wakeup.VoiceService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -100,7 +90,10 @@ data class AppUiState(
     ),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
-    val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
+    val isRescueSignalActive: Boolean = false,
+    // [추가] 설정 상태 관리
+    val isVoiceDetectionEnabled: Boolean = false,
+    val isShockDetectionEnabled: Boolean = false,
     val messages: List<ChatMessage> = emptyList(),
     val bleDebug: BleDebugStats = BleDebugStats(),
     val signatureLogs: List<SignatureLogEntry> = emptyList(),
@@ -158,11 +151,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val profileLogBuffer = ArrayDeque<ProfileSyncLogEntry>()
     private val profileDao by lazy { AppDatabase.getInstance(app).profileDao() }
 
-    // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
-    private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    // 설정 저장소
+    private val settingsPrefs by lazy { app.getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+
     private var senderId: ByteArray = ByteArray(0)
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedNickname: String = ""
@@ -192,7 +186,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshPermissions()
         observeProfileName()
         observeMeshGraph()
-        _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
+
+        // [초기화] 저장된 설정 불러오기
+        val savedVoice = settingsPrefs.getBoolean("voice_detection", false)
+        val savedShock = settingsPrefs.getBoolean("shock_detection", false)
+        _uiState.update {
+            it.copy(
+                myPeerId = bytesToHex(senderId),
+                isVoiceDetectionEnabled = savedVoice,
+                isShockDetectionEnabled = savedShock
+            )
+        }
+
         AppShutdownHooks.register(
             onSendLeave = { sendLeaveOnShutdown() },
             onStopServices = { stopServicesForShutdown() }
@@ -200,7 +205,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ------------------------------------------------------------------------
-    // [핵심 기능] 구조 요청 신호 + 백그라운드 서비스 제어
+    // [추가] 설정 제어 및 서비스 실행 로직
+    // ------------------------------------------------------------------------
+
+    fun setVoiceDetection(enabled: Boolean) {
+        settingsPrefs.edit().putBoolean("voice_detection", enabled).apply()
+        _uiState.update { it.copy(isVoiceDetectionEnabled = enabled) }
+
+        if (enabled) {
+            if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                startServiceSafe(VoiceService::class.java)
+                _uiEvents.tryEmit(UiEvent.Toast("음성 감지 켜짐"))
+            } else {
+                _uiEvents.tryEmit(UiEvent.Toast("마이크 권한이 필요합니다."))
+                // 권한이 없으면 다시 끔
+                _uiState.update { it.copy(isVoiceDetectionEnabled = false) }
+                settingsPrefs.edit().putBoolean("voice_detection", false).apply()
+            }
+        } else {
+            app.stopService(Intent(app, VoiceService::class.java))
+            _uiEvents.tryEmit(UiEvent.Toast("음성 감지 꺼짐"))
+        }
+    }
+
+    fun setShockDetection(enabled: Boolean) {
+        settingsPrefs.edit().putBoolean("shock_detection", enabled).apply()
+        _uiState.update { it.copy(isShockDetectionEnabled = enabled) }
+
+        if (enabled) {
+            startServiceSafe(SensorService::class.java)
+            _uiEvents.tryEmit(UiEvent.Toast("충격 감지 켜짐"))
+        } else {
+            app.stopService(Intent(app, SensorService::class.java))
+            _uiEvents.tryEmit(UiEvent.Toast("충격 감지 꺼짐"))
+        }
+    }
+
+    private fun startServiceSafe(serviceClass: Class<*>) {
+        try {
+            val intent = Intent(app, serviceClass)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                app.startForegroundService(intent)
+            } else {
+                app.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "서비스 시작 실패: ${e.message}")
+            _uiEvents.tryEmit(UiEvent.Toast("서비스 시작 오류: ${e.message}"))
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // [기존 로직 유지]
     // ------------------------------------------------------------------------
 
     fun startRescueSignal() {
@@ -208,11 +264,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _uiEvents.tryEmit(UiEvent.Toast("블루투스 및 서비스 권한이 필요합니다."))
             return
         }
-
-        // 1. BleManager: 72시간 생존 모드 신호 송출 시작
         bleManager.startEmergencyAdvertising()
-
-        // 2. RescueService: 백그라운드 서비스 시작
         try {
             val intent = Intent(app, RescueService::class.java).apply {
                 action = RescueService.ACTION_START_RESCUE
@@ -225,7 +277,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             Log.e("AppViewModel", "서비스 시작 실패: ${e.message}")
         }
-
         _uiState.update { it.copy(isRescueSignalActive = true) }
     }
 
@@ -236,10 +287,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopRescueSignal() {
-        // 1. 신호 중단
         bleManager.stopAdvertising()
-
-        // 2. 백그라운드 서비스 종료
         try {
             val intent = Intent(app, RescueService::class.java).apply {
                 action = RescueService.ACTION_STOP_RESCUE
@@ -248,28 +296,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             Log.e("AppViewModel", "서비스 종료 실패: ${e.message}")
         }
-
         _uiState.update { it.copy(isRescueSignalActive = false) }
         _uiEvents.tryEmit(UiEvent.Toast("구조 신호 중단됨"))
     }
-
-    /**
-     * [수정] 사이렌 울리기 (기기 볼륨 설정을 그대로 사용)
-     */
-    private fun playSiren() {
-        viewModelScope.launch(Dispatchers.Default) {
-            try {
-                // 기기 설정된 알람 볼륨으로 사이렌 1회 울리기
-                toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1000)
-            } catch (e: Exception) {
-                Log.e("Siren", "Error playing siren: ${e.message}")
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // 기존 기능 유지
-    // ------------------------------------------------------------------------
 
     fun refreshPermissions() {
         val granted = requiredPermissions.all { permission ->
@@ -939,7 +968,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             gossipSyncManager.stop()
         }
 
-        // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {
             bleManager.release()
         }
