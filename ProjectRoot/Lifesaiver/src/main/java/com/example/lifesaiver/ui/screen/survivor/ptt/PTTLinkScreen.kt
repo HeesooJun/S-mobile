@@ -23,7 +23,6 @@ import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.ptt.PttActionType
 import com.example.lifesaiver.ui.components.ptt.PttActionsBlock
-import com.example.lifesaiver.ui.components.ptt.PttBottomBar
 import com.example.lifesaiver.ui.components.ptt.PttHeroSection
 import com.example.lifesaiver.ui.components.ptt.PttMeshOverlay
 import com.example.lifesaiver.ui.components.ptt.PttTopBar
@@ -153,19 +152,6 @@ fun PTTLinkScreen(
                     modifier = Modifier.offset(y = scaledDp(24, scale))
                 )
             }
-
-            PttBottomBar(
-                isConnected = isConnected,
-                onProfile = onProfile,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(
-                        start = scaledDp(32, scale),
-                        end = scaledDp(32, scale),
-                        bottom = scaledDp(20, scale)
-                    )
-            )
 
             if (showMeshMap) {
                 PttMeshOverlay(
