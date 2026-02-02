@@ -5,7 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
+import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
@@ -40,9 +41,11 @@ import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
+import com.example.lifesaiver.ui.screen.settings.SettingsScreen
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
+import androidx.core.content.ContextCompat
 
 @Composable
 fun AppNavHost(
@@ -83,7 +86,12 @@ fun AppNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val context = LocalContext.current
     val activity = context as? Activity
-    val appContext = context.applicationContext
+
+    // [핵심 수정] Activity에 연결된 AppViewModel을 여기서 직접 가져옴
+    // 이렇게 하면 LifesaiverApp 코드를 수정하지 않아도 데이터를 공유할 수 있음
+    val appViewModel: AppViewModel = viewModel(viewModelStoreOwner = context as ComponentActivity)
+    val appUiState by appViewModel.uiState.collectAsState()
+
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var pendingSosNavigation by remember { mutableStateOf(false) }
@@ -107,11 +115,7 @@ fun AppNavHost(
             }
         }
         val filter = IntentFilter(SensorService.ACTION_SENSOR_TRIGGERED)
-        if (Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            context.registerReceiver(receiver, filter)
-        }
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         onDispose {
             try {
                 context.unregisterReceiver(receiver)
@@ -123,7 +127,6 @@ fun AppNavHost(
         val route = backStackEntry?.destination?.route ?: AppRoute.SurvivorProfile.route
         onRouteChanged(route)
         if (route == AppRoute.SurvivorStandby.route) {
-            // 센서 트리거로 들어온 경우에만 STT를 켜기 위해 reset token만 갱신
             sttResetToken = System.currentTimeMillis()
         }
     }
@@ -197,7 +200,8 @@ fun AppNavHost(
                     pendingSosNavigation = true
                     sosStartedAt = System.currentTimeMillis()
                     navController.navigate(AppRoute.SurvivorEmergency.route)
-                }
+                },
+                onSettings = { navController.navigate(AppRoute.Settings.route) }
             )
         }
 
@@ -273,9 +277,26 @@ fun AppNavHost(
                 },
                 onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
                 onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
-                onPanicClear = onClearDeviceMonitoring
+                onPanicClear = onClearDeviceMonitoring,
+                onSettings = { navController.navigate(AppRoute.Settings.route) }
             )
         }
+
+        // ▼▼▼ SettingsScreen 네비게이션 등록 (수정됨) ▼▼▼
+        composable(AppRoute.Settings.route) {
+            SettingsScreen(
+                // 위에서 가져온 appViewModel의 상태와 함수를 전달
+                isVoiceOn = appUiState.isVoiceDetectionEnabled,
+                isShockOn = appUiState.isShockDetectionEnabled,
+                onVoiceToggle = { enabled -> appViewModel.setVoiceDetection(enabled) },
+                onShockToggle = { enabled -> appViewModel.setShockDetection(enabled) },
+                onBack = { navController.popBackStack() },
+                onEditProfile = {
+                    navController.navigate(AppRoute.SurvivorProfile.route)
+                }
+            )
+        }
+        // ▲▲▲ 추가된 부분 ▲▲▲
 
         composable(AppRoute.SurvivorChat.route) {
             val chatViewModel: RescueChatViewModel = viewModel()
