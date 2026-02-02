@@ -14,14 +14,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import com.example.lifesaiver.R
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.ui.theme.AppColors
 import kotlin.math.PI
@@ -206,6 +210,8 @@ fun MeshMap(
 ) {
     val density = LocalDensity.current
     val simulation = remember { Simulation() }
+    val selfNodeIcon = ImageBitmap.imageResource(id = R.drawable.ic_mesh_node_icon_principal)
+    val userNodeIcon = ImageBitmap.imageResource(id = R.drawable.ic_mesh_node_icon_user)
     var tick by remember { mutableStateOf(0L) }
 
     LaunchedEffect(nodes, edges) {
@@ -337,11 +343,6 @@ fun MeshMap(
                 val signalScale = 0.7f + node.signal.coerceIn(0.1f, 1f) * 0.6f
                 val pulse = node.pulseLevel.coerceIn(0f, 1f)
                 val radius = baseRadius * signalScale * (1f + pulse * 0.12f)
-                val fill = when {
-                    node.isSelf -> AppColors.Green
-                    node.hop <= 1 -> AppColors.White
-                    else -> AppColors.Gray400
-                }
 
                 if (pulse > 0.05f) {
                     drawCircle(
@@ -351,16 +352,12 @@ fun MeshMap(
                     )
                 }
 
-                drawCircle(
-                    color = fill.copy(alpha = 0.92f),
-                    radius = radius,
-                    center = center
-                )
-                drawCircle(
-                    color = AppColors.White.copy(alpha = 0.9f),
-                    radius = radius,
-                    center = center,
-                    style = Stroke(width = 2f)
+                val icon = if (node.isSelf) selfNodeIcon else userNodeIcon
+                val iconSize = (radius * 2f).toInt().coerceAtLeast(1)
+                drawImage(
+                    image = icon,
+                    dstOffset = IntOffset((center.x - radius).toInt(), (center.y - radius).toInt()),
+                    dstSize = IntSize(iconSize, iconSize)
                 )
 
                 val labelColor = if (node.isSelf) AppColors.Green else AppColors.Gray400
