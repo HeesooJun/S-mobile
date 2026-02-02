@@ -318,9 +318,6 @@ fun AppNavHost(
                     meshVisualEvents = meshVisualEvents,
                     bleDebugStats = bleDebugStats,
                     isConnected = isConnected,
-                    isMicOn = isMicOn,
-                    onMicPress = onMicPress,
-                    onMicRelease = onMicRelease,
                     onBack = { navController.popBackStack() },
                     onDisconnect = {
                         onDisconnect()
