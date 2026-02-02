@@ -226,7 +226,7 @@ fun StandbyStatusScreen(
                     Spacer(modifier = Modifier.height(scaledDp(24, scale)))
 
                     Image(
-                        painter = painterResource(id = R.drawable.ic_siren),
+                        painter = painterResource(id = R.drawable.ic_standby_siren),
                         contentDescription = "SOS",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
