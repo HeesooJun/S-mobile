@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
@@ -32,7 +31,6 @@ import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
-import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
@@ -87,17 +85,16 @@ fun AppNavHost(
     onClearSignatureLogs: () -> Unit,
     onClearProfileLogs: () -> Unit,
     onClearDeviceMonitoring: () -> Unit,
+    isVoiceDetectionEnabled: Boolean,
+    isShockDetectionEnabled: Boolean,
+    onSetVoiceDetection: (Boolean) -> Unit,
+    onSetShockDetection: (Boolean) -> Unit,
     onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scale = LocalAppScale.current
     val context = LocalContext.current
-
-    // [핵심 수정] Activity에 연결된 AppViewModel을 여기서 직접 가져옴
-    // 이렇게 하면 LifesaiverApp 코드를 수정하지 않아도 데이터를 공유할 수 있음
-    val appViewModel: AppViewModel = viewModel(viewModelStoreOwner = context as ComponentActivity)
-    val appUiState by appViewModel.uiState.collectAsState()
 
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
@@ -319,7 +316,6 @@ fun AppNavHost(
                             popUpTo(AppRoute.SurvivorStandby.route) { inclusive = true }
                         }
                     },
-                    onChat = { navigateBottomTab(AppRoute.SurvivorChat.route) },
                     onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                     onPanicClear = onClearDeviceMonitoring,
                     onSettings = { navigateBottomTab(AppRoute.Settings.route) }
@@ -328,10 +324,10 @@ fun AppNavHost(
 
             composable(AppRoute.Settings.route) {
                 SettingsScreen(
-                    isVoiceOn = appUiState.isVoiceDetectionEnabled,
-                    isShockOn = appUiState.isShockDetectionEnabled,
-                    onVoiceToggle = { enabled -> appViewModel.setVoiceDetection(enabled) },
-                    onShockToggle = { enabled -> appViewModel.setShockDetection(enabled) },
+                    isVoiceOn = isVoiceDetectionEnabled,
+                    isShockOn = isShockDetectionEnabled,
+                    onVoiceToggle = onSetVoiceDetection,
+                    onShockToggle = onSetShockDetection,
                     onBack = { navController.popBackStack() },
                     onEditProfile = {
                         navController.navigate(AppRoute.SurvivorProfile.route)
@@ -355,8 +351,6 @@ fun AppNavHost(
                     onClearSignatureLogs = onClearSignatureLogs,
                     onClearProfileLogs = onClearProfileLogs,
                     onSendProfileTest = onSendProfileTest,
-                    onPrev = { navController.popBackStack() },
-                    onSettings = { navigateBottomTab(AppRoute.Settings.route) },
                     inputValue = chatState.inputValue,
                     onInputChange = { chatViewModel.onInputChange(it) },
                     onSendClick = {
