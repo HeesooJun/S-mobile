@@ -75,10 +75,7 @@ fun LifesaiverApp(
     var currentRoute by remember { mutableStateOf(AppRoute.SurvivorProfile.route) }
 
     val autoSaverEnabled =
-        isRescueSignalActive && (
-            currentRoute == AppRoute.SurvivorEmergency.route ||
-                currentRoute == AppRoute.RescuerEmergency.route
-            )
+        isRescueSignalActive && currentRoute == AppRoute.SurvivorEmergency.route
     val autoSaverTimeoutMs = 60_000L // 60초
 
     // [로직 1] 절전 타이머 로직

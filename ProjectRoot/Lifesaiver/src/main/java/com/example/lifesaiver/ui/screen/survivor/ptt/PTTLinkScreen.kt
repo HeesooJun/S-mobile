@@ -5,6 +5,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -45,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import com.example.lifesaiver.R
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
-import com.example.lifesaiver.ui.components.BatteryIndicator
 import com.example.lifesaiver.ui.components.MeshNode
 import com.example.lifesaiver.ui.components.MeshEdge
 import com.example.lifesaiver.ui.components.MeshMap
@@ -106,12 +114,7 @@ fun PTTLinkScreen(
     }
 
     LaunchedEffect(expandedAction) {
-        if (
-            expandedAction == ActionType.Chat ||
-            expandedAction == ActionType.Disconnect ||
-            expandedAction == ActionType.Power ||
-            expandedAction == ActionType.Count
-        ) {
+        if (expandedAction == ActionType.Disconnect) {
             setShowDoubleTapHint(true)
             delay(3500)
             setShowDoubleTapHint(false)
@@ -143,7 +146,7 @@ fun PTTLinkScreen(
             )
             Icon(
                 // 프로젝트에 ic_settings 아이콘이 없다면 추가하거나, R.drawable.ic_gear 등으로 변경하세요.
-                painter = painterResource(id = R.drawable.ic_settings),
+                painter = painterResource(id = R.drawable.ic_ptt_settings),
                 contentDescription = "설정",
                 tint = AppColors.Gray500, // 로고 텍스트와 톤을 맞춰 자연스럽게 배치
                 modifier = Modifier
@@ -154,28 +157,24 @@ fun PTTLinkScreen(
             )
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = scaledDp(32, scale)),
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = scaledDp(32, scale))
+                    .offset(y = scaledDp(16, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.weight(0.5f))
-                BatteryIndicator(level = batteryLevel)
-                Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-                Text(
-                    text = "$batteryLevel%",
-                    color = AppColors.White,
-                    fontSize = scaledSp(54, scale),
-                    fontWeight = FontWeight.ExtraBold
+                RipplePulse(
+                    isActive = isMicOn,
+                    isConnected = isLinkActive,
+                    modifier = Modifier
+                        .size(scaledDp(72, scale))
+                        .offset(y = scaledDp(-40, scale))
                 )
-                Text(
-                    text = "약 36시간 대기 가능",
-                    color = AppColors.Gray500,
-                    fontSize = scaledSp(12, scale)
-                )
-                Spacer(modifier = Modifier.height(scaledDp(80, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(36, scale)))
                 MicButton(
                     isActive = isMicOn,
-                    size = scaledDp(80, scale),
+                    modifier = Modifier.offset(y = scaledDp(-10, scale)),
+                    size = scaledDp(92, scale),
                     onPress = onMicPress,
                     onRelease = onMicRelease
                 )
@@ -190,8 +189,7 @@ fun PTTLinkScreen(
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(scaledDp(18, scale)))
-                Spacer(modifier = Modifier.weight(0.6f))
+                Spacer(modifier = Modifier.height(scaledDp(44, scale)))
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -204,7 +202,7 @@ fun PTTLinkScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ExpandableAction(
-                            iconRes = R.drawable.ic_power_off,
+                            iconRes = R.drawable.ic_ptt_power_off,
                             label = "절전 모드",
                             isExpanded = expandedAction == ActionType.Power,
                             showLabelAlways = showActionLabelsAlways,
@@ -214,7 +212,7 @@ fun PTTLinkScreen(
                             }
                         )
                         ExpandableAction(
-                            iconRes = R.drawable.connection_lost,
+                            iconRes = R.drawable.ic_ptt_connection_lost,
                             label = "연결 끊기",
                             isExpanded = expandedAction == ActionType.Disconnect,
                             iconSizeOverride = scaledDp(44, scale),
@@ -229,33 +227,25 @@ fun PTTLinkScreen(
                             }
                         )
                         ExpandableAction(
-                            iconRes = R.drawable.ic_chat,
+                            iconRes = R.drawable.ic_ptt_chat,
                             label = "채팅",
                             isExpanded = expandedAction == ActionType.Chat,
                             iconSizeOverride = scaledDp(38, scale),
                             showLabelAlways = showActionLabelsAlways,
                             onClick = {
-                                if (expandedAction == ActionType.Chat) {
-                                    setExpandedAction(null)
-                                    onChat()
-                                } else {
-                                    setExpandedAction(ActionType.Chat)
-                                }
+                                setExpandedAction(null)
+                                onChat()
                             }
                         )
                         ExpandableAction(
-                            iconRes = R.drawable.connection_filled,
+                            iconRes = R.drawable.ic_ptt_connection_filled,
                             label = "사용자 $displayConnectedCount",
                             isExpanded = expandedAction == ActionType.Count,
                             iconSizeOverride = scaledDp(32, scale),
                             showLabelAlways = showActionLabelsAlways,
                             onClick = {
-                                if (expandedAction == ActionType.Count) {
-                                    setExpandedAction(null)
-                                    showMeshMap = true
-                                } else {
-                                    setExpandedAction(ActionType.Count)
-                                }
+                                setExpandedAction(null)
+                                showMeshMap = true
                             }
                         )
                     }
@@ -281,32 +271,35 @@ fun PTTLinkScreen(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.weight(1f))
-                Row(
+            }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(
+                        start = scaledDp(32, scale),
+                        end = scaledDp(32, scale),
+                        bottom = scaledDp(24, scale)
+                    ),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = scaledDp(24, scale)),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .height(scaledDp(36, scale))
+                        .padding(start = scaledDp(14, scale)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .height(scaledDp(36, scale))
-                            .padding(start = scaledDp(14, scale)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        SignalBars(
-                            strength = if (isConnected) 4 else 1,
-                            variant = SignalVariant.Green,
-                            modifier = Modifier.graphicsLayer(rotationX = 180f)
-                        )
-                    }
-                    ProfileActionButton(
-                        label = "내정보",
-                        onClick = onProfile
+                    SignalBars(
+                        strength = if (isConnected) 4 else 1,
+                        variant = SignalVariant.Green,
+                        modifier = Modifier.graphicsLayer(rotationX = 180f)
                     )
                 }
+                ProfileActionButton(
+                    label = "내정보",
+                    onClick = onProfile
+                )
             }
 
             if (showMeshMap) {
@@ -322,7 +315,7 @@ fun PTTLinkScreen(
                         modifier = Modifier.fillMaxSize()
                     )
                     TopIconButton(
-                        iconRes = R.drawable.ic_back,
+                        iconRes = R.drawable.ic_common_back,
                         contentDescription = "닫기",
                         onClick = { showMeshMap = false },
                         modifier = Modifier
@@ -365,6 +358,91 @@ fun PTTLinkScreen(
         }
     }
 
+}
+
+@Composable
+private fun RipplePulse(
+    isActive: Boolean,
+    isConnected: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "pttRipple")
+    val waveA by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1250, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "waveA"
+    )
+    val waveB by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1250, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+            initialStartOffset = StartOffset(420)
+        ),
+        label = "waveB"
+    )
+    val waveC by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1250, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+            initialStartOffset = StartOffset(840)
+        ),
+        label = "waveC"
+    )
+    val pulseScale by transition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.14f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 820, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    val waveColor = when {
+        isActive -> Color(0xFF66F2B2)
+        isConnected -> Color(0xFF57D89E)
+        else -> Color(0xFF4C8A72)
+    }
+    val coreAlpha = if (isActive) 0.34f else 0.20f
+    val strokeBaseAlpha = if (isActive) 0.62f else 0.34f
+
+    Canvas(
+        modifier = modifier.graphicsLayer {
+            scaleX = if (isActive) pulseScale else 1f
+            scaleY = if (isActive) pulseScale else 1f
+        }
+    ) {
+        val diameter = size.minDimension
+        val coreRadius = diameter * 0.18f
+        val maxWaveSpread = diameter * 0.48f
+        val strokeWidth = diameter * 0.07f
+
+        fun drawWave(progress: Float) {
+            val radius = coreRadius + maxWaveSpread * progress
+            val alpha = (1f - progress) * strokeBaseAlpha
+            drawCircle(
+                color = waveColor.copy(alpha = alpha),
+                radius = radius,
+                style = Stroke(width = strokeWidth)
+            )
+        }
+
+        drawCircle(
+            color = waveColor.copy(alpha = coreAlpha),
+            radius = coreRadius
+        )
+        drawWave(waveA)
+        drawWave(waveB)
+        drawWave(waveC)
+    }
 }
 
 @Composable

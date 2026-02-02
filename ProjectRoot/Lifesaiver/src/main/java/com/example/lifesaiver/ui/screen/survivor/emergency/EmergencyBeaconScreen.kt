@@ -100,7 +100,7 @@ fun EmergencyBeaconScreen(
                         )
                 )
                 Image(
-                    painter = painterResource(id = R.drawable.ic_sound),
+                    painter = painterResource(id = R.drawable.ic_emergency_sound),
                     contentDescription = "구조 신호",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.size(scaledDp(56, scale))
