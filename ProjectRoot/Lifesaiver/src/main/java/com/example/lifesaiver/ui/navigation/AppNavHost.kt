@@ -4,8 +4,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -14,6 +19,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -23,19 +31,22 @@ import androidx.navigation.compose.rememberNavController
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
-import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
+import com.example.lifesaiver.ui.components.ptt.PttBottomBar
+import com.example.lifesaiver.ui.components.ptt.PttBottomTab
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.survivor.profile.SurvivorProfileScreen
 import com.example.lifesaiver.ui.screen.settings.SettingsScreen
+import com.example.lifesaiver.ui.theme.LocalAppScale
+import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
@@ -74,14 +85,16 @@ fun AppNavHost(
     onClearSignatureLogs: () -> Unit,
     onClearProfileLogs: () -> Unit,
     onClearDeviceMonitoring: () -> Unit,
+    isVoiceDetectionEnabled: Boolean,
+    isShockDetectionEnabled: Boolean,
+    onSetVoiceDetection: (Boolean) -> Unit,
+    onSetShockDetection: (Boolean) -> Unit,
     onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
+    val scale = LocalAppScale.current
     val context = LocalContext.current
-
-    val appViewModel: AppViewModel = viewModel(viewModelStoreOwner = context as ComponentActivity)
-    val appUiState by appViewModel.uiState.collectAsState()
 
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
@@ -90,6 +103,33 @@ fun AppNavHost(
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
     val minSosDurationMs = 1_000L
+    val currentRoute = backStackEntry?.destination?.route
+    val footerEnabledRoutes = setOf(
+        AppRoute.SurvivorPTT.route,
+        AppRoute.SurvivorChat.route,
+        AppRoute.Settings.route
+    )
+    val swipeRoutes = listOf(
+        AppRoute.SurvivorPTT.route,
+        AppRoute.SurvivorChat.route,
+        AppRoute.Settings.route
+    )
+    val shouldShowFooter = currentRoute in footerEnabledRoutes
+    val navigateBottomTab: (String) -> Unit = { targetRoute ->
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        if (currentRoute != targetRoute) {
+            navController.navigate(targetRoute) {
+                launchSingleTop = true
+            }
+        }
+    }
+    val navigateBySwipe: (Int) -> Unit = swipe@{ delta ->
+        val route = navController.currentBackStackEntry?.destination?.route ?: return@swipe
+        val currentIndex = swipeRoutes.indexOf(route)
+        if (currentIndex == -1) return@swipe
+        val targetRoute = swipeRoutes.getOrNull(currentIndex + delta) ?: return@swipe
+        navigateBottomTab(targetRoute)
+    }
 
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
@@ -165,139 +205,177 @@ fun AppNavHost(
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = AppRoute.SurvivorProfile.route
-    ) {
-        composable(AppRoute.SurvivorStandby.route) {
-            StandbyStatusScreen(
-                batteryLevel = batteryLevel,
-                sttResetToken = sttResetToken,
-                sttEnabled = sttEnabled,
-                onPrev = { navController.popBackStack() },
-                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
-                onSos = {
-                    pendingSosNavigation = true
-                    sosStartedAt = System.currentTimeMillis()
-                    navController.navigate(AppRoute.SurvivorEmergency.route)
-                },
-                onSettings = { navController.navigate(AppRoute.Settings.route) }
-            )
-        }
-
-        composable(AppRoute.SurvivorProfile.route) {
-            SurvivorProfileScreen(
-                profileStore = profileStore,
-                onSaved = {
-                    val prevRoute = navController.previousBackStackEntry?.destination?.route
-                    if (prevRoute == null) {
-                        navController.navigate(AppRoute.SurvivorStandby.route) {
-                            popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+    Box(modifier = Modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = AppRoute.SurvivorProfile.route,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = if (shouldShowFooter) scaledDp(58, scale) else scaledDp(0, scale))
+                .pointerInput(shouldShowFooter, currentRoute) {
+                    if (!shouldShowFooter) return@pointerInput
+                    var totalDragX = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDragX = 0f },
+                        onHorizontalDrag = { _, dragAmount ->
+                            totalDragX += dragAmount
+                        },
+                        onDragEnd = {
+                            val threshold = size.width * 0.18f
+                            when {
+                                totalDragX < -threshold -> navigateBySwipe(+1)
+                                totalDragX > threshold -> navigateBySwipe(-1)
+                            }
                         }
-                    } else {
-                        navController.popBackStack()
+                    )
+                }
+        ) {
+            composable(AppRoute.SurvivorStandby.route) {
+                StandbyStatusScreen(
+                    batteryLevel = batteryLevel,
+                    sttResetToken = sttResetToken,
+                    sttEnabled = sttEnabled,
+                    onPrev = { navController.popBackStack() },
+                    onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
+                    onSos = {
+                        pendingSosNavigation = true
+                        sosStartedAt = System.currentTimeMillis()
+                        navController.navigate(AppRoute.SurvivorEmergency.route)
+                    },
+                    onSettings = { navController.navigate(AppRoute.Settings.route) }
+                )
+            }
+
+            composable(AppRoute.SurvivorProfile.route) {
+                SurvivorProfileScreen(
+                    profileStore = profileStore,
+                    onSaved = {
+                        val prevRoute = navController.previousBackStackEntry?.destination?.route
+                        if (prevRoute == null) {
+                            navController.navigate(AppRoute.SurvivorStandby.route) {
+                                popUpTo(AppRoute.SurvivorProfile.route) { inclusive = true }
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                    },
+                    onSendProfileUpdate = onSendProfileUpdate,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(AppRoute.SurvivorEmergency.route) {
+                val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
+                val emergencyState by emergencyViewModel.uiState.collectAsState()
+                val stopAndBack = {
+                    pendingSosNavigation = false
+                    onStopAutoConnect()
+                    onStopRescueSignal()
+                    navController.popBackStack()
+                    Unit
+                }
+                LaunchedEffect(Unit) {
+                    if (!isRescueSignalActive) {
+                        onStartRescueSignal()
                     }
-                },
-                onSendProfileUpdate = onSendProfileUpdate,
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        composable(AppRoute.SurvivorEmergency.route) {
-            val emergencyViewModel: EmergencyBeaconViewModel = viewModel()
-            val emergencyState by emergencyViewModel.uiState.collectAsState()
-            val stopAndBack = {
-                pendingSosNavigation = false
-                onStopAutoConnect()
-                onStopRescueSignal()
-                navController.popBackStack()
-                Unit
-            }
-            LaunchedEffect(Unit) {
-                if (!isRescueSignalActive) {
-                    onStartRescueSignal()
+                    onStartAutoConnect()
                 }
-                onStartAutoConnect()
+                BackHandler {
+                    stopAndBack()
+                }
+                SurvivorEmergencyBeaconScreen(
+                    batteryLevel = batteryLevel,
+                    uiState = emergencyState,
+                    onPrev = stopAndBack,
+                )
             }
-            BackHandler {
-                stopAndBack()
-            }
-            SurvivorEmergencyBeaconScreen(
-                batteryLevel = batteryLevel,
-                uiState = emergencyState,
-                onPrev = stopAndBack,
-            )
-        }
 
-        composable(AppRoute.SurvivorPTT.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
+            composable(AppRoute.SurvivorPTT.route) {
+                LaunchedEffect(Unit) {
+                    onStartAutoConnect()
+                }
+                PTTLinkScreen(
+                    batteryLevel = batteryLevel,
+                    connectedCount = connectedCount,
+                    meshPeerCount = meshPeerCount,
+                    directPeerIds = directPeerIds,
+                    myPeerId = myPeerId,
+                    myNickname = myNickname,
+                    peerNicknames = peerNicknames,
+                    meshGraphSnapshot = meshGraphSnapshot,
+                    meshVisualEvents = meshVisualEvents,
+                    bleDebugStats = bleDebugStats,
+                    isConnected = isConnected,
+                    isMicOn = isMicOn,
+                    onMicPress = onMicPress,
+                    onMicRelease = onMicRelease,
+                    onBack = { navController.popBackStack() },
+                    onDisconnect = {
+                        onDisconnect()
+                        navController.navigate(AppRoute.SurvivorStandby.route) {
+                            popUpTo(AppRoute.SurvivorStandby.route) { inclusive = true }
+                        }
+                    },
+                    onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
+                    onPanicClear = onClearDeviceMonitoring,
+                    onSettings = { navigateBottomTab(AppRoute.Settings.route) }
+                )
             }
-            PTTLinkScreen(
-                batteryLevel = batteryLevel,
-                connectedCount = connectedCount,
-                meshPeerCount = meshPeerCount,
-                directPeerIds = directPeerIds,
-                myPeerId = myPeerId,
-                myNickname = myNickname,
-                peerNicknames = peerNicknames,
-                meshGraphSnapshot = meshGraphSnapshot,
-                meshVisualEvents = meshVisualEvents,
-                bleDebugStats = bleDebugStats,
-                isConnected = isConnected,
-                isMicOn = isMicOn,
-                onMicPress = onMicPress,
-                onMicRelease = onMicRelease,
-                onBack = { navController.popBackStack() },
-                onDisconnect = {
-                    onDisconnect()
-                    navController.navigate(AppRoute.SurvivorStandby.route) {
-                        popUpTo(AppRoute.SurvivorStandby.route) { inclusive = true }
+
+            composable(AppRoute.Settings.route) {
+                SettingsScreen(
+                    isVoiceOn = isVoiceDetectionEnabled,
+                    isShockOn = isShockDetectionEnabled,
+                    onVoiceToggle = onSetVoiceDetection,
+                    onShockToggle = onSetShockDetection,
+                    onBack = { navController.popBackStack() },
+                    onEditProfile = {
+                        navController.navigate(AppRoute.SurvivorProfile.route)
                     }
-                },
-                onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
-                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
-                onPanicClear = onClearDeviceMonitoring,
-                onSettings = { navController.navigate(AppRoute.Settings.route) }
-            )
+                )
+            }
+
+            composable(AppRoute.SurvivorChat.route) {
+                val chatViewModel: RescueChatViewModel = viewModel()
+                val chatState by chatViewModel.uiState.collectAsState()
+                RescueChatScreen(
+                    roomTitle = "전체 채팅",
+                    meshPeerCount = meshPeerCount,
+                    messages = messages,
+                    signatureLogs = signatureLogs,
+                    profileLogs = profileLogs,
+                    peerNodes = meshGraphSnapshot.nodes,
+                    isMicOn = isMicOn,
+                    onMicPress = onMicPress,
+                    onMicRelease = onMicRelease,
+                    onClearSignatureLogs = onClearSignatureLogs,
+                    onClearProfileLogs = onClearProfileLogs,
+                    onSendProfileTest = onSendProfileTest,
+                    inputValue = chatState.inputValue,
+                    onInputChange = { chatViewModel.onInputChange(it) },
+                    onSendClick = {
+                        chatViewModel.consumeSend()?.let { text -> onSendMessage(text) }
+                    }
+                )
+            }
         }
 
-        composable(AppRoute.Settings.route) {
-            SettingsScreen(
-                isVoiceOn = appUiState.isVoiceDetectionEnabled,
-                isShockOn = appUiState.isShockDetectionEnabled,
-                onVoiceToggle = { enabled -> appViewModel.setVoiceDetection(enabled) },
-                onShockToggle = { enabled -> appViewModel.setShockDetection(enabled) },
-                onBack = { navController.popBackStack() },
-                onEditProfile = {
-                    navController.navigate(AppRoute.SurvivorProfile.route)
-                }
-            )
-        }
-
-        composable(AppRoute.SurvivorChat.route) {
-            val chatViewModel: RescueChatViewModel = viewModel()
-            val chatState by chatViewModel.uiState.collectAsState()
-            RescueChatScreen(
-                roomTitle = "전체 채팅",
-                meshPeerCount = meshPeerCount,
-                messages = messages,
-                signatureLogs = signatureLogs,
-                profileLogs = profileLogs,
-                peerNodes = meshGraphSnapshot.nodes,
-                isMicOn = isMicOn,
-                onMicPress = onMicPress,
-                onMicRelease = onMicRelease,
-                onClearSignatureLogs = onClearSignatureLogs,
-                onClearProfileLogs = onClearProfileLogs,
-                onSendProfileTest = onSendProfileTest,
-                onPrev = { navController.popBackStack() },
-                onSettings = { navController.navigate(AppRoute.Settings.route) },
-                inputValue = chatState.inputValue,
-                onInputChange = { chatViewModel.onInputChange(it) },
-                onSendClick = {
-                    chatViewModel.consumeSend()?.let { text -> onSendMessage(text) }
-                }
+        if (shouldShowFooter) {
+            val selectedTab = when (currentRoute) {
+                AppRoute.SurvivorChat.route -> PttBottomTab.Chat
+                AppRoute.Settings.route -> PttBottomTab.Settings
+                else -> PttBottomTab.Home
+            }
+            PttBottomBar(
+                selectedTab = selectedTab,
+                onHome = { navigateBottomTab(AppRoute.SurvivorPTT.route) },
+                onChat = { navigateBottomTab(AppRoute.SurvivorChat.route) },
+                onSettings = { navigateBottomTab(AppRoute.Settings.route) },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(scaledDp(58, scale))
+                    .padding(bottom = scaledDp(4, scale))
             )
         }
     }

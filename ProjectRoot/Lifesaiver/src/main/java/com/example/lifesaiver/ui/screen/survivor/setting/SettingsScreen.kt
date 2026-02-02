@@ -62,10 +62,12 @@ fun SettingsScreen(
         modifier = Modifier.fillMaxSize().background(ColorBackground)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = scaledDp(16, scale)),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = scaledDp(16, scale)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            HeaderSection(scale, onBack)
+            HeaderSection(scale)
             UserInfoCard(scale, "홍길동", "남성", "2000.01.01", "제가 특이해요", onEditProfile)
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
 
@@ -93,9 +95,8 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun HeaderSection(scale: Float, onBack: () -> Unit) {
+private fun HeaderSection(scale: Float) {
     Box(modifier = Modifier.fillMaxWidth().padding(top = scaledDp(40, scale), bottom = scaledDp(20, scale))) {
-        Icon(painter = painterResource(id = R.drawable.ic_common_back), contentDescription = "Back", tint = ColorTextMain, modifier = Modifier.size(scaledDp(24, scale)).align(Alignment.CenterStart).clickable { onBack() })
         Text(text = "설정", color = ColorTextMain, fontSize = scaledSp(20, scale), fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
     }
 }
