@@ -25,14 +25,15 @@ class SensorService : Service(), SensorEventListener {
         const val ACTION_SENSOR_TRIGGERED = "com.example.wakeup.ACTION_SENSOR_TRIGGERED"
         const val NOTIFICATION_ID = 101
 
-        // 알림 채널 ID
         private const val CHANNEL_ID_HIDDEN = "WAKEUP_HIDDEN_CHANNEL_V3"
         private const val CHANNEL_ID_ALERT = "WAKEUP_ALERT_CHANNEL"
     }
 
-    // 센서 관련 변수
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
+
+    // [핵심 1] 서비스 종료 상태 플래그 (오작동 방지)
+    @Volatile private var isDestroyed = false
 
     // 센서 임계값
     private val IMPACT_THRESHOLD = 40.0f
@@ -54,14 +55,18 @@ class SensorService : Service(), SensorEventListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        accelerometer?.also { sensor ->
-            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)
+        // [수정] 서비스가 죽은 상태라면 리스너 등록 안 함
+        if (!isDestroyed) {
+            accelerometer?.also { sensor ->
+                sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)
+            }
         }
         return START_STICKY
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (isAlertTriggered) return
+        // [핵심 2] 종료되었거나 이미 발동된 경우 로직 차단
+        if (isDestroyed || isAlertTriggered) return
 
         event?.let {
             if (it.sensor.type == Sensor.TYPE_ACCELEROMETER) {
@@ -94,24 +99,23 @@ class SensorService : Service(), SensorEventListener {
         }
     }
 
-    // 앱 깨우기 및 알림 로직
     private fun triggerAlert(reason: String) {
-        if (isAlertTriggered) return
+        if (isAlertTriggered || isDestroyed) return
         isAlertTriggered = true
 
         Log.e("SensorService", "🚨 비상 알림 발동! 원인: $reason")
 
-        // 1. 센서 해제 (중복 감지 방지)
+        // [핵심 1] 두 설정 모두 OFF (충격 + 음성)
+        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("shock_detection", false)
+            .putBoolean("voice_detection", false) // 음성 감지도 끔
+            .apply()
+
+        // 1. 센서 해제
         sensorManager.unregisterListener(this)
 
-        // 2. 네비게이션용 브로드캐스트 전송
-        val broadcastIntent = Intent(ACTION_SENSOR_TRIGGERED).apply {
-            setPackage(packageName)
-            putExtra("triggerReason", reason)
-        }
-        sendBroadcast(broadcastIntent)
-
-        // 3. 실행할 액티비티 인텐트 준비
+        // 2. 실행할 액티비티 인텐트 준비
         val activityIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             action = ACTION_SENSOR_TRIGGERED
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -119,48 +123,53 @@ class SensorService : Service(), SensorEventListener {
         }
 
         if (activityIntent != null) {
-            // 4. 화면이 켜져 있을 때 앱 강제 실행 (권한 필요)
+            // 3. 화면 켜져있을 때 앱 강제 실행
             if (Settings.canDrawOverlays(this)) {
                 startActivity(activityIntent)
                 Log.d("SensorService", "🚀 비상 상황! 앱 강제 실행됨")
             }
 
-            // 5. 잠금 화면 깨우기용 PendingIntent
+            // 4. 잠금 화면 깨우기
             val pendingIntent = PendingIntent.getActivity(
                 this,
-                System.currentTimeMillis().toInt(),
+                0,
                 activityIntent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            // 6. 전체 화면 알림 표시
+            // 5. 알림 표시
             val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
-                .setSmallIcon(R.drawable.ic_launcher_foreground) // 아이콘 리소스 확인 필요
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle("재난 감지! ($reason)")
                 .setContentText("터치하여 구조 요청 보내기")
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setFullScreenIntent(pendingIntent, true) // 잠금 화면 깨우기
+                .setFullScreenIntent(pendingIntent, true)
                 .setAutoCancel(true)
 
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify(9999, notificationBuilder.build())
         }
+
+        // [핵심 2] VoiceService(음성 감지)도 강제 종료
+        stopService(Intent(this, VoiceService::class.java))
+
+        // 나 자신도 종료
+        stopSelf()
     }
 
     private fun startForegroundServiceNotification() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID_HIDDEN)
             .setContentTitle("Saivior 감시 중")
             .setContentText("넘어짐 및 구조 요청 대기 중...")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setShowWhen(false)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // 센서 서비스는 데이터 싱크 타입으로 설정 (마이크 권한 불필요)
             val serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             startForeground(NOTIFICATION_ID, notification, serviceType)
         } else {
@@ -199,7 +208,21 @@ class SensorService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         super.onDestroy()
-        sensorManager.unregisterListener(this)
+        isDestroyed = true // [핵심] 깃발 내림
+
+        // [핵심 4] UI 렉 방지: 센서 해제도 백그라운드 스레드에서 처리 (비동기)
+        val sm = sensorManager
+        val listener = this
+        Thread {
+            try {
+                sm.unregisterListener(listener)
+                Log.d("SensorService", "🛑 센서 리스너 안전 해제 완료")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
+
+        Log.d("SensorService", "🔴 센서 서비스 종료")
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
