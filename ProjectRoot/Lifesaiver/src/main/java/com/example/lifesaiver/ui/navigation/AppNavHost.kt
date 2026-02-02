@@ -80,8 +80,6 @@ fun AppNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val context = LocalContext.current
 
-    // [핵심 수정] Activity에 연결된 AppViewModel을 여기서 직접 가져옴
-    // 이렇게 하면 LifesaiverApp 코드를 수정하지 않아도 데이터를 공유할 수 있음
     val appViewModel: AppViewModel = viewModel(viewModelStoreOwner = context as ComponentActivity)
     val appUiState by appViewModel.uiState.collectAsState()
 
@@ -264,10 +262,8 @@ fun AppNavHost(
             )
         }
 
-        // ▼▼▼ SettingsScreen 네비게이션 등록 (수정됨) ▼▼▼
         composable(AppRoute.Settings.route) {
             SettingsScreen(
-                // 위에서 가져온 appViewModel의 상태와 함수를 전달
                 isVoiceOn = appUiState.isVoiceDetectionEnabled,
                 isShockOn = appUiState.isShockDetectionEnabled,
                 onVoiceToggle = { enabled -> appViewModel.setVoiceDetection(enabled) },
@@ -278,7 +274,6 @@ fun AppNavHost(
                 }
             )
         }
-        // ▲▲▲ 추가된 부분 ▲▲▲
 
         composable(AppRoute.SurvivorChat.route) {
             val chatViewModel: RescueChatViewModel = viewModel()
@@ -289,10 +284,15 @@ fun AppNavHost(
                 messages = messages,
                 signatureLogs = signatureLogs,
                 profileLogs = profileLogs,
+                peerNodes = meshGraphSnapshot.nodes,
+                isMicOn = isMicOn,
+                onMicPress = onMicPress,
+                onMicRelease = onMicRelease,
                 onClearSignatureLogs = onClearSignatureLogs,
                 onClearProfileLogs = onClearProfileLogs,
                 onSendProfileTest = onSendProfileTest,
                 onPrev = { navController.popBackStack() },
+                onSettings = { navController.navigate(AppRoute.Settings.route) },
                 inputValue = chatState.inputValue,
                 onInputChange = { chatViewModel.onInputChange(it) },
                 onSendClick = {
