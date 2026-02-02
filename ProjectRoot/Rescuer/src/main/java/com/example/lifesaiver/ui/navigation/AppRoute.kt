@@ -14,4 +14,5 @@ sealed class AppRoute(val route: String) {
     data object RescuerChat : AppRoute("rescuer_chat")
     data object RescuerEmergency : AppRoute("rescuer_emergency")
     data object RescuerSurvivorDb : AppRoute("rescuer/survivor_db")
+    data object RescuerMeshMap : AppRoute("rescuer/mesh_map")
 }

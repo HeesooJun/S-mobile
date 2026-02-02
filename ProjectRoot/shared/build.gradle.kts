@@ -10,7 +10,7 @@ android {
     }
 
     defaultConfig {
-        minSdk = 31
+        minSdk = 29
     }
 
     compileOptions {
@@ -23,7 +23,9 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.bouncycastle.bcprov)
