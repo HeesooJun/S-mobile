@@ -17,9 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,8 +36,6 @@ import com.example.lifesaiver.R
 import com.example.lifesaiver.ai.stt.EmergencyIntentClassifierKorean
 import com.example.lifesaiver.ai.stt.VoiceTriggerDetector
 import com.example.lifesaiver.ui.components.ScreenScaffold
-import com.example.lifesaiver.ui.components.SecondaryButton
-import com.example.lifesaiver.ui.components.SecondaryButtonVariant
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
@@ -49,13 +44,9 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun StandbyStatusScreen(
-    batteryLevel: Int,
     sttResetToken: Long,
     sttEnabled: Boolean,
-    onPrev: () -> Unit,
-    onProfile: () -> Unit,
     onSos: () -> Unit,
-    onSettings: () -> Unit // 👈 [추가] 설정 화면 이동 콜백
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
@@ -242,39 +233,10 @@ fun StandbyStatusScreen(
                     )
 
                     Spacer(modifier = Modifier.weight(1f))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = scaledDp(32, scale),
-                                end = scaledDp(32, scale),
-                                bottom = scaledDp(24, scale)
-                            ),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        SecondaryButton(
-                            label = "내 정보",
-                            variant = SecondaryButtonVariant.Gray,
-                            onClick = onProfile
-                        )
-                    }
                 }
             } // End of Column (Content)
 
-            // ▼▼▼ [추가] 테스트용 설정 버튼 (우측 상단) ▼▼▼
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "설정",
-                tint = AppColors.Gray500,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = scaledDp(20, scale), top = scaledDp(18, scale))
-                    .size(scaledDp(24, scale))
-                    .clickable { onSettings() }
-            )
-            // ▲▲▲ 추가 끝 ▲▲▲
+
 
         } // End of Box
     }
