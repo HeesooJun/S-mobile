@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,32 +39,39 @@ internal fun PttBottomBar(
     modifier: Modifier = Modifier
 ) {
     val scale = LocalAppScale.current
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(color = AppColors.Gray900.copy(alpha = 0.96f))
-            .padding(
-                horizontal = scaledDp(20, scale),
-                vertical = scaledDp(1, scale)
-            ),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+            .background(color = AppColors.Gray900.copy(alpha = 0.96f)),
+        contentAlignment = Alignment.Center
     ) {
-        PttNavItem(
-            iconRes = R.drawable.ic_nav_home,
-            isSelected = selectedTab == PttBottomTab.Home,
-            onClick = onHome
-        )
-        PttNavItem(
-            iconRes = R.drawable.ic_nav_chat,
-            isSelected = selectedTab == PttBottomTab.Chat,
-            onClick = onChat
-        )
-        PttNavItem(
-            iconRes = R.drawable.ic_nav_settings,
-            isSelected = selectedTab == PttBottomTab.Settings,
-            onClick = onSettings
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth()
+                .padding(
+                    horizontal = scaledDp(20, scale),
+                    vertical = scaledDp(2, scale)
+                ),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PttNavItem(
+                iconRes = R.drawable.ic_nav_home,
+                isSelected = selectedTab == PttBottomTab.Home,
+                onClick = onHome
+            )
+            PttNavItem(
+                iconRes = R.drawable.ic_nav_chat,
+                isSelected = selectedTab == PttBottomTab.Chat,
+                onClick = onChat
+            )
+            PttNavItem(
+                iconRes = R.drawable.ic_nav_settings,
+                isSelected = selectedTab == PttBottomTab.Settings,
+                onClick = onSettings
+            )
+        }
     }
 }
 
@@ -76,13 +84,12 @@ private fun PttNavItem(
     val scale = LocalAppScale.current
     Box(
         modifier = Modifier
-            .size(width = scaledDp(74, scale), height = scaledDp(46, scale))
+            .size(width = scaledDp(74, scale), height = scaledDp(44, scale))
             .background(
                 color = if (isSelected) AppColors.Gray800 else AppColors.Gray900.copy(alpha = 0.05f),
                 shape = RoundedCornerShape(scaledDp(14, scale))
             )
-            .clickable { onClick() }
-            .padding(vertical = scaledDp(4, scale)),
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Box(
