@@ -139,7 +139,7 @@ sealed interface UiEvent {
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = getApplication<Application>()
     private val forcePcmCall = true
-    private val wifiAwareEnabled = true
+    private val wifiAwareEnabled = false
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
     private val _uiEvents = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
@@ -570,7 +570,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun packetPathLabel(p: Packet, r: String?): String { if (r == null) return "unknown"; val ttl = if (p.header.type == PacketType.REQUEST_SYNC) ProtocolConstants.SYNC_TTL_HOPS else ProtocolConstants.MESSAGE_TTL_HOPS; return if (p.header.ttl >= ttl) "direct" else "mesh" }
 
     override fun onCleared() {
-        AppShutdownHooks.clear(); toneGenerator.release(); wifiAwareRanger.stop(); wifiDirectRanger.stop(); announceJob?.cancel(); meshCleanupJob?.cancel(); bleDebugJob?.cancel()
+        AppShutdownHooks.clear(); toneGenerator.release(); if (wifiAwareEnabled) wifiAwareRanger.stop(); wifiDirectRanger.stop(); announceJob?.cancel(); meshCleanupJob?.cancel(); bleDebugJob?.cancel()
         if (::gossipSyncManager.isInitialized) gossipSyncManager.stop()
         if (::bleManager.isInitialized) bleManager.release()
         super.onCleared()
