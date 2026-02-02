@@ -44,7 +44,7 @@ internal fun PttBottomBar(
             .background(color = AppColors.Gray900.copy(alpha = 0.96f))
             .padding(
                 horizontal = scaledDp(20, scale),
-                vertical = scaledDp(10, scale)
+                vertical = scaledDp(1, scale)
             ),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
@@ -76,13 +76,13 @@ private fun PttNavItem(
     val scale = LocalAppScale.current
     Box(
         modifier = Modifier
-            .size(width = scaledDp(74, scale), height = scaledDp(52, scale))
+            .size(width = scaledDp(74, scale), height = scaledDp(46, scale))
             .background(
                 color = if (isSelected) AppColors.Gray800 else AppColors.Gray900.copy(alpha = 0.05f),
                 shape = RoundedCornerShape(scaledDp(14, scale))
             )
             .clickable { onClick() }
-            .padding(vertical = scaledDp(6, scale)),
+            .padding(vertical = scaledDp(4, scale)),
         contentAlignment = Alignment.Center
     ) {
         Box(
