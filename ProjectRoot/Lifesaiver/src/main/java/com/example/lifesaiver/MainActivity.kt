@@ -1,6 +1,8 @@
 package com.example.lifesaiver
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,8 +16,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -33,50 +44,57 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: AppViewModel by viewModels()
 
-    // [추가 1] 일반 권한 요청 콜백
+    // 앱 준비 상태 (true가 되면 LifesaiverApp을 보여줌)
+    private var isReady by mutableStateOf(false)
+
+    private val bluetoothManager by lazy { getSystemService(BluetoothManager::class.java) }
+    private val bluetoothAdapter by lazy { bluetoothManager?.adapter }
+
+    // [1단계 결과] 권한 요청 -> 오버레이 체크로 이동
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        // 권한 거부된 게 있어도 일단 오버레이 체크로 넘어가서 진행 (필수 기능 안내는 UI에서)
+    ) {
+        // 거부했더라도 일단 다음 단계(오버레이)로 진행 (필수 안내는 나중에)
         checkOverlayPermission()
     }
 
-    // [추가 2] 오버레이 권한 설정 화면 콜백
+    // [2단계 결과] 오버레이 설정 -> 블루투스 체크로 이동
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        refreshServices()
+        checkAndEnableBluetooth()
+    }
+
+    // [3단계 결과] 블루투스 켜기 -> 준비 완료(User Info)로 이동
+    private val enableBluetoothLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // 블루투스 결과와 상관없이 설정 종료 처리
+        finishSetup()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+        // 윈도우 설정 (전체화면 등)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-            // (선택) 키가드가 있을 때 해제 요청 (보안 설정 없을 경우 바로 풀림)
-            // val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
-            // keyguardManager.requestDismissKeyguard(this, null)
         } else {
-            // 구버전 안드로이드 대응
             window.addFlags(
                 android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                     android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                     android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             )
         }
-
-        // 화면이 켜진 상태를 계속 유지하고 싶다면 추가 (배터리 소모 주의)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // 1. 전체 화면 설정 (기존 코드 유지)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        controller.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
-        // 2. 크래시 핸들러 (기존 코드 유지)
+        // 크래시 핸들러
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
             val errorMsg = "오류: ${throwable.message}"
             Log.e("CRASH_HANDLER", errorMsg, throwable)
@@ -85,58 +103,70 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // [수정] 3. 권한 체크 및 서비스 시작 로직 통합
-        // 기존의 viewModel.refreshPermissions() 대신 통합 함수 호출
+        // [핵심] 앱 켜자마자 권한 체크 시작 (PermissionViewModel UI 없음)
         checkAllPermissions()
 
         setContent {
             LifesaiverTheme(darkTheme = true, dynamicColor = false) {
-                val uiState by viewModel.uiState.collectAsState()
+                // 권한/블루투스 체크가 다 끝나면 isReady = true가 되고
+                // LifesaiverApp이 실행됨. (닉네임 설정 안 되어있으면 거기서 입력창이 뜸)
+                if (isReady) {
+                    val uiState by viewModel.uiState.collectAsState()
 
-                // [중요] 기존 UI 로직 유지
-                // requestPermissions 요청 시 우리가 만든 통합 함수를 호출하도록 연결
-                LifesaiverApp(
-                    hasPermissions = uiState.hasPermissions, // ViewModel 상태 사용
-                    batteryLevel = uiState.batteryLevel,
-                    isConnected = uiState.isConnected,
-                    connectedCount = uiState.connectedCount,
-                    meshPeerCount = uiState.meshPeerCount,
-                    directPeerIds = uiState.directPeerIds,
-                    myPeerId = uiState.myPeerId,
-                    myNickname = uiState.myNickname,
-                    peerNicknames = uiState.peerNicknames,
-                    meshGraphSnapshot = uiState.meshGraphSnapshot,
-                    meshVisualEvents = viewModel.meshVisualEvents,
-                    bleDebugStats = uiState.bleDebug,
-                    isMicOn = uiState.isMicOn,
-                    isDisconnecting = uiState.isDisconnecting,
-                    isRescueSignalActive = uiState.isRescueSignalActive,
-                    messages = uiState.messages,
-                    signatureLogs = uiState.signatureLogs,
-                    profileLogs = uiState.profileLogs,
-                    onRequestPermissions = { checkAllPermissions() }, // 여기 수정됨
-                    onStartAutoConnect = { viewModel.onStartAutoConnect() },
-                    onStopAutoConnect = { viewModel.onStopAutoConnect() },
-                    onMicPress = { viewModel.onMicPress() },
-                    onMicRelease = { viewModel.onMicRelease() },
-                    onSendMessage = { text -> viewModel.onSendMessage(text) },
-                    onSendProfileTest = { viewModel.sendProfileTestPacket() },
-                    onSendProfileUpdate = { profile -> viewModel.sendProfileUpdate(profile) },
-                    onDisconnect = { viewModel.onDisconnect() },
-                    onStartRescueSignal = { viewModel.startRescueSignal() },
-                    onStopRescueSignal = { viewModel.stopRescueSignal() },
-                    onPulseRescueSignal = { viewModel.pulseRescueSignal() },
-                    onClearSignatureLogs = { viewModel.clearSignatureLogs() },
-                    onClearProfileLogs = { viewModel.clearProfileLogs() },
-                    onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() }
-                )
+                    LifesaiverApp(
+                        hasPermissions = uiState.hasPermissions,
+                        batteryLevel = uiState.batteryLevel,
+                        isConnected = uiState.isConnected,
+                        connectedCount = uiState.connectedCount,
+                        meshPeerCount = uiState.meshPeerCount,
+                        directPeerIds = uiState.directPeerIds,
+                        myPeerId = uiState.myPeerId,
+                        myNickname = uiState.myNickname,
+                        peerNicknames = uiState.peerNicknames,
+                        meshGraphSnapshot = uiState.meshGraphSnapshot,
+                        meshVisualEvents = viewModel.meshVisualEvents,
+                        bleDebugStats = uiState.bleDebug,
+                        isMicOn = uiState.isMicOn,
+                        isDisconnecting = uiState.isDisconnecting,
+                        isRescueSignalActive = uiState.isRescueSignalActive,
+                        messages = uiState.messages,
+                        signatureLogs = uiState.signatureLogs,
+                        profileLogs = uiState.profileLogs,
+                        // 권한 재요청이 필요할 때 호출될 함수
+                        onRequestPermissions = { checkAllPermissions() },
+                        onStartAutoConnect = { viewModel.onStartAutoConnect() },
+                        onStopAutoConnect = { viewModel.onStopAutoConnect() },
+                        onMicPress = { viewModel.onMicPress() },
+                        onMicRelease = { viewModel.onMicRelease() },
+                        onSendMessage = { text -> viewModel.onSendMessage(text) },
+                        onSendProfileTest = { viewModel.sendProfileTestPacket() },
+                        onSendProfileUpdate = { profile -> viewModel.sendProfileUpdate(profile) },
+                        onDisconnect = { viewModel.onDisconnect() },
+                        onStartRescueSignal = { viewModel.startRescueSignal() },
+                        onStopRescueSignal = { viewModel.stopRescueSignal() },
+                        onPulseRescueSignal = { viewModel.pulseRescueSignal() },
+                        onClearSignatureLogs = { viewModel.clearSignatureLogs() },
+                        onClearProfileLogs = { viewModel.clearProfileLogs() },
+                        onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() }
+                    )
+                } else {
+                    // [로딩 화면] 체크하는 동안 검은 화면에 로딩바 (이 위로 팝업들이 뜸)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+                }
             }
         }
 
         lifecycleScope.launch {
             viewModel.uiEvents.collect { event ->
-                when (event) {
-                    is UiEvent.Toast -> toast(event.message)
+                if (event is UiEvent.Toast) {
+                    Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -144,72 +174,92 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 앱으로 돌아왔을 때 서비스 상태 갱신
-        refreshServices()
-    }
-
-    private fun toast(message: String) {
-        runOnUiThread {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        // 이미 준비 완료된 상태면 서비스 상태만 리프레시
+        if (isReady) {
+            refreshServices()
         }
     }
 
-    // --- [통합 권한 로직 시작] ---
+    // --- [자동 권한 체크 로직] ---
 
-    // 1단계: 모든 필요 권한(블루투스 + 웨이크업) 통합 체크
+    // 1단계: 필수 권한 체크
     private fun checkAllPermissions() {
-        // ViewModel에 정의된 권한(블루투스, 위치 등) 가져오기
-        val permissions = viewModel.requiredPermissions.toMutableList()
+        isReady = false // 체크 중엔 로딩 상태
 
-        // [추가] 웨이크업 기능에 필요한 권한 추가
+        val permissions = viewModel.requiredPermissions.toMutableList()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-        permissions.add(Manifest.permission.RECORD_AUDIO) // 음성 감지용
-        permissions.add(Manifest.permission.READ_PHONE_STATE) // 고립 감지용
+        permissions.add(Manifest.permission.RECORD_AUDIO)
+        permissions.add(Manifest.permission.READ_PHONE_STATE)
 
-        // 아직 허용되지 않은 권한만 필터링
         val notGranted = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }.toTypedArray()
 
         if (notGranted.isNotEmpty()) {
-            // 권한 요청 팝업 띄우기 -> 결과는 requestPermissionLauncher로
+            // 권한 없으면 바로 시스템 팝업 띄움
             requestPermissionLauncher.launch(notGranted)
         } else {
-            // 이미 다 허용됨 -> 오버레이 체크로
-            viewModel.onPermissionsResult(true) // ViewModel에 알림
+            // 권한 있으면 다음 단계(오버레이)로
+            viewModel.onPermissionsResult(true)
             checkOverlayPermission()
         }
     }
 
-    // 2단계: 다른 앱 위에 표시 권한 체크
+    // 2단계: 오버레이 권한 체크
     private fun checkOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "비상 알림을 위해 '다른 앱 위에 표시' 권한을 허용해주세요.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "비상 알림을 위해 '다른 앱 위에 표시' 설정이 필요합니다.", Toast.LENGTH_LONG).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
                 )
                 overlayPermissionLauncher.launch(intent)
             } else {
-                refreshServices()
+                checkAndEnableBluetooth()
             }
         } else {
-            refreshServices()
+            checkAndEnableBluetooth()
         }
     }
 
-    // 3단계: 서비스 실행 (Voice/Sensor)
+    // 3단계: 블루투스 활성화 체크
+    private fun checkAndEnableBluetooth() {
+        if (bluetoothAdapter == null) {
+            finishSetup()
+            return
+        }
+
+        if (!bluetoothAdapter!!.isEnabled) {
+            val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            try {
+                // 블루투스 켜기 팝업 띄움
+                enableBluetoothLauncher.launch(enableBtIntent)
+            } catch (e: SecurityException) {
+                Log.e("Bluetooth", "Permission error", e)
+                finishSetup()
+            }
+        } else {
+            finishSetup()
+        }
+    }
+
+    // 4단계: 최종 완료 (서비스 시작 & LifesaiverApp 표시)
+    private fun finishSetup() {
+        refreshServices()
+        // [중요] 여기서 true가 되면 LifesaiverApp이 렌더링됨
+        // LifesaiverApp 내부에서 닉네임 유무에 따라 '정보 입력' vs '대기 화면' 분기 처리
+        isReady = true
+    }
+
     private fun refreshServices() {
         val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         val isVoiceOn = prefs.getBoolean("voice_detection", false)
         val isShockOn = prefs.getBoolean("shock_detection", false)
 
-        // 음성 감지 서비스
         if (isVoiceOn) {
-            // 마이크 권한이 있을 때만 안전하게 실행
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 startServiceSafe(VoiceService::class.java)
             }
@@ -217,7 +267,6 @@ class MainActivity : ComponentActivity() {
             stopService(Intent(this, VoiceService::class.java))
         }
 
-        // 충격 감지 서비스
         if (isShockOn) {
             startServiceSafe(SensorService::class.java)
         } else {
@@ -234,8 +283,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // --- [통합 권한 로직 끝] ---
-
     override fun onDestroy() {
         if (isFinishing) {
             val intent = Intent(this, RescueService::class.java).apply {
@@ -245,5 +292,4 @@ class MainActivity : ComponentActivity() {
         }
         super.onDestroy()
     }
-
 }
