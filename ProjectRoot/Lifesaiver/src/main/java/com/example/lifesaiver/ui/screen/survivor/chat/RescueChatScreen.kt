@@ -67,11 +67,11 @@ fun RescueChatScreen(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Spacer(modifier = Modifier.height(scaledDp(4, scale)))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale), vertical = scaledDp(8, scale))
+                .padding(horizontal = scaledDp(18, scale), vertical = scaledDp(6, scale))
         ) {
             // 좌측: 이전 버튼
             SecondaryButton(
@@ -85,7 +85,7 @@ fun RescueChatScreen(
             Text(
                 text = roomTitle,
                 color = AppColors.White,
-                fontSize = scaledSp(14, scale),
+                fontSize = scaledSp(13, scale),
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center)
             )
@@ -98,18 +98,18 @@ fun RescueChatScreen(
                 Text(
                     text = "인원 ${participantCount}명",
                     color = AppColors.Green,
-                    fontSize = scaledSp(12, scale)
+                    fontSize = scaledSp(11, scale)
                 )
                 Box(
                     modifier = Modifier
                         .background(AppColors.Gray700, shape = RoundedCornerShape(scaledDp(12, scale)))
                         .clickable { showSignatureLog = true }
-                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                        .padding(horizontal = scaledDp(8, scale), vertical = scaledDp(4, scale))
                 ) {
                     Text(
                         text = "로그",
                         color = AppColors.White,
-                        fontSize = scaledSp(10, scale),
+                        fontSize = scaledSp(9, scale),
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -117,12 +117,12 @@ fun RescueChatScreen(
                     modifier = Modifier
                         .background(AppColors.Gray700, shape = RoundedCornerShape(scaledDp(12, scale)))
                         .clickable { showDbLog = true }
-                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                        .padding(horizontal = scaledDp(8, scale), vertical = scaledDp(4, scale))
                 ) {
                     Text(
                         text = "DB 로그",
                         color = AppColors.White,
-                        fontSize = scaledSp(10, scale),
+                        fontSize = scaledSp(9, scale),
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -130,19 +130,19 @@ fun RescueChatScreen(
                     modifier = Modifier
                         .background(AppColors.Gray700, shape = RoundedCornerShape(scaledDp(12, scale)))
                         .clickable { onSendProfileTest() }
-                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                        .padding(horizontal = scaledDp(8, scale), vertical = scaledDp(4, scale))
                 ) {
                     Text(
                         text = "TLV 전송",
                         color = AppColors.White,
-                        fontSize = scaledSp(10, scale),
+                        fontSize = scaledSp(9, scale),
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Spacer(modifier = Modifier.height(scaledDp(4, scale)))
         AutoScrollChatList(
             messages = messages,
             modifier = Modifier
@@ -150,8 +150,8 @@ fun RescueChatScreen(
                 .weight(1f),
             listModifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(24, scale)),
-            verticalSpacing = scaledDp(10, scale)
+                .padding(horizontal = scaledDp(18, scale)),
+            verticalSpacing = scaledDp(8, scale)
         ) { message ->
             MessageBubble(message = message)
         }
@@ -159,7 +159,7 @@ fun RescueChatScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = scaledDp(20, scale), vertical = scaledDp(16, scale))
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale))
         ) {
             Row(
                 modifier = Modifier
@@ -168,7 +168,7 @@ fun RescueChatScreen(
                         color = AppColors.Gray800,
                         shape = RoundedCornerShape(scaledDp(28, scale))
                     )
-                    .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale)),
+                    .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale)),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
             ) {
@@ -176,12 +176,12 @@ fun RescueChatScreen(
                     value = inputValue,
                     onValueChange = onInputChange,
                     placeholder = {
-                        Text("메세지 입력...", color = AppColors.Gray500, fontSize = scaledSp(12, scale))
+                        Text("메세지 입력...", color = AppColors.Gray500, fontSize = scaledSp(11, scale))
                     },
                     modifier = Modifier.weight(1f),
                     textStyle = androidx.compose.ui.text.TextStyle(
                         color = AppColors.White,
-                        fontSize = scaledSp(12, scale)
+                        fontSize = scaledSp(11, scale)
                     ),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = AppColors.Gray800,
@@ -198,7 +198,7 @@ fun RescueChatScreen(
                 Box(
                     modifier = Modifier
                         .background(AppColors.GreenSoft, shape = RoundedCornerShape(scaledDp(20, scale)))
-                        .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(10, scale))
+                        .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
                         .then(
                             if (inputValue.isNotBlank()) {
                                 Modifier
@@ -213,7 +213,7 @@ fun RescueChatScreen(
                     Text(
                         text = "전송",
                         color = AppColors.Green,
-                        fontSize = scaledSp(12, scale),
+                        fontSize = scaledSp(11, scale),
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.align(Alignment.Center)
                     )
@@ -260,9 +260,9 @@ private fun MessageBubble(message: ChatMessage) {
                 Box(
                     modifier = Modifier
                         .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
-                        .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(8, scale))
+                        .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(7, scale))
                 ) {
-                    Text(text = message.text, color = textColor, fontSize = scaledSp(12, scale))
+                    Text(text = message.text, color = textColor, fontSize = scaledSp(11, scale))
                 }
             }
             if (pathLabel != null) {
@@ -270,7 +270,7 @@ private fun MessageBubble(message: ChatMessage) {
                 Text(
                     text = "path=$pathLabel",
                     color = AppColors.Gray500,
-                    fontSize = scaledSp(10, scale)
+                    fontSize = scaledSp(9, scale)
                 )
             }
         }
@@ -337,8 +337,8 @@ private fun AudioMessageBubble(path: String, isMine: Boolean) {
     Box(
         modifier = Modifier
             .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
-            .padding(horizontal = scaledDp(14, scale), vertical = scaledDp(10, scale))
-            .width(scaledDp(220, scale))
+            .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
+            .width(scaledDp(200, scale))
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(scaledDp(8, scale))) {
             Row(
