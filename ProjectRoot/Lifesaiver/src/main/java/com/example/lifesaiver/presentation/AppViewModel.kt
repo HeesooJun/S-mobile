@@ -146,7 +146,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = getApplication<Application>()
     private val forcePcmCall = true
-    private val wifiAwareEnabled = true
+    private val wifiAwareEnabled = false
 
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -1230,7 +1230,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun isWifiAwareSupportedLocally(): Boolean {
         if (!wifiAwareEnabled) {
-            wifiAwareRanger.stop()
             return false
         }
         val supported = isLocalWifiAwareSupported()
@@ -1511,7 +1510,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
-        wifiAwareRanger.stop()
+        if (wifiAwareEnabled) {
+            wifiAwareRanger.stop()
+        }
         wifiDirectRanger.stop()
         announceJob?.cancel()
         meshCleanupJob?.cancel()
