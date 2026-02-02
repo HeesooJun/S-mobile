@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
@@ -23,12 +24,13 @@ import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.ptt.PttActionType
 import com.example.lifesaiver.ui.components.ptt.PttActionsBlock
-import com.example.lifesaiver.ui.components.ptt.PttHeroSection
 import com.example.lifesaiver.ui.components.ptt.PttMeshOverlay
 import com.example.lifesaiver.ui.components.ptt.PttTopBar
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
+import com.example.lifesaiver.ui.theme.scaledSp
+import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -46,9 +48,6 @@ fun PTTLinkScreen(
     meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
-    isMicOn: Boolean,
-    onMicPress: () -> Unit,
-    onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onProfile: () -> Unit,
@@ -114,15 +113,14 @@ fun PTTLinkScreen(
                     .offset(y = scaledDp(16, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                PttHeroSection(
-                    isMicOn = isMicOn,
-                    isLinkActive = isLinkActive,
-                    statusLabel = linkStatusLabel,
-                    onMicPress = onMicPress,
-                    onMicRelease = onMicRelease
+                Text(
+                    text = linkStatusLabel,
+                    color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
+                    fontSize = scaledSp(16, scale),
+                    fontWeight = FontWeight.SemiBold
                 )
 
-                Spacer(modifier = Modifier.height(scaledDp(64, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
 
                 PttActionsBlock(
                     expandedAction = expandedAction,
