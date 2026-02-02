@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
@@ -31,6 +33,8 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -62,13 +66,6 @@ fun PTTLinkScreen(
 
     val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
     val displayConnectedCount = meshDisplayCount
-    val hasMeshPeers = meshDisplayCount > 0
-    val isLinkActive = isConnected || hasMeshPeers
-    val linkStatusLabel = when {
-        hasMeshPeers -> "메쉬 연결됨"
-        isConnected -> "구조자 연결됨"
-        else -> "구조자 연결 대기 중"
-    }
 
     val meshGraphState = remember(meshGraphSnapshot, myPeerId, myNickname, peerNicknames) {
         buildPttMeshGraphState(
@@ -110,21 +107,30 @@ fun PTTLinkScreen(
                     .align(Alignment.Center)
                     .fillMaxWidth()
                     .padding(horizontal = scaledDp(32, scale))
-                    .offset(y = scaledDp(16, scale)),
+                    .offset(y = scaledDp(-18, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = linkStatusLabel,
-                    color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
+                    text = "생존자 네트워크 형성 완료",
+                    color = AppColors.Green,
                     fontSize = scaledSp(16, scale),
                     fontWeight = FontWeight.SemiBold
                 )
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                Text(
+                    text = "구조자 연결 시 자동으로 알림 후 연결화면으로 전환됩니다.",
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Medium
+                )
 
-                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(24, scale)))
 
                 PttActionsBlock(
                     expandedAction = expandedAction,
-                    displayConnectedCount = displayConnectedCount,
+                    batteryLevel = batteryLevel,
+                    survivorCount = displayConnectedCount,
+                    isPowerSaving = isPowerSaving,
                     showDoubleTapHint = showDoubleTapHint,
                     onPowerClick = {
                         setPowerSaving(!isPowerSaving)
@@ -142,7 +148,30 @@ fun PTTLinkScreen(
                         expandedAction = null
                         showMeshMap = true
                     },
-                    modifier = Modifier.offset(y = scaledDp(24, scale))
+                    modifier = Modifier.offset(y = scaledDp(12, scale))
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = scaledDp(86, scale)),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .width(scaledDp(28, scale))
+                        .height(scaledDp(28, scale)),
+                    color = AppColors.Green,
+                    strokeWidth = scaledDp(4, scale)
+                )
+                Spacer(modifier = Modifier.width(scaledDp(10, scale)))
+                Text(
+                    text = "구조자 연결 요청 대기중",
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Medium
                 )
             }
 
