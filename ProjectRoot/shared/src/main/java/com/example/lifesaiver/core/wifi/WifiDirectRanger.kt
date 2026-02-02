@@ -304,8 +304,7 @@ class WifiDirectRanger(private val context: Context) {
         val address = peerAddress
         val portOverride = peerPort
         try {
-            val isConnected = currentSocket.isConnected
-            if (!isConnected && (address == null || portOverride == null)) {
+            if (address == null || portOverride == null) {
                 _debugStats.update { stats ->
                     stats.copy(
                         sendFailCount = stats.sendFailCount + 1,
@@ -315,17 +314,25 @@ class WifiDirectRanger(private val context: Context) {
                 }
                 return
             }
+            if (currentSocket.isClosed) {
+                _debugStats.update { stats ->
+                    stats.copy(
+                        sendFailCount = stats.sendFailCount + 1,
+                        lastSendAt = System.currentTimeMillis(),
+                        lastSendError = "socket_closed"
+                    )
+                }
+                return
+            }
+            val targetAddress = address
+            val targetPort = portOverride
             var offset = 0
             var chunks = 0
             while (offset < data.size) {
                 val end = minOf(offset + maxUdpPayload, data.size)
                 val chunk =
                     if (offset == 0 && end == data.size) data else data.copyOfRange(offset, end)
-                val packet = if (isConnected) {
-                    DatagramPacket(chunk, chunk.size)
-                } else {
-                    DatagramPacket(chunk, chunk.size, address, portOverride!!)
-                }
+                val packet = DatagramPacket(chunk, chunk.size, targetAddress, targetPort)
                 currentSocket.send(packet)
                 chunks++
                 _debugStats.update { stats ->
@@ -339,7 +346,7 @@ class WifiDirectRanger(private val context: Context) {
                 }
                 offset = end
             }
-            maybeLogNetSend(data.size, chunks, address, portOverride, isConnected)
+            maybeLogNetSend(data.size, chunks, targetAddress, targetPort, routeReady = true)
         } catch (e: Exception) {
             Log.e("WifiDirect", "Send error", e)
             _debugStats.update { stats ->
@@ -654,14 +661,14 @@ class WifiDirectRanger(private val context: Context) {
         chunks: Int,
         address: InetAddress?,
         port: Int?,
-        isConnected: Boolean
+        routeReady: Boolean
     ) {
         val now = System.currentTimeMillis()
         if (!shouldLog(now, lastNetSendLogAt)) return
         lastNetSendLogAt = now
         Log.d(
             "NetPipe",
-            "Direct SEND total=$totalSize chunks=$chunks connected=$isConnected peer=${address?.hostAddress}:${port ?: -1}"
+            "Direct SEND total=$totalSize chunks=$chunks routeReady=$routeReady peer=${address?.hostAddress}:${port ?: -1}"
         )
     }
 
@@ -800,16 +807,20 @@ class WifiDirectRanger(private val context: Context) {
     }
 
     private fun sendHello() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            ioExecutor.execute { sendHelloInternal() }
+            return
+        }
+        sendHelloInternal()
+    }
+
+    private fun sendHelloInternal() {
         val currentSocket = socket ?: return
         try {
+            val targetAddress = peerAddress ?: return
+            val targetPort = peerPort ?: port
             val payload = byteArrayOf(helloByte)
-            val packet = if (currentSocket.isConnected) {
-                DatagramPacket(payload, payload.size)
-            } else {
-                val targetAddress = peerAddress ?: return
-                val targetPort = peerPort ?: port
-                DatagramPacket(payload, payload.size, targetAddress, targetPort)
-            }
+            val packet = DatagramPacket(payload, payload.size, targetAddress, targetPort)
             currentSocket.send(packet)
         } catch (e: Exception) {
             Log.e("WifiDirect", "Hello send error", e)
