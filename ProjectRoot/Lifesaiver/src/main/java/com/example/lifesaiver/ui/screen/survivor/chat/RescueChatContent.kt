@@ -52,6 +52,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private const val AUTO_RECORDING_DURATION_MS = 9000L
+
 @Composable
 fun RescueChatContent(
     roomTitle: String,
@@ -220,7 +222,7 @@ fun RescueChatContent(
                                     } else {
                                         currentRecordingJob = coroutineScope.launch {
                                             onMicPress()
-                                            delay(9000)
+                                            delay(AUTO_RECORDING_DURATION_MS)
                                             onMicRelease()
                                             currentRecordingJob = null
                                         }
