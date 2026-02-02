@@ -95,7 +95,7 @@ fun SettingsScreen(
 @Composable
 private fun HeaderSection(scale: Float, onBack: () -> Unit) {
     Box(modifier = Modifier.fillMaxWidth().padding(top = scaledDp(40, scale), bottom = scaledDp(20, scale))) {
-        Icon(painter = painterResource(id = R.drawable.ic_back), contentDescription = "Back", tint = ColorTextMain, modifier = Modifier.size(scaledDp(24, scale)).align(Alignment.CenterStart).clickable { onBack() })
+        Icon(painter = painterResource(id = R.drawable.ic_common_back), contentDescription = "Back", tint = ColorTextMain, modifier = Modifier.size(scaledDp(24, scale)).align(Alignment.CenterStart).clickable { onBack() })
         Text(text = "설정", color = ColorTextMain, fontSize = scaledSp(20, scale), fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
     }
 }
@@ -105,7 +105,7 @@ private fun UserInfoCard(scale: Float, name: String, gender: String, birthDate: 
     Column(modifier = Modifier.fillMaxWidth().background(ColorCard, RoundedCornerShape(scaledDp(13, scale))).padding(horizontal = scaledDp(16, scale), vertical = scaledDp(20, scale))) {
         Box(modifier = Modifier.fillMaxWidth().padding(bottom = scaledDp(20, scale))) {
             Text(text = "사용자 정보", color = ColorTextMain, fontSize = scaledSp(16, scale), fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
-            Icon(painter = painterResource(id = R.drawable.ic_modify), contentDescription = "Edit", tint = ColorTextMain, modifier = Modifier.size(scaledDp(20, scale)).align(Alignment.CenterEnd).clickable { onEditClick() })
+            Icon(painter = painterResource(id = R.drawable.ic_settings_edit_profile), contentDescription = "Edit", tint = ColorTextMain, modifier = Modifier.size(scaledDp(20, scale)).align(Alignment.CenterEnd).clickable { onEditClick() })
         }
         InfoRow(scale, "이름", name, true)
         InfoRow(scale, "성별", gender, true)

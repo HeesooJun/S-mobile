@@ -1,6 +1,5 @@
 ﻿package com.example.lifesaiver.ui.navigation
 
-import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -32,11 +31,6 @@ import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
-import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
-import com.example.lifesaiver.ui.screen.rescuer.db.RescuerSurvivorDbScreen
-import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
-import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
-import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
 import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
@@ -85,7 +79,6 @@ fun AppNavHost(
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val context = LocalContext.current
-    val activity = context as? Activity
 
     // [핵심 수정] Activity에 연결된 AppViewModel을 여기서 직접 가져옴
     // 이렇게 하면 LifesaiverApp 코드를 수정하지 않아도 데이터를 공유할 수 있음
@@ -157,25 +150,14 @@ fun AppNavHost(
     LaunchedEffect(isConnected, isRescueSignalActive, backStackEntry) {
         val currentRoute = backStackEntry?.destination?.route
         if (isRescueSignalActive && !isConnected) {
-            val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
-                currentRoute == AppRoute.RescuerPTT.route ||
-                currentRoute == AppRoute.RescuerChat.route ||
-                currentRoute == AppRoute.RescuerEmergency.route ||
-                currentRoute == AppRoute.RescuerSurvivorDb.route
-            val targetRoute = if (isRescuerRoute) {
-                AppRoute.RescuerEmergency.route
-            } else {
-                AppRoute.SurvivorEmergency.route
-            }
+            val targetRoute = AppRoute.SurvivorEmergency.route
             if (!pendingSosNavigation) {
                 pendingSosNavigation = true
                 sosStartedAt = System.currentTimeMillis()
             }
             if (currentRoute != targetRoute) {
                 navController.navigate(targetRoute) {
-                    if (currentRoute == AppRoute.SurvivorPTT.route ||
-                        currentRoute == AppRoute.RescuerPTT.route
-                    ) {
+                    if (currentRoute == AppRoute.SurvivorPTT.route) {
                         popUpTo(currentRoute) { inclusive = true }
                     } else {
                         launchSingleTop = true
@@ -317,78 +299,6 @@ fun AppNavHost(
                     chatViewModel.consumeSend()?.let { text -> onSendMessage(text) }
                 }
             )
-        }
-
-        composable(AppRoute.RescuerStandby.route) {
-            RescuerStandbyScreen(
-                batteryLevel = batteryLevel,
-                isConnected = isConnected,
-                connectedCount = connectedCount,
-                onPrev = { activity?.finish() },
-                onGoPTT = { navController.navigate(AppRoute.RescuerPTT.route) },
-                onSos = { navController.navigate(AppRoute.RescuerEmergency.route) }
-            )
-        }
-
-        composable(AppRoute.RescuerPTT.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
-            }
-            RescuerPTTLinkScreen(
-                batteryLevel = batteryLevel,
-                connectedCount = connectedCount,
-                meshPeerCount = meshPeerCount,
-                isConnected = isConnected,
-                isMicOn = isMicOn,
-                onMicPress = onMicPress,
-                onMicRelease = onMicRelease,
-                onBack = { navController.popBackStack() },
-                onDisconnect = {
-                    onDisconnect()
-                    navController.navigate(AppRoute.RescuerStandby.route)
-                },
-                onChat = { navController.navigate(AppRoute.RescuerChat.route) },
-                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) },
-                onPanicClear = onClearDeviceMonitoring
-            )
-        }
-
-        composable(AppRoute.RescuerSurvivorDb.route) {
-            RescuerSurvivorDbScreen(
-                survivors = emptyList(),
-                onBack = { navController.popBackStack() }
-            )
-        }
-
-        composable(AppRoute.RescuerChat.route) {
-            RescuerChatScreen(
-                roomTitle = "전체 채팅",
-                meshPeerCount = meshPeerCount,
-                messages = messages,
-                signatureLogs = signatureLogs,
-                profileLogs = profileLogs,
-                onClearSignatureLogs = onClearSignatureLogs,
-                onClearProfileLogs = onClearProfileLogs,
-                onSendProfileTest = onSendProfileTest,
-                onPrev = { navController.popBackStack() },
-                onSend = onSendMessage
-            )
-        }
-
-        composable(AppRoute.RescuerEmergency.route) {
-            val stopAndBack = {
-                onStopAutoConnect()
-                onStopRescueSignal()
-                navController.popBackStack()
-                Unit
-            }
-            RescuerEmergencyBeaconScreen(
-                batteryLevel = batteryLevel,
-                onPrev = stopAndBack,
-            )
-            BackHandler {
-                stopAndBack()
-            }
         }
     }
 }

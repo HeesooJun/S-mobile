@@ -19,11 +19,11 @@ fun BatteryIndicator(
     val scale = LocalAppScale.current
     val clamped = level.coerceIn(0, 100)
     val iconRes = when {
-        clamped >= 100 -> R.drawable.battery_segment_100
-        clamped >= 75 -> R.drawable.battery_segment_75
-        clamped >= 50 -> R.drawable.battery_segment_50
-        clamped >= 25 -> R.drawable.battery_segment_25
-        else -> R.drawable.battery_segment_0
+        clamped >= 100 -> R.drawable.ic_common_battery_segment_100
+        clamped >= 75 -> R.drawable.ic_common_battery_segment_75
+        clamped >= 50 -> R.drawable.ic_common_battery_segment_50
+        clamped >= 25 -> R.drawable.ic_common_battery_segment_25
+        else -> R.drawable.ic_common_battery_segment_0
     }
     val size = scaledDp(110, scale)
 
