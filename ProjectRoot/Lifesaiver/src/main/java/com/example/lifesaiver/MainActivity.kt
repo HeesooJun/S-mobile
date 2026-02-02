@@ -147,7 +147,11 @@ class MainActivity : ComponentActivity() {
                         onPulseRescueSignal = { viewModel.pulseRescueSignal() },
                         onClearSignatureLogs = { viewModel.clearSignatureLogs() },
                         onClearProfileLogs = { viewModel.clearProfileLogs() },
-                        onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() }
+                        onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() },
+                        isVoiceDetectionEnabled = uiState.isVoiceDetectionEnabled,
+                        isShockDetectionEnabled = uiState.isShockDetectionEnabled,
+                        onSetVoiceDetection = { enabled -> viewModel.setVoiceDetection(enabled) },
+                        onSetShockDetection = { enabled -> viewModel.setShockDetection(enabled) }
                     )
                 } else {
                     // [로딩 화면] 체크하는 동안 검은 화면에 로딩바 (이 위로 팝업들이 뜸)
