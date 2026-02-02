@@ -51,7 +51,6 @@ fun PTTLinkScreen(
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
-    onChat: () -> Unit,
     onProfile: () -> Unit,
     onPanicClear: () -> Unit,
     onSettings: () -> Unit
@@ -140,10 +139,6 @@ fun PTTLinkScreen(
                         } else {
                             expandedAction = PttActionType.Disconnect
                         }
-                    },
-                    onChatClick = {
-                        expandedAction = null
-                        onChat()
                     },
                     onUsersClick = {
                         expandedAction = null

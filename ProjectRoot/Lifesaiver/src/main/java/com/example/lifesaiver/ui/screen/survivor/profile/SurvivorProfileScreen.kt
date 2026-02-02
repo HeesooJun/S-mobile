@@ -8,8 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -75,12 +73,6 @@ fun SurvivorProfileScreen(
                 .height(scaledDp(56, scale)),
             contentAlignment = Alignment.Center
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.align(Alignment.CenterStart).padding(start = scaledDp(16, scale))
-            ) {
-                Icon(Icons.Default.ArrowBack, contentDescription = null, tint = AppColors.White)
-            }
             Text(
                 text = "사용자 정보",
                 color = AppColors.White,

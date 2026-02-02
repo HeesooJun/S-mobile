@@ -39,7 +39,6 @@ internal fun PttActionsBlock(
     showDoubleTapHint: Boolean,
     onPowerClick: () -> Unit,
     onDisconnectClick: () -> Unit,
-    onChatClick: () -> Unit,
     onUsersClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -67,13 +66,6 @@ internal fun PttActionsBlock(
                 isExpanded = expandedAction == PttActionType.Disconnect,
                 iconSizeOverride = scaledDp(44, scale),
                 onClick = onDisconnectClick
-            )
-            PttExpandableAction(
-                iconRes = R.drawable.ic_ptt_chat,
-                label = "채팅",
-                isExpanded = expandedAction == PttActionType.Chat,
-                iconSizeOverride = scaledDp(38, scale),
-                onClick = onChatClick
             )
             PttExpandableAction(
                 iconRes = R.drawable.ic_ptt_connection_filled,
