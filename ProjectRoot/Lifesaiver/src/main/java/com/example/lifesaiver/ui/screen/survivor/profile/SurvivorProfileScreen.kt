@@ -6,41 +6,16 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -49,8 +24,6 @@ import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.ui.components.PrimaryButton
 import com.example.lifesaiver.ui.components.PrimaryButtonVariant
 import com.example.lifesaiver.ui.components.ScreenScaffold
-import com.example.lifesaiver.ui.components.SecondaryButton
-import com.example.lifesaiver.ui.components.SecondaryButtonVariant
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
@@ -74,270 +47,168 @@ fun SurvivorProfileScreen(
     val scope = rememberCoroutineScope()
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
 
+    // 기본값 "홍길동" 로직 삭제됨 (사용자 피드백 반영)
     var name by rememberSaveable { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("") }
     var birthDate by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
 
+    // 데이터 로드 시점의 동기화만 유지
     LaunchedEffect(profileState) {
         name = profileState.name
         gender = profileState.gender
         birthDate = profileState.birthDate
         notes = profileState.notes
-
-        if (!profileState.isComplete) {
-            name = name.ifBlank { "홍길동" }
-            gender = gender.ifBlank { "남성" }
-            birthDate = birthDate.ifBlank { "1990-01-01" }
-        }
     }
 
-    val birthDateValid = isBirthDateValid(birthDate)
-    var showBirthDateError by rememberSaveable { mutableStateOf(false) }
-    val isComplete = name.isNotBlank() && gender.isNotBlank() && birthDateValid
+    val isComplete = name.isNotBlank() && gender.isNotBlank() && isBirthDateValid(birthDate)
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
 
-    val formModifier = Modifier
-        .fillMaxWidth(0.85f)
-        .widthIn(max = scaledDp(360, scale))
-
-    if (showDatePicker) {
-        val initialMillis = parseDateToMillis(birthDate)
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                Text(
-                    text = "확인",
-                    color = AppColors.Green,
-                    modifier = Modifier
-                        .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
-                        .clickable {
-                            val millis = datePickerState.selectedDateMillis
-                            if (millis != null) {
-                                val formatted = formatDate(millis)
-                                birthDate = formatted
-                                showBirthDateError = false
-                                showDatePicker = false
-                            } else {
-                                showBirthDateError = true
-                            }
-                        }
-                )
-            },
-            dismissButton = {
-                Text(
-                    text = "취소",
-                    color = AppColors.Gray400,
-                    modifier = Modifier
-                        .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
-                        .clickable { showDatePicker = false }
-                )
-            }
-        ) {
-            DatePicker(state = datePickerState)
-        }
-    }
-
     ScreenScaffold(
-        gradient = listOf(AppColors.Gray900, AppColors.Black),
+        gradient = listOf(AppColors.Black, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
-        Row(
+        // 1. 헤더 영역 (아이콘 + 사용자 정보)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(scaledDp(56, scale))
-                .padding(horizontal = scaledDp(24, scale)),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .height(scaledDp(56, scale)),
+            contentAlignment = Alignment.Center
         ) {
-            SecondaryButton(
-                label = "뒤로",
-                variant = SecondaryButtonVariant.Gray,
-                onClick = onBack
-            )
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = scaledDp(16, scale))
+            ) {
+                Icon(Icons.Default.ArrowBack, contentDescription = null, tint = AppColors.White)
+            }
             Text(
-                text = "생존자 정보",
+                text = "사용자 정보",
                 color = AppColors.White,
-                fontSize = scaledSp(16, scale),
+                fontSize = scaledSp(18, scale),
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.width(scaledDp(56, scale)))
         }
 
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = scaledDp(35, scale)),
-            verticalArrangement = Arrangement.Top,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .fillMaxSize()
+                .padding(horizontal = scaledDp(24, scale))
         ) {
-            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
-            Column(
-                modifier = formModifier,
-                verticalArrangement = Arrangement.spacedBy(scaledDp(18, scale))
-            ) {
-                ProfileInputField(
-                    label = "이름",
-                    value = name,
-                    placeholder = "이름 입력",
-                    modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { name = it }
-                )
-                ProfileExposedSelectField(
-                    label = "성별",
-                    value = gender,
-                    placeholder = "선택",
-                    options = listOf("남성", "여성"),
-                    modifier = Modifier.fillMaxWidth(),
-                    onSelected = { gender = it }
-                )
-                ProfileDateField(
-                    label = "생년월일",
-                    value = birthDate,
-                    placeholder = "YYYY-MM-DD",
-                    isError = showBirthDateError,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        showBirthDateError = false
-                        showDatePicker = true
-                    }
-                )
-                ProfileInputField(
-                    label = "특이사항 (선택)",
-                    value = notes,
-                    placeholder = "알레르기, 지병 등",
-                    modifier = Modifier.fillMaxWidth(),
-                    onValueChange = { notes = it }
-                )
-            }
+            Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+
+            // 2. 필수 입력 섹션
+            Text("필수", color = Color(0xFFFF5252), fontSize = scaledSp(14, scale), fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(scaledDp(16, scale)))
-        }
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    start = scaledDp(24, scale),
-                    end = scaledDp(24, scale),
-                    bottom = scaledDp(24, scale)
-                )
-        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(scaledDp(20, scale))) {
+                ProfileFieldWrapper("이름") {
+                    ProfileInputField(name, "이름 입력") { name = it }
+                }
+                ProfileFieldWrapper("성별") {
+                    ProfileExposedSelectField(gender, "성별 선택", listOf("남성", "여성")) { gender = it }
+                }
+                ProfileFieldWrapper("생년월일") {
+                    ProfileDateField(birthDate, "YYYY-MM-DD") { showDatePicker = true }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(scaledDp(32, scale)))
+
+            // 3. 선택 입력 섹션
+            Text("선택", color = AppColors.Gray400, fontSize = scaledSp(14, scale), fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+
+            ProfileFieldWrapper("특이사항") {
+                ProfileInputField(notes, "알레르기, 지병 등 (선택사항)") { notes = it }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // 4. 저장 버튼
             PrimaryButton(
                 label = "저장",
                 variant = if (isComplete) PrimaryButtonVariant.Red else PrimaryButtonVariant.Gray,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(bottom = scaledDp(24, scale)),
                 onClick = {
                     if (isComplete) {
                         scope.launch {
-                            profileStore.saveProfile(
-                                SurvivorProfile(
-                                    name = name,
-                                    gender = gender,
-                                    birthDate = birthDate,
-                                    notes = notes
-                                )
-                            )
-                            onSendProfileUpdate(
-                                SurvivorProfile(
-                                    name = name,
-                                    gender = gender,
-                                    birthDate = birthDate,
-                                    notes = notes
-                                )
-                            )
+                            val profile = SurvivorProfile(name, gender, birthDate, notes)
+                            profileStore.saveProfile(profile)
+                            onSendProfileUpdate(profile)
                             Toast.makeText(context, "저장 완료", Toast.LENGTH_SHORT).show()
                             delay(300)
                             onSaved()
                         }
-                    } else if (!birthDateValid) {
-                        showBirthDateError = true
                     }
                 }
             )
         }
     }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = parseDateToMillis(birthDate))
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { birthDate = formatDate(it) }
+                    showDatePicker = false
+                }) { Text("확인", color = AppColors.Green) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("취소", color = AppColors.Gray400) }
+            }
+        ) { DatePicker(state = datePickerState) }
+    }
 }
 
 @Composable
-private fun ProfileInputField(
-    label: String,
-    value: String,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-    onValueChange: (String) -> Unit
-) {
+private fun ProfileFieldWrapper(label: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        val scale = LocalAppScale.current
+        Text(
+            text = label,
+            color = AppColors.Gray400,
+            fontSize = scaledSp(12, scale),
+            modifier = Modifier.padding(bottom = scaledDp(8, scale))
+        )
+        content()
+    }
+}
+
+@Composable
+private fun ProfileInputField(value: String, placeholder: String, onValueChange: (String) -> Unit) {
     val scale = LocalAppScale.current
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier,
-        label = { Text(text = label, color = AppColors.Gray500) },
-        placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
-        textStyle = TextStyle(
-            color = AppColors.White,
-            fontSize = scaledSp(12, scale)
-        ),
-        singleLine = true,
+        value = value, onValueChange = onValueChange, modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text(placeholder, color = AppColors.Gray500) },
+        textStyle = TextStyle(color = AppColors.White, fontSize = scaledSp(16, scale)),
+        shape = RoundedCornerShape(scaledDp(12, scale)),
         colors = profileFieldColors()
     )
 }
 
 @Composable
-private fun ProfileExposedSelectField(
-    label: String,
-    value: String,
-    placeholder: String,
-    options: List<String>,
-    modifier: Modifier = Modifier,
-    onSelected: (String) -> Unit
-) {
-    val scale = LocalAppScale.current
+private fun ProfileExposedSelectField(value: String, placeholder: String, options: List<String>, onSelected: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
+    ExposedDropdownMenuBox(expanded, { expanded = !expanded }) {
+        val scale = LocalAppScale.current
         OutlinedTextField(
-            value = value,
-            onValueChange = {},
-            modifier = modifier.menuAnchor(),
-            label = { Text(text = label, color = AppColors.Gray500) },
-            placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
-            textStyle = TextStyle(
-                color = AppColors.White,
-                fontSize = scaledSp(12, scale)
-            ),
-            readOnly = true,
-            singleLine = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            value = value, onValueChange = {}, modifier = Modifier.fillMaxWidth().menuAnchor(),
+            placeholder = { Text(placeholder, color = AppColors.Gray500) }, readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            shape = RoundedCornerShape(scaledDp(12, scale)),
             colors = profileFieldColors()
         )
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .widthIn(min = scaledDp(180, scale))
-                .background(
-                    color = AppColors.Gray800,
-                    shape = RoundedCornerShape(scaledDp(14, scale))
-                )
+            modifier = Modifier.background(Color(0xFF2A2A2A))
         ) {
             options.forEach { option ->
                 DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = option,
-                            color = AppColors.White,
-                            fontSize = scaledSp(12, scale)
-                        )
-                    },
-                    onClick = {
-                        onSelected(option)
-                        expanded = false
-                    }
+                    text = { Text(option, color = AppColors.White) },
+                    onClick = { onSelected(option); expanded = false }
                 )
             }
         }
@@ -345,102 +216,38 @@ private fun ProfileExposedSelectField(
 }
 
 @Composable
-private fun ExposedDropdownMenu(
-    expanded: Boolean,
-    onDismissRequest: () -> Unit,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismissRequest,
-        modifier = modifier,
-        content = content
-    )
+private fun ProfileDateField(value: String, placeholder: String, onClick: () -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        val scale = LocalAppScale.current
+        OutlinedTextField(
+            value = value, onValueChange = {}, modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(placeholder, color = AppColors.Gray500) },
+            enabled = false,
+            shape = RoundedCornerShape(scaledDp(12, scale)),
+            colors = profileFieldColors()
+        )
+        Box(modifier = Modifier.matchParentSize().clickable(onClick = onClick))
+    }
 }
 
 @Composable
 private fun profileFieldColors() = TextFieldDefaults.colors(
-    focusedContainerColor = AppColors.Gray800,
-    unfocusedContainerColor = AppColors.Gray800,
-    disabledContainerColor = AppColors.Gray800,
-    focusedIndicatorColor = AppColors.Gray700,
-    unfocusedIndicatorColor = AppColors.Gray700,
-    disabledIndicatorColor = AppColors.Gray700,
-    cursorColor = AppColors.Green,
+    focusedContainerColor = Color(0xFF1E1E1E),
+    unfocusedContainerColor = Color(0xFF1E1E1E),
+    disabledContainerColor = Color(0xFF1E1E1E),
+    focusedIndicatorColor = Color.Transparent,
+    unfocusedIndicatorColor = Color.Transparent,
+    disabledIndicatorColor = Color.Transparent,
     focusedTextColor = AppColors.White,
     unfocusedTextColor = AppColors.White,
-    disabledTextColor = AppColors.White,
-    focusedLabelColor = AppColors.Gray400,
-    unfocusedLabelColor = AppColors.Gray500,
-    disabledLabelColor = AppColors.Gray500,
-    disabledPlaceholderColor = AppColors.Gray500
+    disabledTextColor = AppColors.White
 )
 
-@Composable
-private fun ProfileDateField(
-    label: String,
-    value: String,
-    placeholder: String,
-    isError: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val scale = LocalAppScale.current
-    val interactionSource = remember { MutableInteractionSource() }
+private fun formatDate(millis: Long): String =
+    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-    Box(modifier = modifier) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = {},
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(text = label, color = AppColors.Gray500) },
-            placeholder = { Text(text = placeholder, color = AppColors.Gray500) },
-            textStyle = TextStyle(
-                color = AppColors.White,
-                fontSize = scaledSp(12, scale)
-            ),
-            enabled = false,
-            isError = isError,
-            readOnly = true,
-            singleLine = true,
-            colors = profileFieldColors()
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null
-                ) { onClick() }
-        )
-    }
-}
+private fun parseDateToMillis(value: String): Long? =
+    try { LocalDate.parse(value).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() } catch (_: Exception) { null }
 
-private fun formatDate(millis: Long?): String {
-    if (millis == null) return ""
-    val date = Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .toLocalDate()
-    return DateTimeFormatter.ISO_LOCAL_DATE.format(date)
-}
-
-private fun parseDateToMillis(value: String): Long? {
-    return try {
-        if (value.isBlank()) return null
-        val localDate = LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE)
-        localDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-    } catch (_: Exception) {
-        null
-    }
-}
-
-private fun isBirthDateValid(value: String): Boolean {
-    if (value.isBlank()) return false
-    return try {
-        LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE)
-        true
-    } catch (_: Exception) {
-        false
-    }
-}
+private fun isBirthDateValid(value: String): Boolean =
+    try { LocalDate.parse(value); true } catch (_: Exception) { false }
