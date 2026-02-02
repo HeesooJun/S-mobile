@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
+import com.example.lifesaiver.core.log.ConnectionLog
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.ui.components.BatteryIndicator
@@ -91,13 +94,16 @@ fun PTTLinkScreen(
     onProfile: () -> Unit,
     onPanicClear: () -> Unit,
     onAcceptCall: () -> Unit = {},
-    onDeclineCall: () -> Unit = {}
+    onDeclineCall: () -> Unit = {},
+    onOpenUserList: (() -> Unit)? = null
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
+    var showDebugModal by remember { mutableStateOf(false) }
+    val connectionLogs by ConnectionLog.logs.collectAsState()
     val showActionLabelsAlways = true
     val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
     val displayConnectedCount = meshDisplayCount
@@ -111,6 +117,7 @@ fun PTTLinkScreen(
             peerNicknames = peerNicknames
         )
     }
+    val canShowMeshMap = onOpenUserList == null
 
     LaunchedEffect(expandedAction) {
         if (
@@ -147,6 +154,16 @@ fun PTTLinkScreen(
                     .align(Alignment.TopStart)
                     .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
                     .tripleClickable(onTripleClick = onPanicClear)
+            )
+            Text(
+                text = "디버그",
+                color = AppColors.Gray400,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = scaledDp(20, scale), top = scaledDp(16, scale))
+                    .clickable { showDebugModal = true }
             )
             Column(
                 modifier = Modifier
@@ -258,12 +275,18 @@ fun PTTLinkScreen(
                         )
                         ExpandableAction(
                             iconRes = R.drawable.connection_filled,
-                            label = "사용자 $displayConnectedCount",
+                            label = if (onOpenUserList == null) {
+                                "사용자 $displayConnectedCount"
+                            } else {
+                                "사용자 DB $displayConnectedCount"
+                            },
                             isExpanded = expandedAction == ActionType.Count,
                             iconSizeOverride = scaledDp(32, scale),
                             showLabelAlways = showActionLabelsAlways,
                             onClick = {
-                                if (expandedAction == ActionType.Count) {
+                                if (onOpenUserList != null) {
+                                    onOpenUserList()
+                                } else if (expandedAction == ActionType.Count) {
                                     setExpandedAction(null)
                                     showMeshMap = true
                                 } else {
@@ -322,7 +345,7 @@ fun PTTLinkScreen(
                 }
             }
 
-            if (showMeshMap) {
+            if (showMeshMap && canShowMeshMap) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -359,19 +382,93 @@ fun PTTLinkScreen(
                             color = AppColors.Gray400,
                             fontSize = scaledSp(12, scale)
                         )
-                        val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
-                        val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
-                        Text(
-                            text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(11, scale),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(10, scale)
-                        )
+                    }
+                }
+            }
+            if (showDebugModal) {
+                Dialog(onDismissRequest = { showDebugModal = false }) {
+                    Surface(
+                        color = AppColors.Gray900,
+                        shape = RoundedCornerShape(scaledDp(18, scale)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(24, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(scaledDp(18, scale)),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "디버그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(16, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+                            Text(
+                                text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(12, scale)
+                            )
+                            val callLabel = callPeerName?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                            val callStatus = if (isInCall) {
+                                if (isCallConnected) "연결됨$callLabel" else "연결 중$callLabel"
+                            } else {
+                                "대기"
+                            }
+                            Text(
+                                text = "통화 상태: $callStatus",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
+                            val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
+                            Text(
+                                text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+                            Text(
+                                text = "통신 로그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            val displayedLogs = connectionLogs.takeLast(12)
+                            if (displayedLogs.isEmpty()) {
+                                Text(
+                                    text = "로그 없음",
+                                    color = AppColors.Gray500,
+                                    fontSize = scaledSp(10, scale)
+                                )
+                            } else {
+                                displayedLogs.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = AppColors.Gray400,
+                                        fontSize = scaledSp(10, scale)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                            Text(
+                                text = "닫기",
+                                color = AppColors.Green,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .align(Alignment.End)
+                                    .clickable { showDebugModal = false }
+                            )
+                        }
                     }
                 }
             }
