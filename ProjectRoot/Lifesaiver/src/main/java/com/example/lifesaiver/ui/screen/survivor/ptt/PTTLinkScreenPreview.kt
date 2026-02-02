@@ -45,7 +45,6 @@ private fun PTTLinkScreenPreviewConnected() {
             onMicRelease = {},
             onBack = {},
             onDisconnect = {},
-            onChat = {},
             onProfile = {},
             onPanicClear = {},
             onSettings = {}
@@ -77,7 +76,6 @@ private fun PTTLinkScreenPreviewWaiting() {
             onMicRelease = {},
             onBack = {},
             onDisconnect = {},
-            onChat = {},
             onProfile = {},
             onPanicClear = {},
             onSettings = {}

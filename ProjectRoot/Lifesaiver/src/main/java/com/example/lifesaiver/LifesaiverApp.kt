@@ -62,7 +62,11 @@ fun LifesaiverApp(
     onPulseRescueSignal: () -> Unit,
     onClearSignatureLogs: () -> Unit,
     onClearProfileLogs: () -> Unit,
-    onClearDeviceMonitoring: () -> Unit
+    onClearDeviceMonitoring: () -> Unit,
+    isVoiceDetectionEnabled: Boolean,
+    isShockDetectionEnabled: Boolean,
+    onSetVoiceDetection: (Boolean) -> Unit,
+    onSetShockDetection: (Boolean) -> Unit
 ) {
     val scale = rememberAppScale()
 
@@ -152,6 +156,10 @@ fun LifesaiverApp(
                 onStopRescueSignal = onStopRescueSignal,
                 onPulseRescueSignal = onPulseRescueSignal,
                 onClearDeviceMonitoring = onClearDeviceMonitoring,
+                isVoiceDetectionEnabled = isVoiceDetectionEnabled,
+                isShockDetectionEnabled = isShockDetectionEnabled,
+                onSetVoiceDetection = onSetVoiceDetection,
+                onSetShockDetection = onSetShockDetection,
                 onRouteChanged = { route -> currentRoute = route }
             )
 

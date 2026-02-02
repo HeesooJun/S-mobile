@@ -251,14 +251,9 @@ fun StandbyStatusScreen(
                                 end = scaledDp(32, scale),
                                 bottom = scaledDp(24, scale)
                             ),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SecondaryButton(
-                            label = "이전",
-                            variant = SecondaryButtonVariant.Gray,
-                            onClick = onPrev
-                        )
                         SecondaryButton(
                             label = "내 정보",
                             variant = SecondaryButtonVariant.Gray,
