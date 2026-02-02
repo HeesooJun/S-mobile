@@ -32,7 +32,7 @@ fun MicButton(
 ) {
     val scale = LocalAppScale.current
     val contentColor = if (isActive) AppColors.Green else AppColors.Red
-    val micRes = if (isActive) R.drawable.ic_mic else R.drawable.ic_mic_red
+    val micRes = if (isActive) R.drawable.ic_common_mic_active else R.drawable.ic_common_mic_inactive
     val micSize = size ?: scaledDp(88, scale)
 
     Column(
