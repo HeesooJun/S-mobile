@@ -27,6 +27,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,7 +68,8 @@ fun RescuerSurvivorDbScreen(
     onSelectTarget: (SurvivorProfile) -> Unit = {},
     isLive: Boolean = true,
     activeSurvivor: SurvivorProfile? = null,
-    isInCall: Boolean = false
+    isInCall: Boolean = false,
+    callingPeerId: String? = null
 ) {
     val scale = LocalAppScale.current
 
@@ -79,6 +81,11 @@ fun RescuerSurvivorDbScreen(
 
     val liveLabel = if (isLive) "실시간" else "대기"
     val activeCallName = activeSurvivor?.name?.ifBlank { "생존자" }
+    val callingSurvivorName = survivors
+        .firstOrNull { it.peerId == callingPeerId }
+        ?.name
+        ?.ifBlank { "생존자" }
+        ?: "생존자"
 
     var query by rememberSaveable { mutableStateOf("") }
 
@@ -283,7 +290,58 @@ fun RescuerSurvivorDbScreen(
                                 peerRssiMap = peerRssiMap,
                                 isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
                                 onSelectTarget = onSelectTarget,
-                                onCallClick = onCallClick
+                                onCallClick = onCallClick,
+                                isCalling = survivor.peerId.isNotBlank() && survivor.peerId == callingPeerId,
+                                callButtonEnabled = callingPeerId == null || survivor.peerId == callingPeerId
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (callingPeerId != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        color = charcoal.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(scaledDp(20, scale)),
+                        border = BorderStroke(1.dp, border),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(28, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    horizontal = scaledDp(22, scale),
+                                    vertical = scaledDp(24, scale)
+                                ),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(
+                                color = neonGreen,
+                                strokeWidth = scaledDp(3, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(14, scale)))
+                            Text(
+                                text = "통화 연결 시도 중",
+                                color = Color.White,
+                                fontSize = scaledSp(15, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            Text(
+                                text = "${callingSurvivorName} · 최대 15초 대기",
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
@@ -304,7 +362,9 @@ private fun SurvivorCard(
     peerRssiMap: Map<String, Int>,
     isSelected: Boolean,
     onSelectTarget: (SurvivorProfile) -> Unit,
-    onCallClick: (SurvivorProfile) -> Unit
+    onCallClick: (SurvivorProfile) -> Unit,
+    isCalling: Boolean,
+    callButtonEnabled: Boolean
 ) {
     Surface(
         color = charcoal.copy(alpha = 0.80f),
@@ -389,26 +449,39 @@ private fun SurvivorCard(
             }
 
             Column(horizontalAlignment = Alignment.End) {
-                FilledIconButton(
-                    onClick = { onCallClick(survivor) },
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = neonGreen)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Call,
-                        contentDescription = "통화",
-                        tint = Color.Black
+                if (isCalling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(scaledDp(30, scale)),
+                        color = neonGreen,
+                        strokeWidth = scaledDp(2.6f, scale)
                     )
+                } else {
+                    FilledIconButton(
+                        onClick = { onCallClick(survivor) },
+                        enabled = callButtonEnabled,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = neonGreen,
+                            disabledContainerColor = neonGreen.copy(alpha = 0.32f),
+                            disabledContentColor = Color.Black.copy(alpha = 0.45f)
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Call,
+                            contentDescription = "통화",
+                            tint = Color.Black
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(neonGreen.copy(alpha = 0.10f))
+                        .background((if (isCalling) neonRed else neonGreen).copy(alpha = 0.10f))
                         .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(7, scale))
                 ) {
                     Text(
-                        text = "수신됨",
-                        color = neonGreen,
+                        text = if (isCalling) "연결 시도 중" else "수신됨",
+                        color = if (isCalling) neonRed else neonGreen,
                         fontSize = scaledSp(12, scale),
                         fontWeight = FontWeight.Bold
                     )

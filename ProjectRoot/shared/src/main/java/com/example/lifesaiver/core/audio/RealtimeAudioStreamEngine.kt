@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
@@ -94,7 +95,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private var lastDecodeSkipLogAt = 0L
     private var lastGateLogAt = 0L
     private val debugLogIntervalMs = 1000L
-    private val silenceGateEnabled = true
+    private val silenceGateEnabled = false
     private val silenceGateRmsThreshold = 3.0
     private val silenceGateWarmupFrames = 50
     private val transmitGain = 0.7
@@ -369,6 +370,9 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
             // 오디오 모드 원상복구
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                runCatching { audioManager.clearCommunicationDevice() }
+            }
             audioManager.isSpeakerphoneOn = false
             audioManager.mode = AudioManager.MODE_NORMAL
         }
@@ -451,14 +455,48 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
     private fun applyAudioModeAndRoute() {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = preferSpeakerphone
-        if (audioManager.isSpeakerphoneOn != preferSpeakerphone) {
-            Log.w("AudioEngine", "Speakerphone routing failed target=$preferSpeakerphone actual=${audioManager.isSpeakerphoneOn}")
+        // Some devices ignore direct transition to IN_COMMUNICATION unless mode is toggled.
+        runCatching { audioManager.mode = AudioManager.MODE_NORMAL }
+        runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
+        var speakerRouted = false
+        var communicationDeviceType: Int? = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val preferredType = if (preferSpeakerphone) {
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            } else {
+                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            }
+            val available = audioManager.availableCommunicationDevices
+            val preferredDevice = available.firstOrNull { it.type == preferredType }
+            val targetDevice = preferredDevice ?: available.firstOrNull()
+            if (targetDevice != null) {
+                runCatching { audioManager.setCommunicationDevice(targetDevice) }
+            } else {
+                runCatching { audioManager.clearCommunicationDevice() }
+            }
+            communicationDeviceType = audioManager.communicationDevice?.type
+            speakerRouted = communicationDeviceType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            if (preferSpeakerphone && !speakerRouted) {
+                // Fallback for vendor stacks that do not honor setCommunicationDevice.
+                runCatching { audioManager.isSpeakerphoneOn = true }
+                speakerRouted = audioManager.isSpeakerphoneOn
+            }
+        } else {
+            audioManager.isSpeakerphoneOn = preferSpeakerphone
+            speakerRouted = audioManager.isSpeakerphoneOn
+        }
+        // Re-assert after route selection in case policy daemon changed the mode.
+        runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
+        val modeOk = audioManager.mode == AudioManager.MODE_IN_COMMUNICATION
+        if (!modeOk || (preferSpeakerphone && !speakerRouted)) {
+            Log.w(
+                "AudioEngine",
+                "Speakerphone routing failed target=$preferSpeakerphone actual=$speakerRouted mode=${audioManager.mode} commType=$communicationDeviceType"
+            )
         }
         Log.d(
             "AudioEngine",
-            "Audio mode=${audioManager.mode}, speakerOn=${audioManager.isSpeakerphoneOn}"
+            "Audio mode=${audioManager.mode}, speakerOn=${audioManager.isSpeakerphoneOn}, commType=$communicationDeviceType"
         )
     }
 

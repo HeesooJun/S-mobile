@@ -22,6 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,7 +64,9 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.core.content.ContextCompat
 
 @Composable
@@ -143,6 +146,8 @@ fun AppNavHost(
     var sttEnabled by remember { mutableStateOf(false) }
     val minSosDurationMs = 1_000L
     var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
+    var connectingTargetPeerId by remember { mutableStateOf<String?>(null) }
+    val callAttemptTimeoutMs = 15_000L
     val currentRoute = backStackEntry?.destination?.route
     val footerEnabledRoutes = setOf(
         AppRoute.SurvivorPTT.route,
@@ -257,7 +262,59 @@ fun AppNavHost(
     LaunchedEffect(appState.callPeerId, isInCall) {
         if (isInCall && appState.callPeerId == null) {
             callViewModel.endCall()
+            connectingTargetPeerId = null
         }
+    }
+
+    LaunchedEffect(
+        connectingTargetPeerId,
+        isInCall,
+        appState.isCallConnected,
+        targetSurvivor?.peerId,
+        appState.callPeerId
+    ) {
+        val targetPeerId = connectingTargetPeerId ?: return@LaunchedEffect
+        val connected =
+            isInCall &&
+                appState.isCallConnected &&
+                (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
+        if (connected) {
+            connectingTargetPeerId = null
+        }
+    }
+
+    LaunchedEffect(connectingTargetPeerId) {
+        val targetPeerId = connectingTargetPeerId ?: return@LaunchedEffect
+        val completedInTime = withTimeoutOrNull(callAttemptTimeoutMs) {
+            snapshotFlow {
+                val connected =
+                    isInCall &&
+                        appState.isCallConnected &&
+                        (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
+                val canceled = connectingTargetPeerId != targetPeerId
+                connected || canceled
+            }.first { done -> done }
+        } != null
+        if (connectingTargetPeerId != targetPeerId) return@LaunchedEffect
+        val connectedNow =
+            isInCall &&
+                appState.isCallConnected &&
+                (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
+        if (completedInTime || connectedNow) return@LaunchedEffect
+        val localAware = appViewModel.isWifiAwareSupportedLocally()
+        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+        appViewModel.sendCallHandshake(
+            targetPeerIdHex = targetPeerId,
+            action = CallHandshakeAction.END,
+            callerName = profileState.name.ifBlank { "생존자" },
+            wifiAwareSupported = localAware,
+            wifiDirectSupported = localDirect,
+            useOpus = localOpusSupported
+        )
+        appViewModel.clearLocalCallState(targetPeerId)
+        callViewModel.endCall()
+        connectingTargetPeerId = null
+        Toast.makeText(context, "통화 연결 시간 초과(15초)", Toast.LENGTH_SHORT).show()
     }
 
     fun acceptIncomingCall(peerId: String): Boolean {
@@ -304,8 +361,11 @@ fun AppNavHost(
                 useOpus = localOpusSupported
             )
             appViewModel.clearIncomingCall(peerId)
+            connectingTargetPeerId = null
             return false
         }
+        connectingTargetPeerId = peerId
+        appViewModel.clearIncomingCall(peerId)
         return true
     }
 
@@ -458,8 +518,10 @@ fun AppNavHost(
                                     wifiDirectSupported = localDirect,
                                     useOpus = localOpusSupported
                                 )
+                                appViewModel.clearLocalCallState(targetPeerId)
                             }
                             callViewModel.endCall()
+                            connectingTargetPeerId = null
                         }
                         onDisconnect()
                         navController.navigate(AppRoute.SurvivorStandby.route) {
@@ -500,8 +562,10 @@ fun AppNavHost(
                                 wifiDirectSupported = localDirect,
                                 useOpus = localOpusSupported
                             )
+                            appViewModel.clearLocalCallState(targetPeerId)
                         }
                         callViewModel.endCall()
+                        connectingTargetPeerId = null
                     }
                 )
             }
