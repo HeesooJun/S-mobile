@@ -341,8 +341,9 @@ fun AppNavHost(
         val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
         val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
         val canUseAware = localWifiAware && profile.isWifiAware
-        if (!canUseAware && !forceDirectOnly) {
-            Toast.makeText(context, "통화 불가: Wi-Fi Aware 미지원", Toast.LENGTH_SHORT).show()
+        val canUseDirect = localWifiDirect && profile.isWifiDirect
+        if (!canUseAware && !canUseDirect) {
+            Toast.makeText(context, "통화 불가: Aware/Direct 미지원", Toast.LENGTH_SHORT).show()
             appViewModel.sendCallHandshake(
                 targetPeerIdHex = peerId,
                 action = CallHandshakeAction.END,
@@ -370,7 +371,8 @@ fun AppNavHost(
             peerWifiAwareSupported = if (forceDirectOnly) false else profile.isWifiAware,
             peerWifiDirectSupported = profile.isWifiDirect,
             isServer = false,
-            useOpus = useOpus
+            useOpus = useOpus,
+            targetDirectAddress = appState.incomingCallDirectAddress
         )
         if (!started) {
             Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
@@ -482,6 +484,7 @@ fun AppNavHost(
         val localAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
         val localDirect = appViewModel.isWifiDirectSupportedLocally()
         val useOpus = localOpusSupported && (appState.callPeerUseOpus ?: false)
+        val targetDirectAddress = appState.callPeerDirectAddress ?: appState.peerDirectAddresses[peerId]
         val started = callViewModel.startRealTimeCall(
             survivor = pending,
             localWifiAwareSupported = localAware,
@@ -489,10 +492,11 @@ fun AppNavHost(
             peerWifiAwareSupported = peerAware,
             peerWifiDirectSupported = peerDirect,
             isServer = true,
-            useOpus = useOpus
+            useOpus = useOpus,
+            targetDirectAddress = targetDirectAddress
         )
         if (!started) {
-            Toast.makeText(context, "Wi-Fi Aware 미지원: 통화 불가", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
         }
         callViewModel.clearPendingCall()
     }
@@ -634,8 +638,9 @@ fun AppNavHost(
                     val peerWifiAware = if (forceDirectOnly) false else appState.incomingCallWifiAware
                     val peerWifiDirect = appState.incomingCallWifiDirect
                     val canUseAware = localWifiAware && peerWifiAware
-                    if (!canUseAware && !forceDirectOnly) {
-                        Toast.makeText(context, "통화 불가: Wi-Fi Aware 미지원", Toast.LENGTH_SHORT).show()
+                    val canUseDirect = localWifiDirect && peerWifiDirect
+                    if (!canUseAware && !canUseDirect) {
+                        Toast.makeText(context, "통화 불가: Aware/Direct 미지원", Toast.LENGTH_SHORT).show()
                         appViewModel.sendCallHandshake(
                             targetPeerIdHex = peerId,
                             action = CallHandshakeAction.END,
@@ -669,7 +674,8 @@ fun AppNavHost(
                         peerWifiAwareSupported = peerWifiAware,
                         peerWifiDirectSupported = peerWifiDirect,
                         isServer = false,
-                        useOpus = useOpus
+                        useOpus = useOpus,
+                        targetDirectAddress = appState.incomingCallDirectAddress
                     )
                     if (!started) {
                         Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
@@ -850,13 +856,19 @@ fun AppNavHost(
                     }
                     val hasBleLink = directPeerIds.contains(targetPeerId)
                     val peerWifiAware = if (forceDirectOnly) false else survivor.isWifiAware || hasBleLink
-                    val peerWifiDirect = survivor.isWifiDirect || hasBleLink
+                    val peerDirectAddress = appState.peerDirectAddresses[targetPeerId]
+                    val peerWifiDirect = survivor.isWifiDirect || hasBleLink || !peerDirectAddress.isNullOrBlank()
                     val canUseAware = localWifiAware && peerWifiAware
-                    if (!canUseAware && !forceDirectOnly) {
-                        Toast.makeText(context, "Wi-Fi Aware 미지원: 통화 불가", Toast.LENGTH_SHORT).show()
+                    val canUseDirect = localWifiDirect && peerWifiDirect
+                    if (!canUseAware && !canUseDirect) {
+                        Toast.makeText(context, "통화 불가: Aware/Direct 미지원", Toast.LENGTH_SHORT).show()
                         return@RescuerSurvivorDbScreen
                     }
-                    val initialState = com.example.lifesaiver.protocol.model.CallHandshakeState.AWARE_TRY
+                    val initialState = if (canUseAware) {
+                        com.example.lifesaiver.protocol.model.CallHandshakeState.AWARE_TRY
+                    } else {
+                        com.example.lifesaiver.protocol.model.CallHandshakeState.DIRECT_TRY
+                    }
                     appViewModel.sendCallHandshake(
                         targetPeerIdHex = targetPeerId,
                         action = CallHandshakeAction.START,
