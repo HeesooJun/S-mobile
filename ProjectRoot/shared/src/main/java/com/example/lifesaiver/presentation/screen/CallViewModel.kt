@@ -99,4 +99,12 @@ class CallViewModel(
         callManager.stopCallSession()
         _isDirectTestRunning.value = false
     }
+
+    fun setSpeakerphoneEnabled(enabled: Boolean) {
+        callManager.setSpeakerphoneEnabled(enabled)
+    }
+
+    fun toggleSpeakerphone() {
+        callManager.setSpeakerphoneEnabled(!callManager.isSpeakerphoneEnabled())
+    }
 }

@@ -84,6 +84,7 @@ fun PTTLinkScreen(
     isMicOn: Boolean,
     isCallConnected: Boolean,
     isInCall: Boolean,
+    isSpeakerphoneOn: Boolean = true,
     callPeerName: String? = null,
     pendingCall: SurvivorCallRequest? = null,
     onMicPress: () -> Unit,
@@ -93,6 +94,7 @@ fun PTTLinkScreen(
     onChat: () -> Unit,
     onProfile: () -> Unit,
     onPanicClear: () -> Unit,
+    onToggleSpeakerphone: () -> Unit = {},
     onAcceptCall: () -> Unit = {},
     onDeclineCall: () -> Unit = {},
     onOpenUserList: (() -> Unit)? = null
@@ -241,6 +243,17 @@ fun PTTLinkScreen(
                             onClick = {
                                 setPowerSaving(!isPowerSaving)
                                 setExpandedAction(ActionType.Power)
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.ic_sound,
+                            label = if (isSpeakerphoneOn) "스피커 ON" else "스피커 OFF",
+                            isExpanded = expandedAction == ActionType.Speaker,
+                            iconSizeOverride = scaledDp(34, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                setExpandedAction(ActionType.Speaker)
+                                onToggleSpeakerphone()
                             }
                         )
                         ExpandableAction(
@@ -560,6 +573,7 @@ private fun ExpandableAction(
 
 private enum class ActionType {
     Power,
+    Speaker,
     Disconnect,
     Chat,
     Count

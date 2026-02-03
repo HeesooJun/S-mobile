@@ -74,6 +74,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private var opusEncoder: MediaCodec? = null
     private var opusDecoder: MediaCodec? = null
     private var preferOpus = true
+    private var preferSpeakerphone = true
     private var useOpus = true
     private val encoderBufferInfo = MediaCodec.BufferInfo()
     private val decoderBufferInfo = MediaCodec.BufferInfo()
@@ -113,19 +114,8 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         try {
             Log.d("AudioEngine", "Starting stream...")
 
-            // 1. 오디오 매니저 설정 (통화 모드 활성화)
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-
-            // 필요 시 스피커폰 강제 설정 (상황에 따라 false로 변경 가능)
-            audioManager.isSpeakerphoneOn = true
-            if (!audioManager.isSpeakerphoneOn) {
-                Log.w("AudioEngine", "Speakerphone routing failed")
-            }
-            Log.d(
-                "AudioEngine",
-                "Audio mode=${audioManager.mode}, speakerOn=${audioManager.isSpeakerphoneOn}"
-            )
+            // 1. 오디오 매니저 설정 (통화 모드 + 라우팅)
+            applyAudioModeAndRoute()
 
             // 2. AudioTrack 초기화 (수신 음성 재생용)
             audioTrack = AudioTrack.Builder()
@@ -155,6 +145,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                 stats.copy(
                     isStreaming = true,
                     useOpus = useOpus,
+                    speakerphoneEnabled = preferSpeakerphone,
                     lastStartError = null
                 )
             }
@@ -378,6 +369,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
             // 오디오 모드 원상복구
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager.isSpeakerphoneOn = false
             audioManager.mode = AudioManager.MODE_NORMAL
         }
     }
@@ -385,6 +377,18 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     fun setPreferredOpus(enabled: Boolean) {
         preferOpus = enabled
     }
+
+    fun setSpeakerphoneEnabled(enabled: Boolean) {
+        preferSpeakerphone = enabled
+        if (isStreaming) {
+            applyAudioModeAndRoute()
+        }
+        _debugStats.update { stats ->
+            stats.copy(speakerphoneEnabled = enabled)
+        }
+    }
+
+    fun isSpeakerphoneEnabled(): Boolean = preferSpeakerphone
 
     fun isOpusSupported(): Boolean {
         return try {
@@ -443,6 +447,19 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             releaseOpusCodec()
             false
         }
+    }
+
+    private fun applyAudioModeAndRoute() {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioManager.isSpeakerphoneOn = preferSpeakerphone
+        if (audioManager.isSpeakerphoneOn != preferSpeakerphone) {
+            Log.w("AudioEngine", "Speakerphone routing failed target=$preferSpeakerphone actual=${audioManager.isSpeakerphoneOn}")
+        }
+        Log.d(
+            "AudioEngine",
+            "Audio mode=${audioManager.mode}, speakerOn=${audioManager.isSpeakerphoneOn}"
+        )
     }
 
     private fun findPreferredCodecName(mime: String, isEncoder: Boolean): String? {
