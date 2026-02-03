@@ -144,6 +144,10 @@ fun AppNavHost(
     val callDebugState by callViewModel.debugState.collectAsState()
     val pendingTarget by callViewModel.pendingTarget.collectAsState()
     var selectedTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
+    val distanceTargetPeerId = targetSurvivor?.peerId ?: selectedTargetPeerId
+    val distanceTargetSupportsUwb = appState.survivors.firstOrNull { it.peerId == distanceTargetPeerId }?.isUwb
+        ?: targetSurvivor?.isUwb
+        ?: false
     val distanceViewModelFactory = remember(appContext) {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -226,8 +230,18 @@ fun AppNavHost(
         }
     }
 
-    LaunchedEffect(selectedTargetPeerId) {
-        distanceViewModel.setTargetPeerId(selectedTargetPeerId)
+    LaunchedEffect(distanceTargetPeerId) {
+        distanceViewModel.setTargetPeerId(distanceTargetPeerId)
+    }
+
+    LaunchedEffect(callDebugState.activeTransport) {
+        distanceViewModel.setActiveTransport(callDebugState.activeTransport)
+    }
+
+    LaunchedEffect(distanceTargetPeerId, distanceTargetSupportsUwb) {
+        val localUwb = appViewModel.isUwbSupportedLocally()
+        val peerUwb = distanceTargetPeerId != null && distanceTargetSupportsUwb
+        distanceViewModel.setUwbCapability(localSupported = localUwb, peerSupported = peerUwb)
     }
 
     LaunchedEffect(appState.survivors) {
@@ -266,10 +280,12 @@ fun AppNavHost(
         val currentRoute = backStackEntry?.destination?.route
         if (currentRoute?.startsWith("survivor_") != true) return@LaunchedEffect
         val name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자"
+        val peerIsUwb = appState.survivors.firstOrNull { it.peerId == peerId }?.isUwb ?: false
         val profile = SurvivorProfile(
             name = name,
             isWifiAware = appState.incomingCallWifiAware,
             isWifiDirect = appState.incomingCallWifiDirect,
+            isUwb = peerIsUwb,
             peerId = peerId
         )
         if (!appViewModel.ensureWifiAwarePermissions()) return@LaunchedEffect
@@ -591,6 +607,7 @@ fun AppNavHost(
                 isMicOn = isMicOn,
                 isCallConnected = appState.isCallConnected,
                 isInCall = isInCall,
+                isSpeakerphoneOn = callDebugState.audio.speakerphoneEnabled,
                 callPeerName = targetSurvivor?.name,
                 pendingCall = pendingRequest,
                 onMicPress = onMicPress,
@@ -621,6 +638,7 @@ fun AppNavHost(
                 onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
                 onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                 onPanicClear = onClearDeviceMonitoring,
+                onToggleSpeakerphone = { callViewModel.toggleSpeakerphone() },
                 onAcceptCall = {
                     val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
                     if (!appViewModel.ensureWifiAwarePermissions()) return@PTTLinkScreen
@@ -656,6 +674,7 @@ fun AppNavHost(
                             name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자",
                             isWifiAware = peerWifiAware,
                             isWifiDirect = peerWifiDirect,
+                            isUwb = appState.survivors.firstOrNull { it.peerId == peerId }?.isUwb ?: false,
                             peerId = peerId
                         ),
                         localWifiAwareSupported = localWifiAware,
@@ -761,14 +780,21 @@ fun AppNavHost(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
+                myPeerId = myPeerId,
+                myNickname = myNickname,
+                peerNicknames = peerNicknames,
+                meshGraphSnapshot = meshGraphSnapshot,
+                meshVisualEvents = meshVisualEvents,
                 bleDebugStats = bleDebugStats,
                 callStatusLabel = callStatusLabel,
                 callDecisionLabel = callDebugState.lastDecision,
+                isInCall = isInCall,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
+                isSpeakerphoneOn = callDebugState.audio.speakerphoneEnabled,
                 distanceMeters = distanceState.distanceMeters,
                 distanceTrend = distanceState.trend,
-                isPrecisionMode = distanceState.isPrecisionMode,
+                distanceSource = distanceState.measurementSource,
                 onMicPress = onMicPress,
                 onMicRelease = onMicRelease,
                 onBack = { navController.popBackStack() },
@@ -794,7 +820,8 @@ fun AppNavHost(
                 },
                 onChat = { navController.navigate(AppRoute.RescuerChat.route) },
                 onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) },
-                onPanicClear = onClearDeviceMonitoring
+                onPanicClear = onClearDeviceMonitoring,
+                onToggleSpeakerphone = { callViewModel.toggleSpeakerphone() }
             )
         }
 
@@ -859,6 +886,7 @@ fun AppNavHost(
                             isWifiDirect = peerWifiDirect
                         )
                     )
+                    navController.navigate(AppRoute.RescuerPTT.route) { launchSingleTop = true }
                     Toast.makeText(context, "통화 요청 전송됨", Toast.LENGTH_SHORT).show()
                 },
                 onEndCall = {

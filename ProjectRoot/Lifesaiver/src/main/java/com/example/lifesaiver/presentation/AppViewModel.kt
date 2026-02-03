@@ -173,6 +173,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             add(Manifest.permission.BLUETOOTH_ADVERTISE)
             add(Manifest.permission.BLUETOOTH_CONNECT)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.UWB_RANGING)
+        }
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         add(Manifest.permission.RECORD_AUDIO)
@@ -1295,6 +1298,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return supported
     }
 
+    fun isUwbSupportedLocally(): Boolean {
+        return (getCurrentCapabilityFlags() and 0x02) != 0
+    }
+
     private fun getCurrentCapabilityFlags(): Int {
         var flags = 0
         val pm = app.packageManager
@@ -1336,8 +1343,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             flags = flags or 0x01
         }
 
+        val hasUwbPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(app, Manifest.permission.UWB_RANGING) ==
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            false
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            pm.hasSystemFeature("android.hardware.uwb")) {
+            pm.hasSystemFeature(PackageManager.FEATURE_UWB) &&
+            hasUwbPermission
+        ) {
             flags = flags or 0x02
         }
 
