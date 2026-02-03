@@ -145,8 +145,8 @@ sealed interface UiEvent {
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = getApplication<Application>()
-    private val forcePcmCall = true
-    private val wifiAwareEnabled = false
+    private val forcePcmCall = false
+    private val wifiAwareEnabled = true
 
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
