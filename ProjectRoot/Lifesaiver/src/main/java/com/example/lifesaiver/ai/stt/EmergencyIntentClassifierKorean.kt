@@ -10,25 +10,26 @@ import java.lang.Math.sqrt
 
 /**
  * 🚨 EmergencyKeywordDetector
- * "살려주세요", "구해주세요" 등의 핵심 의미가 담겨 있으면
- * 앞에 "제발", "빨리" 같은 수식어가 붙어도 찰떡같이 잡아냅니다.
+ * 안전한 스레드 동기화가 적용된 버전입니다.
  */
 class EmergencyIntentClassifierKorean(context: Context) {
 
-    @Volatile private var interpreter: Interpreter? = null
-    @Volatile private var tokenizer: WordPieceTokenizer? = null
+    // [핵심] 동기화를 위한 락 객체
+    private val lock = Any()
+
+    // [핵심] 종료 상태 플래그
+    @Volatile private var isClosed = false
+
+    private var interpreter: Interpreter? = null
+    private var tokenizer: WordPieceTokenizer? = null
     @Volatile private var isReady = false
 
-    // ✅ 핵심 앵커 (이것들과 뉘앙스가 비슷하면 잡힘)
-    // 앞에 '제발', '빨리'가 붙어도 BERT가 알아서 이쪽으로 분류합니다.
     private val emergencyAnchors = listOf(
         "살려주세요", "살려줘", "사람 살려",
         "구해주세요", "구해줘", "구조 요청",
         "도와주세요", "도와줘", "아파요",
     )
 
-    // ✅ 비교군 (오작동 방지용)
-    // 살려달라는 말이 아닌 평범한 말들을 넣어둡니다.
     private val normalAnchors = listOf(
         "안녕하세요", "반가워요", "식사 하셨나요",
         "날씨 좋다", "배고파", "심심해",
@@ -36,50 +37,60 @@ class EmergencyIntentClassifierKorean(context: Context) {
         "그러니까", "초야", "춰야", "갑자기",
         "세상", "센서", "토요일","퇴원 중",
         "병원",
-
-        // 2. [의문 및 당황] (앱이 갑자기 켜졌을 때 반응)
         "이거 뭐야", "왜 이래", "누구세요", "뭐지",
         "잘못 켰어", "오작동이야", "고장 났나",
         "무슨 일이야", "어떻게 된 거야", "잠깐만",
-
-        // 3. [접속사 및 추임새] (문장 중간에 들어가는 말들)
         "그러니까", "그래서", "하지만", "그런데", "솔직히",
         "진짜", "정말", "완전", "대박", "헐",
         "갑자기", "그냥", "아니", "음", "어"
     )
 
     private val anchorVectors = mutableListOf<FloatArray>()
-    private val anchorLabels = mutableListOf<Int>() // 1: 비상, 0: 일상
+    private val anchorLabels = mutableListOf<Int>()
 
     init {
         Thread {
             try {
                 setupModel(context)
-                isReady = true
-                Log.d("KeywordDetector", "🚀 키워드 감지 모델 준비 완료")
-            } catch (e: Exception) { e.printStackTrace() }
+                // 설정이 끝난 후, 닫혀있지 않다면 준비 완료 처리
+                synchronized(lock) {
+                    if (!isClosed) {
+                        isReady = true
+                        Log.d("KeywordDetector", "🚀 키워드 감지 모델 준비 완료")
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }.start()
     }
 
     private fun setupModel(context: Context) {
         val modelBuffer = loadModelFile(context, "bert_kor.tflite")
-        interpreter = Interpreter(modelBuffer)
         val vocab = loadVocab(context, "vocab.txt")
-        tokenizer = WordPieceTokenizer(vocab)
 
-        // 1. 비상 앵커 등록
+        // [안전 장치] 인터프리터 생성 및 할당 시점 보호
+        synchronized(lock) {
+            if (isClosed) return // 이미 닫혔다면 중단
+            interpreter = Interpreter(modelBuffer)
+            tokenizer = WordPieceTokenizer(vocab)
+        }
+
+        // 1. 비상 앵커 등록 (getEmbedding 내부에서 동기화 체크함)
         emergencyAnchors.forEach { text ->
+            if (isClosed) return // 루프 도중에도 닫히면 즉시 중단
             getEmbedding(text)?.let {
                 anchorVectors.add(it)
-                anchorLabels.add(1) // Label 1: 비상
+                anchorLabels.add(1)
             }
         }
 
         // 2. 일상 앵커 등록
         normalAnchors.forEach { text ->
+            if (isClosed) return
             getEmbedding(text)?.let {
                 anchorVectors.add(it)
-                anchorLabels.add(0) // Label 0: 일상
+                anchorLabels.add(0)
             }
         }
     }
@@ -90,45 +101,38 @@ class EmergencyIntentClassifierKorean(context: Context) {
             return
         }
         Thread {
+            // 스레드 시작 직후 닫혔을 수도 있으므로 내부에서 체크
             val (isDetected, score, match) = detectKeywordSemantics(inputText)
-            callback(isDetected, score, match)
+
+            // 콜백 시점에 서비스가 살아있는지는 Service 쪽에서 처리하겠지만,
+            // 여기서도 닫힌 상태면 콜백을 안 부르는 게 안전할 수 있음
+            if (!isClosed) {
+                callback(isDetected, score, match)
+            }
         }.start()
     }
 
-    /**
-     * 🕵️‍♀️ [의미 기반 키워드 탐지]
-     * 단순 글자 매칭이 아니라, 벡터 유사도를 봅니다.
-     */
     private fun detectKeywordSemantics(text: String): Triple<Boolean, Double, String> {
         try {
+            // 여기서 getEmbedding이 null을 반환하면(닫힘) 바로 종료
             val inputVector = getEmbedding(text) ?: return Triple(false, 0.0, "")
 
             var maxScore = 0.0
             var bestMatch = ""
             var isEmergency = false
 
-            // 모든 앵커(비상 + 일상) 중에서 가장 비슷한 녀석 하나를 뽑습니다.
             for (i in anchorVectors.indices) {
                 val score = calculateCosineSimilarity(anchorVectors[i], inputVector)
-
                 if (score > maxScore) {
                     maxScore = score
                     bestMatch = if (anchorLabels[i] == 1) emergencyAnchors[i % emergencyAnchors.size]
                     else normalAnchors[i % normalAnchors.size]
-
-                    // 1등이 비상 앵커면 True, 아니면 False
                     isEmergency = (anchorLabels[i] == 1)
                 }
             }
 
-            // 점수 변환 (0.90 ~ 1.0 구간을 0~100점으로 보기 좋게)
             val displayScore = if (maxScore > 0.9) (maxScore - 0.9) * 1000.0 else 0.0
-
             Log.d("KeywordCheck", "입력: '$text' -> 가장 유사: '$bestMatch' (${String.format("%.1f", displayScore)}점)")
-
-            // 🎯 판정 로직
-            // 1. 가장 비슷한 앵커가 '비상' 그룹이어야 함.
-            // 2. 유사도가 최소 0.92 (92%) 이상이어야 함. (엉뚱한 단어 방지)
 
             if (isEmergency && maxScore >= 0.92) {
                 return Triple(true, displayScore, bestMatch)
@@ -141,15 +145,26 @@ class EmergencyIntentClassifierKorean(context: Context) {
         }
     }
 
-    // --- (이하 유틸리티 함수: 기존과 동일) ---
+    // [핵심 수정] 임베딩 추출 시 자물쇠(lock) 사용
     private fun getEmbedding(text: String): FloatArray? {
-        if (tokenizer == null || interpreter == null) return null
-        val inputIdsInt = tokenizer!!.tokenize(text)
-        val inputIdsLong = Array(1) { LongArray(128) }
-        for (i in inputIdsInt.indices) inputIdsLong[0][i] = inputIdsInt[i].toLong()
-        val output = Array(1) { FloatArray(512) }
-        interpreter?.run(inputIdsLong, output)
-        return output[0]
+        synchronized(lock) {
+            // 1. 닫혔거나 초기화 전이면 즉시 리턴
+            if (isClosed || tokenizer == null || interpreter == null) return null
+
+            try {
+                val inputIdsInt = tokenizer!!.tokenize(text)
+                val inputIdsLong = Array(1) { LongArray(128) }
+                for (i in inputIdsInt.indices) inputIdsLong[0][i] = inputIdsInt[i].toLong()
+                val output = Array(1) { FloatArray(512) }
+
+                // 2. 안전하게 추론 실행
+                interpreter?.run(inputIdsLong, output)
+                return output[0]
+            } catch (e: Exception) {
+                e.printStackTrace()
+                return null
+            }
+        }
     }
 
     private fun calculateCosineSimilarity(v1: FloatArray, v2: FloatArray): Double {
@@ -179,5 +194,19 @@ class EmergencyIntentClassifierKorean(context: Context) {
         return vocab
     }
 
-    fun close() { interpreter?.close() }
+    // [핵심 수정] 종료 시 자물쇠를 걸고 안전하게 닫음
+    fun close() {
+        synchronized(lock) {
+            isClosed = true // 깃발 내림
+            isReady = false
+
+            try {
+                interpreter?.close()
+                interpreter = null
+                Log.d("EmergencyClassifier", "🛑 모델 리소스 안전 해제 완료")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 }

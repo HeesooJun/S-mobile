@@ -7,12 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.location.LocationManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Build
-import android.net.wifi.WifiManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -23,52 +21,33 @@ import com.example.lifesaiver.core.ble.BleDebugSnapshot
 import com.example.lifesaiver.core.ble.BleManager
 import com.example.lifesaiver.core.ble.BleTransport
 import com.example.lifesaiver.core.database.AppDatabase
-import com.example.lifesaiver.core.log.ConnectionLog
 import com.example.lifesaiver.core.media.FileTransferStorage
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.core.service.RescueService
-import com.example.lifesaiver.core.wifi.WifiAwareRanger
-import com.example.lifesaiver.core.wifi.WifiDirectRanger
+import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
 import com.example.lifesaiver.protocol.codec.BinaryPacketCodec
 import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.core.ProtocolCore
 import com.example.lifesaiver.protocol.mesh.GossipTlv
 import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
-import com.example.lifesaiver.protocol.mesh.MeshPeerRegistry
 import com.example.lifesaiver.protocol.mesh.PeerIdentityRegistry
-import com.example.lifesaiver.protocol.model.CallHandshakeAction
-import com.example.lifesaiver.protocol.model.CallHandshakePayload
-import com.example.lifesaiver.protocol.model.CallHandshakeState
-import com.example.lifesaiver.protocol.model.FileTransferPayload
-import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
-import com.example.lifesaiver.protocol.model.Packet
-import com.example.lifesaiver.protocol.model.PacketHeader
-import com.example.lifesaiver.protocol.model.PacketType
-import com.example.lifesaiver.protocol.model.RequestSyncPayload
+import com.example.lifesaiver.protocol.model.*
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.profile.ProfileTlv
-import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
+import com.example.lifesaiver.protocol.security.SignatureManager
 import com.example.lifesaiver.protocol.sync.GossipSyncManager
 import com.example.lifesaiver.protocol.util.sha256Bytes
-import com.example.lifesaiver.presentation.packet.ProfilePacketHandler
-import kotlinx.coroutines.channels.BufferOverflow
+import com.example.lifesaiver.wakeup.SensorService
+import com.example.lifesaiver.wakeup.VoiceService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.roundToInt
 
 data class BleDebugStats(
     val scanRssiAvg: Int? = null,
@@ -102,39 +81,23 @@ data class AppUiState(
     val connectedCount: Int = 0,
     val meshPeerCount: Int = 0,
     val directPeerIds: List<String> = emptyList(),
-    val peerRssi: Map<String, Int> = emptyMap(),
     val myPeerId: String = "",
     val myNickname: String = "",
     val peerNicknames: Map<String, String> = emptyMap(),
-    val peerDirectAddresses: Map<String, String> = emptyMap(),
     val meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot = MeshGraphRegistry.GraphSnapshot(
         emptyList(),
         emptyList()
     ),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
-    val isRescueSignalActive: Boolean = false, // 구조 신호 활성화 여부
+    val isRescueSignalActive: Boolean = false,
+    // [추가] 설정 상태 관리
+    val isVoiceDetectionEnabled: Boolean = false,
+    val isShockDetectionEnabled: Boolean = false,
     val messages: List<ChatMessage> = emptyList(),
     val bleDebug: BleDebugStats = BleDebugStats(),
     val signatureLogs: List<SignatureLogEntry> = emptyList(),
-    val profileLogs: List<ProfileSyncLogEntry> = emptyList(),
-    val survivors: List<SurvivorProfile> = emptyList(),
-    val incomingCallPeerId: String? = null,
-    val incomingCallName: String? = null,
-    val incomingCallWifiAware: Boolean = false,
-    val incomingCallWifiDirect: Boolean = false,
-    val incomingCallUseOpus: Boolean = false,
-    val incomingCallState: com.example.lifesaiver.protocol.model.CallHandshakeState? = null,
-    val incomingCallRttCm: Int? = null,
-    val incomingCallDirectAddress: String? = null,
-    val isCallConnected: Boolean = false,
-    val callPeerWifiAware: Boolean? = null,
-    val callPeerWifiDirect: Boolean? = null,
-    val callPeerUseOpus: Boolean? = null,
-    val callPeerId: String? = null,
-    val callPeerState: com.example.lifesaiver.protocol.model.CallHandshakeState? = null,
-    val callPeerRttCm: Int? = null,
-    val callPeerDirectAddress: String? = null
+    val profileLogs: List<ProfileSyncLogEntry> = emptyList()
 )
 
 // UI 이벤트
@@ -145,8 +108,6 @@ sealed interface UiEvent {
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = getApplication<Application>()
-    private val forcePcmCall = false
-    private val wifiAwareEnabled = true
 
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -161,30 +122,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val meshVisualEvents: SharedFlow<MeshVisualEvent> = _meshVisualEvents.asSharedFlow()
 
     // 권한 목록
-    val requiredPermissions: Array<String> = buildList {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            add(Manifest.permission.BLUETOOTH_SCAN)
-            add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            add(Manifest.permission.BLUETOOTH_CONNECT)
-            add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            add(Manifest.permission.POST_NOTIFICATIONS)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            add(Manifest.permission.BLUETOOTH_SCAN)
-            add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            add(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            add(Manifest.permission.UWB_RANGING)
-        }
-        add(Manifest.permission.ACCESS_FINE_LOCATION)
-        add(Manifest.permission.ACCESS_COARSE_LOCATION)
-        add(Manifest.permission.RECORD_AUDIO)
-        add(Manifest.permission.FOREGROUND_SERVICE)
-    }.toTypedArray()
+    val requiredPermissions: Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        arrayOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_ADVERTISE,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.FOREGROUND_SERVICE
+        )
+    } else {
+        arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.FOREGROUND_SERVICE
+        )
+    }
 
     private var audioEngine: AudioEngine? = null
-    val wifiAwareRanger = WifiAwareRanger(app)
-    val wifiDirectRanger = WifiDirectRanger(app)
     private lateinit var bleManager: BleManager
     private lateinit var protocolCore: ProtocolCore
     private lateinit var signatureManager: SignatureManager
@@ -193,21 +150,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val signatureLogBuffer = ArrayDeque<SignatureLogEntry>()
     private val profileLogBuffer = ArrayDeque<ProfileSyncLogEntry>()
     private val profileDao by lazy { AppDatabase.getInstance(app).profileDao() }
-    private val meshRegistry = MeshPeerRegistry()
 
-    // [수정] 사이렌 발생기 및 오디오 매니저 (볼륨 제어용)
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
-    private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    // 설정 저장소
+    private val settingsPrefs by lazy { app.getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+
     private var senderId: ByteArray = ByteArray(0)
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedNickname: String = ""
     private val announcedToPeers = mutableSetOf<String>()
-    private val announcedPeerLastSeen = ConcurrentHashMap<String, Long>()
     private val peerNicknames = mutableMapOf<String, String>()
-    private val peerDirectAddresses = ConcurrentHashMap<String, String>()
-    private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -230,12 +184,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         initBle()
         initBatteryMonitor()
         refreshPermissions()
-        wifiDirectRanger.refreshLocalDeviceAddress()
         observeProfileName()
-        observeProfiles()
         observeMeshGraph()
-        observeCallConnection()
-        _uiState.update { it.copy(myPeerId = bytesToHex(senderId)) }
+
+        // [초기화] 저장된 설정 불러오기
+        val savedVoice = settingsPrefs.getBoolean("voice_detection", false)
+        val savedShock = settingsPrefs.getBoolean("shock_detection", false)
+        _uiState.update {
+            it.copy(
+                myPeerId = bytesToHex(senderId),
+                isVoiceDetectionEnabled = savedVoice,
+                isShockDetectionEnabled = savedShock
+            )
+        }
+
         AppShutdownHooks.register(
             onSendLeave = { sendLeaveOnShutdown() },
             onStopServices = { stopServicesForShutdown() }
@@ -243,7 +205,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ------------------------------------------------------------------------
-    // [핵심 기능] 구조 요청 신호 + 백그라운드 서비스 제어
+    // [추가] 설정 제어 및 서비스 실행 로직
+    // ------------------------------------------------------------------------
+
+    fun setVoiceDetection(enabled: Boolean) {
+        settingsPrefs.edit().putBoolean("voice_detection", enabled).apply()
+        _uiState.update { it.copy(isVoiceDetectionEnabled = enabled) }
+
+        if (enabled) {
+            if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                startServiceSafe(VoiceService::class.java)
+                _uiEvents.tryEmit(UiEvent.Toast("음성 감지 켜짐"))
+            } else {
+                _uiEvents.tryEmit(UiEvent.Toast("마이크 권한이 필요합니다."))
+                // 권한이 없으면 다시 끔
+                _uiState.update { it.copy(isVoiceDetectionEnabled = false) }
+                settingsPrefs.edit().putBoolean("voice_detection", false).apply()
+            }
+        } else {
+            app.stopService(Intent(app, VoiceService::class.java))
+            _uiEvents.tryEmit(UiEvent.Toast("음성 감지 꺼짐"))
+        }
+    }
+
+    fun setShockDetection(enabled: Boolean) {
+        settingsPrefs.edit().putBoolean("shock_detection", enabled).apply()
+        _uiState.update { it.copy(isShockDetectionEnabled = enabled) }
+
+        if (enabled) {
+            startServiceSafe(SensorService::class.java)
+            _uiEvents.tryEmit(UiEvent.Toast("충격 감지 켜짐"))
+        } else {
+            app.stopService(Intent(app, SensorService::class.java))
+            _uiEvents.tryEmit(UiEvent.Toast("충격 감지 꺼짐"))
+        }
+    }
+
+    private fun startServiceSafe(serviceClass: Class<*>) {
+        try {
+            val intent = Intent(app, serviceClass)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                app.startForegroundService(intent)
+            } else {
+                app.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("AppViewModel", "서비스 시작 실패: ${e.message}")
+            _uiEvents.tryEmit(UiEvent.Toast("서비스 시작 오류: ${e.message}"))
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // [기존 로직 유지]
     // ------------------------------------------------------------------------
 
     fun startRescueSignal() {
@@ -251,11 +264,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _uiEvents.tryEmit(UiEvent.Toast("블루투스 및 서비스 권한이 필요합니다."))
             return
         }
-
-        // 1. BleManager: 72시간 생존 모드 신호 송출 시작
         bleManager.startEmergencyAdvertising()
-
-        // 2. RescueService: 백그라운드 서비스 시작
         try {
             val intent = Intent(app, RescueService::class.java).apply {
                 action = RescueService.ACTION_START_RESCUE
@@ -268,15 +277,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             Log.e("AppViewModel", "서비스 시작 실패: ${e.message}")
         }
-
         _uiState.update { it.copy(isRescueSignalActive = true) }
-
-        // [추가] 구조 신호 시작 시 자신의 프로필 정보를 즉시 브로드캐스트
-        viewModelScope.launch {
-            profileStore.profileFlow.firstOrNull()?.let { currentProfile ->
-                sendProfileUpdate(currentProfile)
-            }
-        }
     }
 
     fun pulseRescueSignal() {
@@ -286,10 +287,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopRescueSignal() {
-        // 1. 신호 중단
         bleManager.stopAdvertising()
-
-        // 2. 백그라운드 서비스 종료
         try {
             val intent = Intent(app, RescueService::class.java).apply {
                 action = RescueService.ACTION_STOP_RESCUE
@@ -298,28 +296,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             Log.e("AppViewModel", "서비스 종료 실패: ${e.message}")
         }
-
         _uiState.update { it.copy(isRescueSignalActive = false) }
         _uiEvents.tryEmit(UiEvent.Toast("구조 신호 중단됨"))
     }
-
-    /**
-     * [수정] 사이렌 울리기 (기기 볼륨 설정을 그대로 사용)
-     */
-    private fun playSiren() {
-        viewModelScope.launch(Dispatchers.Default) {
-            try {
-                // 기기 설정된 알람 볼륨으로 사이렌 1회 울리기
-                toneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1000)
-            } catch (e: Exception) {
-                Log.e("Siren", "Error playing siren: ${e.message}")
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // 기존 기능 유지
-    // ------------------------------------------------------------------------
 
     fun refreshPermissions() {
         val granted = requiredPermissions.all { permission ->
@@ -327,18 +306,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         _uiState.update { it.copy(hasPermissions = granted) }
 
-        if (granted) {
-            wifiDirectRanger.refreshLocalDeviceAddress()
-            if (audioEngine == null) {
-                initAudio()
-            }
+        if (granted && audioEngine == null) {
+            initAudio()
         }
     }
 
     fun onPermissionsResult(granted: Boolean) {
         _uiState.update { it.copy(hasPermissions = granted) }
         if (granted) {
-            wifiDirectRanger.refreshLocalDeviceAddress()
             if (audioEngine == null) initAudio()
         } else {
             _uiEvents.tryEmit(UiEvent.Toast("필수 권한이 필요합니다."))
@@ -428,257 +403,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         gossipSyncManager.onPublicPacketSeen(signedPacket)
         protocolCore.broadcast(signedPacket)
         addMessage(ChatMessage(text = text, isMine = true))
-    }
-
-    fun ensureWifiAwarePermissions(): Boolean {
-        val required = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            required.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
-        required.add(Manifest.permission.ACCESS_FINE_LOCATION)
-        required.add(Manifest.permission.ACCESS_COARSE_LOCATION)
-        required.add(Manifest.permission.RECORD_AUDIO)
-
-        val missing = required.filterNot { permission ->
-            ContextCompat.checkSelfPermission(app, permission) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missing.isNotEmpty()) {
-            _uiEvents.tryEmit(UiEvent.Toast("근처 기기/위치 권한이 필요합니다."))
-            return false
-        }
-
-        val wifiManager = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        if (wifiManager?.isWifiEnabled == false) {
-            _uiEvents.tryEmit(UiEvent.Toast("Wi-Fi가 꺼져있습니다."))
-            return false
-        }
-
-        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            locationManager?.isLocationEnabled == true
-        } else {
-            val providers = locationManager?.getProviders(true) ?: emptyList()
-            providers.isNotEmpty()
-        }
-        if (!locationEnabled) {
-            _uiEvents.tryEmit(UiEvent.Toast("위치 서비스가 꺼져있습니다."))
-            return false
-        }
-        return true
-    }
-
-    fun getConnectivityBlockReason(): String? {
-        val missing = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(app, Manifest.permission.NEARBY_WIFI_DEVICES) !=
-                    PackageManager.PERMISSION_GRANTED) {
-                    add("NEARBY_WIFI_DEVICES")
-                }
-            }
-            if (ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) !=
-                PackageManager.PERMISSION_GRANTED) {
-                    add("ACCESS_FINE_LOCATION")
-            }
-            if (ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) !=
-                PackageManager.PERMISSION_GRANTED) {
-                add("ACCESS_COARSE_LOCATION")
-            }
-            if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) !=
-                PackageManager.PERMISSION_GRANTED) {
-                add("RECORD_AUDIO")
-            }
-        }
-        if (missing.isNotEmpty()) {
-            return "권한 없음: ${missing.joinToString(", ")}"
-        }
-        val wifiManager = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        if (wifiManager?.isWifiEnabled == false) {
-            return "Wi-Fi OFF"
-        }
-        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            locationManager?.isLocationEnabled == true
-        } else {
-            val providers = locationManager?.getProviders(true) ?: emptyList()
-            providers.isNotEmpty()
-        }
-        if (!locationEnabled) {
-            return "Location OFF"
-        }
-        return null
-    }
-
-    fun sendCallHandshake(
-        targetPeerIdHex: String,
-        action: CallHandshakeAction,
-        callerName: String,
-        wifiAwareSupported: Boolean,
-        wifiDirectSupported: Boolean,
-        useOpus: Boolean,
-        state: CallHandshakeState? = null,
-        rttCm: Int? = null
-    ) {
-        if (targetPeerIdHex.isBlank()) return
-        wifiDirectRanger.refreshLocalDeviceAddress()
-        val actualUseOpus = if (forcePcmCall) false else useOpus
-        val awareSupported = if (wifiAwareEnabled) wifiAwareSupported else false
-        val resolvedRttCm = if (wifiAwareEnabled) {
-            rttCm ?: wifiAwareRanger.isConnectionReady.value.let { ready ->
-                if (!ready) null else wifiAwareRanger.rttDistance.value
-            }?.let { distance ->
-                val cm = (distance * 100f).roundToInt()
-                cm.coerceIn(0, 0xFFFF)
-            }
-        } else {
-            null
-        }
-        val directAddr = wifiDirectRanger.getLocalDeviceAddress()
-        val payload = CallHandshakePayload(
-            action = action,
-            callerName = callerName,
-            wifiAwareSupported = awareSupported,
-            wifiDirectSupported = wifiDirectSupported,
-            useOpus = actualUseOpus,
-            state = state,
-            rttCm = resolvedRttCm,
-            directDeviceAddress = directAddr
-        ).encode()
-        val packet = Packet(
-            header = PacketHeader(
-                version = 2,
-                type = PacketType.CALL_HANDSHAKE,
-                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
-                flags = 0,
-                length = payload.size,
-                timestamp = System.currentTimeMillis(),
-                senderId = senderId,
-                recipientId = hexToBytes(targetPeerIdHex)
-            ),
-            payload = payload
-        )
-        protocolCore.broadcast(packet)
-    }
-
-    fun clearIncomingCall(peerIdHex: String) {
-        _uiState.update { state ->
-            if (state.incomingCallPeerId != peerIdHex) return@update state
-            state.copy(
-                incomingCallPeerId = null,
-                incomingCallName = null,
-                incomingCallWifiAware = false,
-                incomingCallWifiDirect = false,
-                incomingCallUseOpus = false,
-                incomingCallState = null,
-                incomingCallRttCm = null,
-                incomingCallDirectAddress = null
-            )
-        }
-    }
-
-    private fun handleCallHandshake(peerIdHex: String, payload: CallHandshakePayload) {
-        ConnectionLog.add(
-            "CallHandshake",
-            "recv ${payload.action.name} from=$peerIdHex aware=${payload.wifiAwareSupported} direct=${payload.wifiDirectSupported} opus=${payload.useOpus}"
-        )
-        when (payload.action) {
-            CallHandshakeAction.START -> {
-                val callerName = payload.callerName?.ifBlank { "구조자" } ?: "구조자"
-                val peerInfo = meshRegistry.getPeer(peerIdHex)
-                val wifiAware = if (wifiAwareEnabled) {
-                    payload.wifiAwareSupported || (peerInfo?.isWifiAware ?: false)
-                } else {
-                    false
-                }
-                val wifiDirect = payload.wifiDirectSupported || (peerInfo?.isWifiDirect ?: false)
-                val directFromPayload = cachePeerDirectAddress(
-                    peerIdHex = peerIdHex,
-                    rawAddress = payload.directDeviceAddress,
-                    source = "handshake-start"
-                )
-                val announcedDirect = peerDirectAddresses[peerIdHex]
-                val resolvedDirect = directFromPayload ?: announcedDirect
-                _uiState.update {
-                    it.copy(
-                        incomingCallPeerId = peerIdHex,
-                        incomingCallName = callerName,
-                        incomingCallWifiAware = wifiAware,
-                        incomingCallWifiDirect = wifiDirect,
-                        incomingCallUseOpus = payload.useOpus,
-                        incomingCallState = payload.state,
-                        incomingCallRttCm = payload.rttCm,
-                        incomingCallDirectAddress = resolvedDirect,
-                        callPeerWifiAware = wifiAware,
-                        callPeerWifiDirect = wifiDirect,
-                        callPeerUseOpus = payload.useOpus,
-                        callPeerId = peerIdHex,
-                        callPeerState = payload.state,
-                        callPeerRttCm = payload.rttCm,
-                        callPeerDirectAddress = resolvedDirect,
-                        peerDirectAddresses = peerDirectAddresses.toMap()
-                    )
-                }
-            }
-            CallHandshakeAction.END -> {
-                _uiState.update { state ->
-                    val shouldClearIncoming = state.incomingCallPeerId == peerIdHex
-                    val shouldClearCallPeer = state.callPeerId == peerIdHex
-                    if (!shouldClearIncoming && !shouldClearCallPeer) return@update state
-                    state.copy(
-                        incomingCallPeerId = if (shouldClearIncoming) null else state.incomingCallPeerId,
-                        incomingCallName = if (shouldClearIncoming) null else state.incomingCallName,
-                        incomingCallWifiAware = if (shouldClearIncoming) false else state.incomingCallWifiAware,
-                        incomingCallWifiDirect = if (shouldClearIncoming) false else state.incomingCallWifiDirect,
-                        incomingCallUseOpus = if (shouldClearIncoming) false else state.incomingCallUseOpus,
-                        incomingCallState = if (shouldClearIncoming) null else state.incomingCallState,
-                        incomingCallRttCm = if (shouldClearIncoming) null else state.incomingCallRttCm,
-                        incomingCallDirectAddress = if (shouldClearIncoming) null else state.incomingCallDirectAddress,
-                        callPeerWifiAware = if (shouldClearCallPeer) null else state.callPeerWifiAware,
-                        callPeerWifiDirect = if (shouldClearCallPeer) null else state.callPeerWifiDirect,
-                        callPeerUseOpus = if (shouldClearCallPeer) null else state.callPeerUseOpus,
-                        callPeerId = if (shouldClearCallPeer) null else state.callPeerId,
-                        callPeerState = if (shouldClearCallPeer) null else state.callPeerState,
-                        callPeerRttCm = if (shouldClearCallPeer) null else state.callPeerRttCm,
-                        callPeerDirectAddress = if (shouldClearCallPeer) null else state.callPeerDirectAddress
-                    )
-                }
-            }
-            CallHandshakeAction.ACK -> {
-                val peerInfo = meshRegistry.getPeer(peerIdHex)
-                val mergedWifiAware = if (wifiAwareEnabled) {
-                    payload.wifiAwareSupported || (peerInfo?.isWifiAware ?: false)
-                } else {
-                    false
-                }
-                val mergedWifiDirect = payload.wifiDirectSupported || (peerInfo?.isWifiDirect ?: false)
-                val directFromPayload = cachePeerDirectAddress(
-                    peerIdHex = peerIdHex,
-                    rawAddress = payload.directDeviceAddress,
-                    source = "handshake-ack"
-                )
-                val announcedDirect = peerDirectAddresses[peerIdHex]
-                val resolvedDirect = directFromPayload ?: announcedDirect
-                meshRegistry.updatePeer(
-                    peerIdHex = peerIdHex,
-                    isWifiAware = mergedWifiAware,
-                    isWifiDirect = mergedWifiDirect,
-                    isUwb = peerInfo?.isUwb ?: false
-                )
-                refreshSurvivorCapabilities()
-                _uiState.update {
-                    it.copy(
-                        callPeerWifiAware = mergedWifiAware,
-                        callPeerWifiDirect = mergedWifiDirect,
-                        callPeerUseOpus = payload.useOpus,
-                        callPeerId = peerIdHex,
-                        callPeerState = payload.state,
-                        callPeerRttCm = payload.rttCm,
-                        callPeerDirectAddress = resolvedDirect,
-                        peerDirectAddresses = peerDirectAddresses.toMap()
-                    )
-                }
-            }
-        }
     }
 
     fun sendProfileTestPacket() {
@@ -871,10 +595,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val now = System.currentTimeMillis()
                     val age = now - packet.header.timestamp
                     if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
-                    val flags = packet.header.flags
-                    val isWifiCapable = (flags and 0x01) != 0
-                    val isUwbCapable = (flags and 0x02) != 0
-                    val isWifiDirectCapable = (flags and 0x04) != 0
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     val decision = peerIdentityRegistry.handleAnnounce(
                         peerId = peerHex,
@@ -888,41 +608,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         meshGraphRegistry.removePeer(removedPeerId)
                         gossipSyncManager.removeAnnouncementForPeer(removedPeerId)
                         announcedToPeers.remove(removedPeerId)
-                        announcedPeerLastSeen.remove(removedPeerId)
                         peerNicknames.remove(removedPeerId)
-                        peerDirectAddresses.remove(removedPeerId)
                     }
-                    announcedPeerLastSeen[peerHex] = now
                     if (announcement.nickname.isNotBlank()) {
                         peerNicknames[peerHex] = announcement.nickname
-                    }
-                    val directAddress = announcement.wifiDirectAddress?.trim()?.lowercase()?.ifBlank { null }
-                    if (directAddress != null) {
-                        peerDirectAddresses[peerHex] = directAddress
-                    }
-                    val shouldConnectDirect =
-                        directAddress != null &&
-                        (_uiState.value.incomingCallPeerId == peerHex || _uiState.value.callPeerId == peerHex)
-                    if (shouldConnectDirect) {
-                        wifiDirectRanger.connectToAddress(directAddress!!)
-                    }
-                    _uiState.update { state ->
-                        val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peerHex) {
-                            directAddress
-                        } else {
-                            state.incomingCallDirectAddress
-                        }
-                        val callPeerDirect = if (directAddress != null && state.callPeerId == peerHex) {
-                            directAddress
-                        } else {
-                            state.callPeerDirectAddress
-                        }
-                        state.copy(
-                            peerNicknames = peerNicknames.toMap(),
-                            peerDirectAddresses = peerDirectAddresses.toMap(),
-                            incomingCallDirectAddress = incomingDirect,
-                            callPeerDirectAddress = callPeerDirect
-                        )
+                        _uiState.update { it.copy(peerNicknames = peerNicknames.toMap()) }
                     }
                     if (relayAddress != null && packet.header.ttl >= ProtocolConstants.MESSAGE_TTL_HOPS) {
                         bleManager.bindPeerIdForAddress(relayAddress, peerHex)
@@ -935,33 +625,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         neighborsOrNull = neighbors,
                         timestamp = packet.header.timestamp
                     )
-                    meshRegistry.updatePeer(
-                        peerIdHex = peerHex,
-                        isWifiAware = isWifiCapable,
-                        isWifiDirect = isWifiDirectCapable,
-                        isUwb = isUwbCapable
-                    )
-                    refreshSurvivorCapabilities()
                     updateMeshCount()
                     gossipSyncManager.onPublicPacketSeen(packet)
                 }
                 PacketType.LEAVE -> {
                     meshGraphRegistry.removePeer(peerHex)
-                    meshRegistry.remove(peerHex)
                     peerIdentityRegistry.removePeer(peerHex)
                     gossipSyncManager.removeAnnouncementForPeer(peerHex)
                     announcedToPeers.remove(peerHex)
-                    announcedPeerLastSeen.remove(peerHex)
-                    peerNicknames.remove(peerHex)
-                    peerDirectAddresses.remove(peerHex)
-                    _uiState.update {
-                        it.copy(
-                            peerNicknames = peerNicknames.toMap(),
-                            peerDirectAddresses = peerDirectAddresses.toMap()
-                        )
+                    if (peerNicknames.remove(peerHex) != null) {
+                        _uiState.update { it.copy(peerNicknames = peerNicknames.toMap()) }
                     }
                     updateMeshCount()
-                    refreshSurvivorCapabilities()
                 }
                 PacketType.MESSAGE -> {
                     val profileResult = ProfileTlv.decodeIfProfile(packet.payload)
@@ -999,13 +674,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.REQUEST_SYNC -> {
                     val request = RequestSyncPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     gossipSyncManager.handleRequestSync(packet.header.senderId, request)
-                }
-                PacketType.CALL_HANDSHAKE -> {
-                    val payload = CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived
-                    val recipientHex = packet.header.recipientId?.let { bytesToHex(it) }
-                    val myHex = bytesToHex(senderId)
-                    if (recipientHex != null && recipientHex != myHex) return@setOnPacketReceived
-                    handleCallHandshake(peerHex, payload)
                 }
                 else -> Unit
             }
@@ -1088,9 +756,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (meshCleanupJob?.isActive == true) return
         meshCleanupJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
-                val now = System.currentTimeMillis()
-                meshGraphRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS, now)
-                pruneAnnouncedPeers(now)
+                meshGraphRegistry.prune(ProtocolConstants.Mesh.PEER_TIMEOUT_MS)
                 updateMeshCount()
                 delay(ProtocolConstants.Mesh.PEER_CLEANUP_INTERVAL_MS)
             }
@@ -1102,29 +768,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         bleDebugJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 val snapshot = bleManager.getDebugSnapshot()
-                val peerRssi = bleManager.getPeerRssiSnapshot()
-                _uiState.update {
-                    it.copy(
-                        bleDebug = BleDebugStats.fromSnapshot(snapshot),
-                        peerRssi = peerRssi
-                    )
-                }
+                _uiState.update { it.copy(bleDebug = BleDebugStats.fromSnapshot(snapshot)) }
                 delay(3_000L)
             }
         }
     }
 
     private fun sendAnnounce() {
-        wifiDirectRanger.refreshLocalDeviceAddress()
         val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
         val noisePublicKey = signatureManager.getNoisePublicKeyBytes()
         val signingPublicKey = signatureManager.getPublicKeyBytes()
-        val directAddress = wifiDirectRanger.getLocalDeviceAddress()
         val announcement = IdentityAnnouncementPayload(
             nickname = nickname,
             noisePublicKey = noisePublicKey,
-            signingPublicKey = signingPublicKey,
-            wifiDirectAddress = directAddress
+            signingPublicKey = signingPublicKey
         )
         val basePayload = announcement.encode() ?: return
         val directPeers = bleManager.getConnectedPeerIds()
@@ -1141,13 +798,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             timestamp = now
         )
         updateMeshCount()
-        val currentFlags = getCurrentCapabilityFlags()
         val packet = Packet(
             header = PacketHeader(
                 version = 2,
                 type = PacketType.ANNOUNCE,
                 ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
-                flags = currentFlags,
+                flags = 0,
                 length = payload.size,
                 timestamp = now,
                 senderId = senderId
@@ -1166,207 +822,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(myNickname = cachedNickname) }
             }
         }
-    }
-
-    private fun observeProfiles() {
-        viewModelScope.launch {
-            profileDao.getAll().collect { entities ->
-                discoveredSurvivors.clear()
-                entities.forEach { entity ->
-                    discoveredSurvivors[entity.peerId] = SurvivorProfile(
-                        name = entity.name,
-                        gender = entity.gender,
-                        birthDate = entity.birthDate,
-                        notes = entity.notes,
-                        peerId = entity.peerId
-                    )
-                }
-                refreshSurvivorCapabilities()
-            }
-        }
-    }
-
-    private fun refreshSurvivorCapabilities() {
-        _uiState.update { state ->
-            val peerIds = announcedPeerLastSeen.keys.sorted()
-            val mergedList = peerIds.map { peerId ->
-                val base = discoveredSurvivors[peerId]
-                    ?: SurvivorProfile(name = peerNicknames[peerId].orEmpty(), peerId = peerId)
-                val peerInfo = meshRegistry.getPeer(peerId)
-                base.copy(
-                    isWifiAware = peerInfo?.isWifiAware ?: base.isWifiAware,
-                    isWifiDirect = peerInfo?.isWifiDirect ?: base.isWifiDirect,
-                    isUwb = peerInfo?.isUwb ?: base.isUwb,
-                    peerId = peerId
-                )
-            }
-            state.copy(
-                meshPeerCount = meshGraphRegistry.countNodes().coerceAtLeast(1),
-                survivors = mergedList
-            )
-        }
-    }
-
-    private fun pruneAnnouncedPeers(now: Long) {
-        val cutoff = now - ProtocolConstants.Mesh.PEER_TIMEOUT_MS
-        val stale = announcedPeerLastSeen.filterValues { it < cutoff }.keys
-        if (stale.isEmpty()) return
-        stale.forEach {
-            announcedPeerLastSeen.remove(it)
-            peerDirectAddresses.remove(it)
-        }
-        _uiState.update { it.copy(peerDirectAddresses = peerDirectAddresses.toMap()) }
-        refreshSurvivorCapabilities()
-    }
-
-    private fun observeCallConnection() {
-        viewModelScope.launch {
-            wifiDirectRanger.isConnectionReady.collect { ready ->
-                _uiState.update { it.copy(isCallConnected = ready) }
-            }
-        }
-    }
-
-    private fun isLocalWifiAwareSupported(): Boolean {
-        return (getCurrentCapabilityFlags() and 0x01) != 0
-    }
-
-    fun isWifiAwareSupportedLocally(): Boolean {
-        if (!wifiAwareEnabled) {
-            return false
-        }
-        val supported = isLocalWifiAwareSupported()
-        val pm = app.packageManager
-        val awareFeature = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            pm.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
-        } else {
-            false
-        }
-        val wifiManager = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        val wifiEnabled = wifiManager?.isWifiEnabled
-        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            locationManager?.isLocationEnabled
-        } else {
-            val providers = locationManager?.getProviders(true) ?: emptyList()
-            providers.isNotEmpty()
-        }
-        val awareManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            app.getSystemService(Context.WIFI_AWARE_SERVICE) as? android.net.wifi.aware.WifiAwareManager
-        } else {
-            null
-        }
-        val awareAvailable = awareManager?.isAvailable
-        val hasNearby = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(app, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-        val hasFine = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        Log.d(
-            "AppViewModel",
-            "Local Wi-Fi Aware supported=$supported feature=$awareFeature available=$awareAvailable wifiEnabled=$wifiEnabled locationEnabled=$locationEnabled nearby=$hasNearby fine=$hasFine coarse=$hasCoarse"
-        )
-        return supported
-    }
-
-    fun isWifiDirectSupportedLocally(): Boolean {
-        val supported = (getCurrentCapabilityFlags() and 0x04) != 0
-        val pm = app.packageManager
-        val directFeature = pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)
-        val wifiManager = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        val wifiEnabled = wifiManager?.isWifiEnabled
-        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            locationManager?.isLocationEnabled
-        } else {
-            val providers = locationManager?.getProviders(true) ?: emptyList()
-            providers.isNotEmpty()
-        }
-        val hasNearby = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(app, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-        val hasFine = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        Log.d(
-            "AppViewModel",
-            "Local Wi-Fi Direct supported=$supported feature=$directFeature wifiEnabled=$wifiEnabled locationEnabled=$locationEnabled nearby=$hasNearby fine=$hasFine coarse=$hasCoarse"
-        )
-        return supported
-    }
-
-    fun isUwbSupportedLocally(): Boolean {
-        return (getCurrentCapabilityFlags() and 0x02) != 0
-    }
-
-    private fun getCurrentCapabilityFlags(): Int {
-        var flags = 0
-        val pm = app.packageManager
-        val wifiManager = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        val wifiEnabled = wifiManager?.isWifiEnabled == true
-        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-        val locationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            locationManager?.isLocationEnabled == true
-        } else {
-            val providers = locationManager?.getProviders(true) ?: emptyList()
-            providers.isNotEmpty()
-        }
-        val hasNearby = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(app, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-        val hasFine = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasLocationPermission = hasFine || hasCoarse
-
-        val awareReady = if (wifiAwareEnabled) {
-            val awareFeature = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                pm.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
-            } else {
-                false
-            }
-            val awareManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                app.getSystemService(Context.WIFI_AWARE_SERVICE) as? android.net.wifi.aware.WifiAwareManager
-            } else {
-                null
-            }
-            val awareAvailable = awareManager?.isAvailable == true
-            awareFeature && wifiEnabled && locationEnabled && hasNearby && hasLocationPermission && awareAvailable
-        } else {
-            false
-        }
-        if (awareReady) {
-            flags = flags or 0x01
-        }
-
-        val hasUwbPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(app, Manifest.permission.UWB_RANGING) ==
-                PackageManager.PERMISSION_GRANTED
-        } else {
-            false
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            pm.hasSystemFeature(PackageManager.FEATURE_UWB) &&
-            hasUwbPermission
-        ) {
-            flags = flags or 0x02
-        }
-
-        val directFeature = pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)
-        val directReady = directFeature && wifiEnabled && locationEnabled && hasNearby && hasLocationPermission
-        if (directReady) {
-            flags = flags or 0x04
-        }
-
-        Log.d(
-            "AppViewModel",
-            "Capability Flags(now): $flags (Aware=$awareReady, Direct=$directReady, UWB=${flags and 2 != 0})"
-        )
-        return flags
     }
 
     private fun observeMeshGraph() {
@@ -1472,25 +927,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    private fun cachePeerDirectAddress(peerIdHex: String, rawAddress: String?, source: String): String? {
-        val normalized = normalizeMacAddress(rawAddress) ?: return null
-        val previous = peerDirectAddresses.put(peerIdHex, normalized)
-        if (previous != normalized) {
-            ConnectionLog.add("CallHandshake", "peer direct updated $source peer=$peerIdHex addr=$normalized")
-        }
-        return normalized
-    }
-
-    private fun normalizeMacAddress(rawAddress: String?): String? {
-        val normalized = rawAddress?.trim()?.lowercase()?.ifBlank { null } ?: return null
-        val parts = normalized.split(':')
-        if (parts.size != 6) return null
-        val isHex = parts.all { part ->
-            part.length == 2 && part.all { ch -> ch in '0'..'9' || ch in 'a'..'f' }
-        }
-        return if (isHex) normalized else null
-    }
-
     private fun hexToBytes(hex: String): ByteArray {
         return hex.chunked(2)
             .map { it.toInt(16).toByte() }
@@ -1525,10 +961,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         toneGenerator.release()
-        if (wifiAwareEnabled) {
-            wifiAwareRanger.stop()
-        }
-        wifiDirectRanger.stop()
         announceJob?.cancel()
         meshCleanupJob?.cancel()
         bleDebugJob?.cancel()
@@ -1536,7 +968,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             gossipSyncManager.stop()
         }
 
-        // [수정] BleManager 리소스 완전 해제 (메모리 릭 방지)
         if (::bleManager.isInitialized) {
             bleManager.release()
         }
