@@ -2,6 +2,7 @@
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,13 +19,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -48,12 +54,22 @@ import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
+import kotlin.math.pow
 
 @Composable
 fun RescuerSurvivorDbScreen(
     survivors: List<SurvivorProfile>,
+    peerRssiMap: Map<String, Int> = emptyMap(),
     onBack: () -> Unit,
-    isLive: Boolean = true
+    onCallClick: (SurvivorProfile) -> Unit,
+    onEndCall: () -> Unit,
+    onOpenMeshMap: () -> Unit,
+    selectedTargetPeerId: String? = null,
+    onSelectTarget: (SurvivorProfile) -> Unit = {},
+    isLive: Boolean = true,
+    activeSurvivor: SurvivorProfile? = null,
+    isInCall: Boolean = false,
+    callingPeerId: String? = null
 ) {
     val scale = LocalAppScale.current
 
@@ -64,6 +80,12 @@ fun RescuerSurvivorDbScreen(
     val neonRed = Color(0xFFFF2A5A)
 
     val liveLabel = if (isLive) "실시간" else "대기"
+    val activeCallName = activeSurvivor?.name?.ifBlank { "생존자" }
+    val callingSurvivorName = survivors
+        .firstOrNull { it.peerId == callingPeerId }
+        ?.name
+        ?.ifBlank { "생존자" }
+        ?: "생존자"
 
     var query by rememberSaveable { mutableStateOf("") }
 
@@ -116,18 +138,63 @@ fun RescuerSurvivorDbScreen(
                         )
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(neonGreen.copy(alpha = 0.10f))
-                            .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
-                    ) {
-                        Text(
-                            text = liveLabel,
-                            color = neonGreen,
-                            fontSize = scaledSp(12, scale),
-                            fontWeight = FontWeight.Bold
-                        )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(neonGreen.copy(alpha = 0.10f))
+                                    .padding(horizontal = scaledDp(12, scale), vertical = scaledDp(8, scale))
+                            ) {
+                                Text(
+                                    text = liveLabel,
+                                    color = neonGreen,
+                                    fontSize = scaledSp(12, scale),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(scaledDp(8, scale)))
+                            TextButton(
+                                onClick = onOpenMeshMap,
+                                contentPadding = PaddingValues(horizontal = scaledDp(10, scale), vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text = "메쉬 망",
+                                    color = neonGreen,
+                                    fontSize = scaledSp(11, scale),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        if (isInCall && activeCallName != null) {
+                            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(neonRed.copy(alpha = 0.12f))
+                                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                                ) {
+                                    Text(
+                                        text = "통화 중 ${activeCallName.orEmpty()}",
+                                        color = neonRed,
+                                        fontSize = scaledSp(10, scale),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                TextButton(
+                                    onClick = onEndCall,
+                                    contentPadding = PaddingValues(horizontal = scaledDp(8, scale), vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        text = "통화 종료",
+                                        color = neonRed,
+                                        fontSize = scaledSp(10, scale),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -219,7 +286,62 @@ fun RescuerSurvivorDbScreen(
                                 charcoal = charcoal,
                                 border = border,
                                 neonGreen = neonGreen,
-                                neonRed = neonRed
+                                neonRed = neonRed,
+                                peerRssiMap = peerRssiMap,
+                                isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
+                                onSelectTarget = onSelectTarget,
+                                onCallClick = onCallClick,
+                                isCalling = survivor.peerId.isNotBlank() && survivor.peerId == callingPeerId,
+                                callButtonEnabled = callingPeerId == null || survivor.peerId == callingPeerId
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (callingPeerId != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        color = charcoal.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(scaledDp(20, scale)),
+                        border = BorderStroke(1.dp, border),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(28, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    horizontal = scaledDp(22, scale),
+                                    vertical = scaledDp(24, scale)
+                                ),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(
+                                color = neonGreen,
+                                strokeWidth = scaledDp(3, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(14, scale)))
+                            Text(
+                                text = "통화 연결 시도 중",
+                                color = Color.White,
+                                fontSize = scaledSp(15, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            Text(
+                                text = "${callingSurvivorName} · 최대 15초 대기",
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
@@ -236,7 +358,13 @@ private fun SurvivorCard(
     charcoal: Color,
     border: Color,
     neonGreen: Color,
-    neonRed: Color
+    neonRed: Color,
+    peerRssiMap: Map<String, Int>,
+    isSelected: Boolean,
+    onSelectTarget: (SurvivorProfile) -> Unit,
+    onCallClick: (SurvivorProfile) -> Unit,
+    isCalling: Boolean,
+    callButtonEnabled: Boolean
 ) {
     Surface(
         color = charcoal.copy(alpha = 0.80f),
@@ -249,6 +377,7 @@ private fun SurvivorCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable { onSelectTarget(survivor) }
                 .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(14, scale)),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -288,6 +417,17 @@ private fun SurvivorCard(
                     fontWeight = FontWeight.Medium
                 )
 
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                val rssi = peerRssiMap[survivor.peerId]
+                val rssiText = rssi?.let { "${it} dBm" } ?: "-"
+                val distanceText = rssi?.let { String.format("%.1f", estimateDistanceMeters(it)) } ?: "-"
+                Text(
+                    text = "RSSI $rssiText · 약 ${distanceText}m",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Medium
+                )
+
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))) {
@@ -298,24 +438,63 @@ private fun SurvivorCard(
                             fg = neonRed
                         )
                     }
+                    if (isSelected) {
+                        MiniChip(
+                            text = "거리 추적",
+                            bg = neonGreen.copy(alpha = 0.12f),
+                            fg = neonGreen
+                        )
+                    }
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(neonGreen.copy(alpha = 0.10f))
-                    .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(7, scale))
-            ) {
-                Text(
-                    text = "수신됨",
-                    color = neonGreen,
-                    fontSize = scaledSp(12, scale),
-                    fontWeight = FontWeight.Bold
-                )
+            Column(horizontalAlignment = Alignment.End) {
+                if (isCalling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(scaledDp(30, scale)),
+                        color = neonGreen,
+                        strokeWidth = scaledDp(2.6f, scale)
+                    )
+                } else {
+                    FilledIconButton(
+                        onClick = { onCallClick(survivor) },
+                        enabled = callButtonEnabled,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = neonGreen,
+                            disabledContainerColor = neonGreen.copy(alpha = 0.32f),
+                            disabledContentColor = Color.Black.copy(alpha = 0.45f)
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Call,
+                            contentDescription = "통화",
+                            tint = Color.Black
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background((if (isCalling) neonRed else neonGreen).copy(alpha = 0.10f))
+                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(7, scale))
+                ) {
+                    Text(
+                        text = if (isCalling) "연결 시도 중" else "수신됨",
+                        color = if (isCalling) neonRed else neonGreen,
+                        fontSize = scaledSp(12, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
+}
+
+private fun estimateDistanceMeters(rssi: Int): Float {
+    val txPower = -59
+    val pathLossExponent = 2.0
+    return 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
 }
 
 @Composable

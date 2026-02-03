@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
+        // 요청 직후 실제 권한 상태를 ViewModel에 동기화
+        viewModel.refreshPermissions()
         // 거부했더라도 일단 다음 단계(오버레이)로 진행 (필수 안내는 나중에)
         checkOverlayPermission()
     }
@@ -252,6 +254,8 @@ class MainActivity : ComponentActivity() {
 
     // 4단계: 최종 완료 (서비스 시작 & LifesaiverApp 표시)
     private fun finishSetup() {
+        // 권한 다이얼로그/설정 화면 복귀 후 상태를 다시 반영
+        viewModel.refreshPermissions()
         refreshServices()
         // [중요] 여기서 true가 되면 LifesaiverApp이 렌더링됨
         // LifesaiverApp 내부에서 닉네임 유무에 따라 '정보 입력' vs '대기 화면' 분기 처리

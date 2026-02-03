@@ -20,7 +20,11 @@ data class SurvivorProfile(
     val name: String = "",
     val gender: String = "",
     val birthDate: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    val isWifiAware: Boolean = false,
+    val isWifiDirect: Boolean = false,
+    val isUwb: Boolean = false,
+    val peerId: String = ""
 ) {
     val isComplete: Boolean
         get() = name.isNotBlank() && gender.isNotBlank() && birthDate.isNotBlank()

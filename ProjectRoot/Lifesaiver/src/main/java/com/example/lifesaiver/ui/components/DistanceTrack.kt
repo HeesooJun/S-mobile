@@ -24,13 +24,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.example.lifesaiver.core.location.DistanceMeasurementSource
+import com.example.lifesaiver.core.location.DistanceTrend
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import java.util.Locale
-
-enum class DistanceTrend { Approaching, Receding, Unknown }
 
 @Composable
 fun DistanceTrack(
@@ -38,6 +38,8 @@ fun DistanceTrack(
     modifier: Modifier = Modifier,          // ✅ modifier를 첫 optional로
     trend: DistanceTrend = DistanceTrend.Unknown,
     maxMeters: Float = 30f,
+    measurementSource: DistanceMeasurementSource = DistanceMeasurementSource.NONE,
+    isPrecisionMode: Boolean = false,
 ) {
     val scale = LocalAppScale.current
     val density = LocalDensity.current
@@ -188,8 +190,19 @@ fun DistanceTrack(
                 DistanceTrend.Receding -> "멀어지는 중"
                 DistanceTrend.Unknown -> "거리 측정 중"
             }
+            val resolvedSource = when {
+                measurementSource != DistanceMeasurementSource.NONE -> measurementSource
+                isPrecisionMode -> DistanceMeasurementSource.RTT
+                else -> DistanceMeasurementSource.RSSI
+            }
+            val techSuffix = when (resolvedSource) {
+                DistanceMeasurementSource.RTT -> " (RTT)"
+                DistanceMeasurementSource.RSSI -> " (RSSI)"
+                DistanceMeasurementSource.UWB -> " (UWB)"
+                DistanceMeasurementSource.NONE -> ""
+            }
             Text(
-                text = sub,
+                text = "$sub$techSuffix",
                 color = AppColors.Gray500,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.SemiBold
