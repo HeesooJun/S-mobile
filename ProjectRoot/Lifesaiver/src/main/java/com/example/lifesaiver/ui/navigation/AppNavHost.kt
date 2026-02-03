@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -21,29 +22,39 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.lifesaiver.core.audio.RealtimeAudioStreamEngine
+import com.example.lifesaiver.core.call.RealTimeCallManager
 import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
+import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
+import com.example.lifesaiver.presentation.screen.CallViewModel
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
+import com.example.lifesaiver.protocol.model.CallHandshakeAction
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.components.ptt.PttBottomBar
 import com.example.lifesaiver.ui.components.ptt.PttBottomTab
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
+import com.example.lifesaiver.ui.screen.survivor.ptt.SurvivorCallRequest
 import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
 import com.example.lifesaiver.ui.screen.survivor.chat.RescueChatScreen
 import com.example.lifesaiver.ui.screen.survivor.emergency.EmergencyBeaconScreen as SurvivorEmergencyBeaconScreen
@@ -53,7 +64,9 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.core.content.ContextCompat
 
 @Composable
@@ -99,6 +112,31 @@ fun AppNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scale = LocalAppScale.current
     val context = LocalContext.current
+    val appContext = context.applicationContext
+    val appViewModel: AppViewModel = viewModel(
+        viewModelStoreOwner = context as ViewModelStoreOwner
+    )
+    val appState by appViewModel.uiState.collectAsState()
+    val audioEngine = remember(appContext) { RealtimeAudioStreamEngine(appContext) }
+    val localOpusSupported = remember(audioEngine) { audioEngine.isOpusSupported() }
+    val callManager = remember(appViewModel) {
+        RealTimeCallManager(
+            audioEngine = audioEngine,
+            wifiAwareRanger = appViewModel.wifiAwareRanger,
+            wifiDirectRanger = appViewModel.wifiDirectRanger
+        )
+    }
+    val callViewModel: CallViewModel = viewModel(
+        viewModelStoreOwner = context as ViewModelStoreOwner,
+        factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return CallViewModel(callManager) as T
+            }
+        }
+    )
+    val isInCall by callViewModel.isInCall.collectAsState()
+    val targetSurvivor by callViewModel.targetSurvivor.collectAsState()
 
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
@@ -107,6 +145,9 @@ fun AppNavHost(
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
     val minSosDurationMs = 1_000L
+    var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
+    var connectingTargetPeerId by remember { mutableStateOf<String?>(null) }
+    val callAttemptTimeoutMs = 15_000L
     val currentRoute = backStackEntry?.destination?.route
     val footerEnabledRoutes = setOf(
         AppRoute.SurvivorPTT.route,
@@ -209,6 +250,141 @@ fun AppNavHost(
         }
     }
 
+    LaunchedEffect(appState.incomingCallPeerId, isInCall, backStackEntry) {
+        val current = backStackEntry?.destination?.route
+        if (appState.incomingCallPeerId != null && !isInCall && current != AppRoute.SurvivorPTT.route) {
+            navController.navigate(AppRoute.SurvivorPTT.route) {
+                launchSingleTop = true
+            }
+        }
+    }
+
+    LaunchedEffect(appState.callPeerId, isInCall) {
+        if (isInCall && appState.callPeerId == null) {
+            callViewModel.endCall()
+            connectingTargetPeerId = null
+        }
+    }
+
+    LaunchedEffect(
+        connectingTargetPeerId,
+        isInCall,
+        appState.isCallConnected,
+        targetSurvivor?.peerId,
+        appState.callPeerId
+    ) {
+        val targetPeerId = connectingTargetPeerId ?: return@LaunchedEffect
+        val connected =
+            isInCall &&
+                appState.isCallConnected &&
+                (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
+        if (connected) {
+            connectingTargetPeerId = null
+        }
+    }
+
+    LaunchedEffect(connectingTargetPeerId) {
+        val targetPeerId = connectingTargetPeerId ?: return@LaunchedEffect
+        val completedInTime = withTimeoutOrNull(callAttemptTimeoutMs) {
+            snapshotFlow {
+                val connected =
+                    isInCall &&
+                        appState.isCallConnected &&
+                        (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
+                val canceled = connectingTargetPeerId != targetPeerId
+                connected || canceled
+            }.first { done -> done }
+        } != null
+        if (connectingTargetPeerId != targetPeerId) return@LaunchedEffect
+        val connectedNow =
+            isInCall &&
+                appState.isCallConnected &&
+                (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
+        if (completedInTime || connectedNow) return@LaunchedEffect
+        val localAware = appViewModel.isWifiAwareSupportedLocally()
+        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+        appViewModel.sendCallHandshake(
+            targetPeerIdHex = targetPeerId,
+            action = CallHandshakeAction.END,
+            callerName = profileState.name.ifBlank { "생존자" },
+            wifiAwareSupported = localAware,
+            wifiDirectSupported = localDirect,
+            useOpus = localOpusSupported
+        )
+        appViewModel.clearLocalCallState(targetPeerId)
+        callViewModel.endCall()
+        connectingTargetPeerId = null
+        Toast.makeText(context, "통화 연결 시간 초과(15초)", Toast.LENGTH_SHORT).show()
+    }
+
+    fun acceptIncomingCall(peerId: String): Boolean {
+        if (!appViewModel.ensureWifiAwarePermissions()) return false
+        val localAware = appViewModel.isWifiAwareSupportedLocally()
+        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+        val peerAware = appState.incomingCallWifiAware
+        val peerDirect = appState.incomingCallWifiDirect
+        appViewModel.sendCallHandshake(
+            targetPeerIdHex = peerId,
+            action = CallHandshakeAction.ACK,
+            callerName = profileState.name.ifBlank { "생존자" },
+            wifiAwareSupported = localAware,
+            wifiDirectSupported = localDirect,
+            useOpus = localOpusSupported
+        )
+        val useOpus = localOpusSupported && appState.incomingCallUseOpus
+        val started = callViewModel.startRealTimeCall(
+            survivor = SurvivorProfile(
+                name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자",
+                isWifiAware = peerAware,
+                isWifiDirect = peerDirect,
+                isUwb = appState.survivors.firstOrNull { it.peerId == peerId }?.isUwb ?: false,
+                peerId = peerId
+            ),
+            localWifiAwareSupported = localAware,
+            localWifiDirectSupported = localDirect,
+            peerWifiAwareSupported = peerAware,
+            peerWifiDirectSupported = peerDirect,
+            isServer = false,
+            useOpus = useOpus,
+            targetDirectAddress = appState.incomingCallDirectAddress,
+            localPeerId = myPeerId,
+            targetPeerId = peerId
+        )
+        if (!started) {
+            Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
+            appViewModel.sendCallHandshake(
+                targetPeerIdHex = peerId,
+                action = CallHandshakeAction.END,
+                callerName = profileState.name.ifBlank { "생존자" },
+                wifiAwareSupported = localAware,
+                wifiDirectSupported = localDirect,
+                useOpus = localOpusSupported
+            )
+            appViewModel.clearIncomingCall(peerId)
+            connectingTargetPeerId = null
+            return false
+        }
+        connectingTargetPeerId = peerId
+        appViewModel.clearIncomingCall(peerId)
+        return true
+    }
+
+    LaunchedEffect(appState.incomingCallPeerId) {
+        if (appState.incomingCallPeerId == null) {
+            autoAcceptedPeerId = null
+        }
+    }
+
+    LaunchedEffect(appState.incomingCallPeerId, isInCall, backStackEntry) {
+        val peerId = appState.incomingCallPeerId ?: return@LaunchedEffect
+        if (isInCall || autoAcceptedPeerId == peerId) return@LaunchedEffect
+        val currentRoute = backStackEntry?.destination?.route
+        if (currentRoute != AppRoute.SurvivorPTT.route) return@LaunchedEffect
+        if (acceptIncomingCall(peerId)) {
+            autoAcceptedPeerId = peerId
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -302,6 +478,14 @@ fun AppNavHost(
                 LaunchedEffect(Unit) {
                     onStartAutoConnect()
                 }
+                val pendingRequest = appState.incomingCallPeerId?.let {
+                    SurvivorCallRequest(
+                        callerName = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자",
+                        wifiAware = appState.incomingCallWifiAware,
+                        wifiDirect = appState.incomingCallWifiDirect,
+                        useOpus = appState.incomingCallUseOpus
+                    )
+                }
                 PTTLinkScreen(
                     batteryLevel = batteryLevel,
                     connectedCount = connectedCount,
@@ -314,8 +498,31 @@ fun AppNavHost(
                     meshVisualEvents = meshVisualEvents,
                     bleDebugStats = bleDebugStats,
                     isConnected = isConnected,
+                    isMicOn = isMicOn,
+                    isCallConnected = appState.isCallConnected,
+                    isInCall = isInCall,
+                    callPeerName = targetSurvivor?.name,
+                    pendingCall = pendingRequest,
                     onBack = { navController.popBackStack() },
                     onDisconnect = {
+                        if (isInCall) {
+                            val targetPeerId = targetSurvivor?.peerId ?: appState.callPeerId.orEmpty()
+                            if (targetPeerId.isNotBlank()) {
+                                val localAware = appViewModel.isWifiAwareSupportedLocally()
+                                val localDirect = appViewModel.isWifiDirectSupportedLocally()
+                                appViewModel.sendCallHandshake(
+                                    targetPeerIdHex = targetPeerId,
+                                    action = CallHandshakeAction.END,
+                                    callerName = profileState.name.ifBlank { "생존자" },
+                                    wifiAwareSupported = localAware,
+                                    wifiDirectSupported = localDirect,
+                                    useOpus = localOpusSupported
+                                )
+                                appViewModel.clearLocalCallState(targetPeerId)
+                            }
+                            callViewModel.endCall()
+                            connectingTargetPeerId = null
+                        }
                         onDisconnect()
                         navController.navigate(AppRoute.SurvivorStandby.route) {
                             popUpTo(AppRoute.SurvivorStandby.route) { inclusive = true }
@@ -323,7 +530,43 @@ fun AppNavHost(
                     },
                     onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                     onPanicClear = onClearDeviceMonitoring,
-                    onSettings = { navigateBottomTab(AppRoute.Settings.route) }
+                    onSettings = { navigateBottomTab(AppRoute.Settings.route) },
+                    onAcceptCall = {
+                        val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
+                        acceptIncomingCall(peerId)
+                    },
+                    onDeclineCall = {
+                        val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
+                        val localAware = appViewModel.isWifiAwareSupportedLocally()
+                        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+                        appViewModel.sendCallHandshake(
+                            targetPeerIdHex = peerId,
+                            action = CallHandshakeAction.END,
+                            callerName = profileState.name.ifBlank { "생존자" },
+                            wifiAwareSupported = localAware,
+                            wifiDirectSupported = localDirect,
+                            useOpus = localOpusSupported
+                        )
+                        appViewModel.clearIncomingCall(peerId)
+                    },
+                    onEndCall = {
+                        val targetPeerId = targetSurvivor?.peerId ?: appState.callPeerId.orEmpty()
+                        if (targetPeerId.isNotBlank()) {
+                            val localAware = appViewModel.isWifiAwareSupportedLocally()
+                            val localDirect = appViewModel.isWifiDirectSupportedLocally()
+                            appViewModel.sendCallHandshake(
+                                targetPeerIdHex = targetPeerId,
+                                action = CallHandshakeAction.END,
+                                callerName = profileState.name.ifBlank { "생존자" },
+                                wifiAwareSupported = localAware,
+                                wifiDirectSupported = localDirect,
+                                useOpus = localOpusSupported
+                            )
+                            appViewModel.clearLocalCallState(targetPeerId)
+                        }
+                        callViewModel.endCall()
+                        connectingTargetPeerId = null
+                    }
                 )
             }
 

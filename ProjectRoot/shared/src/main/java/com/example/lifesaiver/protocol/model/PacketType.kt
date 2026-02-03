@@ -10,7 +10,8 @@ enum class PacketType(val code: Int) {
     REQUEST_SYNC(0x21),
     FILE_TRANSFER(0x22),
     FILE_ACK(0x23),
-    RESCUE_ID(0x30);
+    RESCUE_ID(0x30),
+    CALL_HANDSHAKE(0x31);
 
     companion object {
         fun fromCode(code: Int): PacketType? {

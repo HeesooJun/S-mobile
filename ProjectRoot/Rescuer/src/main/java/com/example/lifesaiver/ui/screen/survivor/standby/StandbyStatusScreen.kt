@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,9 +36,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
 import com.example.lifesaiver.ai.stt.EmergencyIntentClassifierKorean
 import com.example.lifesaiver.ai.stt.VoiceTriggerDetector
+import com.example.lifesaiver.core.log.ConnectionLog
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SecondaryButton
 import com.example.lifesaiver.ui.components.SecondaryButtonVariant
@@ -52,6 +56,9 @@ fun StandbyStatusScreen(
     batteryLevel: Int,
     sttResetToken: Long,
     sttEnabled: Boolean,
+    connectedCount: Int,
+    meshPeerCount: Int,
+    bleDebugStats: BleDebugStats,
     onPrev: () -> Unit,
     onProfile: () -> Unit,
     onSos: () -> Unit
@@ -63,6 +70,8 @@ fun StandbyStatusScreen(
     var hasTriggered by remember { mutableStateOf(false) }
     var sttStatus by remember { mutableStateOf("🎙️ 대기 중") }
     var lastHeardText by remember { mutableStateOf("") }
+    var showDebugModal by remember { mutableStateOf(false) }
+    val connectionLogs by ConnectionLog.logs.collectAsState()
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -136,12 +145,21 @@ fun StandbyStatusScreen(
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.Medium
             )
-            if (sttEnabled) {
+            Column(horizontalAlignment = Alignment.End) {
+                if (sttEnabled) {
+                    Text(
+                        text = sttStatus,
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
                 Text(
-                    text = sttStatus,
-                    color = AppColors.Gray500,
+                    text = "디버그",
+                    color = AppColors.Gray400,
                     fontSize = scaledSp(11, scale),
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable { showDebugModal = true }
                 )
             }
         }
@@ -257,6 +275,83 @@ fun StandbyStatusScreen(
                     variant = SecondaryButtonVariant.Gray,
                     onClick = onProfile
                 )
+            }
+        }
+        if (showDebugModal) {
+            Dialog(onDismissRequest = { showDebugModal = false }) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.Surface(
+                        color = AppColors.Gray900,
+                        shape = RoundedCornerShape(scaledDp(18, scale)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(24, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(scaledDp(18, scale)),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "디버그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(16, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+                            Text(
+                                text = "직접 ${connectedCount}명 · 메쉬 ${meshPeerCount}명",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(12, scale)
+                            )
+                            val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
+                            val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
+                            Text(
+                                text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+                            Text(
+                                text = "통신 로그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            val displayedLogs = connectionLogs.takeLast(12)
+                            if (displayedLogs.isEmpty()) {
+                                Text(
+                                    text = "로그 없음",
+                                    color = AppColors.Gray500,
+                                    fontSize = scaledSp(10, scale)
+                                )
+                            } else {
+                                displayedLogs.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = AppColors.Gray400,
+                                        fontSize = scaledSp(10, scale)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                            Text(
+                                text = "닫기",
+                                color = AppColors.Green,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .align(Alignment.End)
+                                    .clickable { showDebugModal = false }
+                            )
+                        }
+                    }
+                }
             }
         }
     }

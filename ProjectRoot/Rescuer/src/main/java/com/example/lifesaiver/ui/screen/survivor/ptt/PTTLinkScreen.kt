@@ -23,10 +23,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,9 +43,12 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
+import com.example.lifesaiver.core.log.ConnectionLog
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.ui.components.BatteryIndicator
@@ -76,19 +82,30 @@ fun PTTLinkScreen(
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
     isMicOn: Boolean,
+    isCallConnected: Boolean,
+    isInCall: Boolean,
+    isSpeakerphoneOn: Boolean = true,
+    callPeerName: String? = null,
+    pendingCall: SurvivorCallRequest? = null,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
     onProfile: () -> Unit,
-    onPanicClear: () -> Unit
+    onPanicClear: () -> Unit,
+    onToggleSpeakerphone: () -> Unit = {},
+    onAcceptCall: () -> Unit = {},
+    onDeclineCall: () -> Unit = {},
+    onOpenUserList: (() -> Unit)? = null
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
+    var showDebugModal by remember { mutableStateOf(false) }
+    val connectionLogs by ConnectionLog.logs.collectAsState()
     val showActionLabelsAlways = true
     val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
     val displayConnectedCount = meshDisplayCount
@@ -102,6 +119,7 @@ fun PTTLinkScreen(
             peerNicknames = peerNicknames
         )
     }
+    val canShowMeshMap = onOpenUserList == null
 
     LaunchedEffect(expandedAction) {
         if (
@@ -139,6 +157,16 @@ fun PTTLinkScreen(
                     .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
                     .tripleClickable(onTripleClick = onPanicClear)
             )
+            Text(
+                text = "디버그",
+                color = AppColors.Gray400,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = scaledDp(20, scale), top = scaledDp(16, scale))
+                    .clickable { showDebugModal = true }
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -161,22 +189,39 @@ fun PTTLinkScreen(
                 )
                 Spacer(modifier = Modifier.height(scaledDp(80, scale)))
                 MicButton(
-                    isActive = isMicOn,
+                    isActive = isMicOn && !isInCall,
                     size = scaledDp(80, scale),
-                    onPress = onMicPress,
-                    onRelease = onMicRelease
+                    onPress = { if (!isInCall) onMicPress() },
+                    onRelease = { if (!isInCall) onMicRelease() }
                 )
                 Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                val callLabel = callPeerName?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
                 Text(
-                    text = when {
-                        hasMeshPeers -> "메쉬 연결됨"
-                        isConnected -> "구조자 연결됨"
-                        else -> "구조자 연결 대기 중"
+                    text = if (isInCall) {
+                        if (isCallConnected) "실시간 통화 연결됨$callLabel" else "실시간 통화 연결 중$callLabel"
+                    } else {
+                        when {
+                            hasMeshPeers -> "메쉬 연결됨"
+                            isConnected -> "구조자 연결됨"
+                            else -> "구조자 연결 대기 중"
+                        }
                     },
-                    color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
+                    color = if (isInCall) {
+                        if (isCallConnected) AppColors.Green else AppColors.Yellow
+                    } else {
+                        if (isLinkActive) AppColors.Green else AppColors.Gray500
+                    },
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
+                if (!isInCall && pendingCall != null) {
+                    Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                    CallRequestCard(
+                        callerName = pendingCall.callerName,
+                        onAccept = onAcceptCall,
+                        onDecline = onDeclineCall
+                    )
+                }
                 Spacer(modifier = Modifier.height(scaledDp(18, scale)))
                 Spacer(modifier = Modifier.weight(0.6f))
                 Column(
@@ -198,6 +243,17 @@ fun PTTLinkScreen(
                             onClick = {
                                 setPowerSaving(!isPowerSaving)
                                 setExpandedAction(ActionType.Power)
+                            }
+                        )
+                        ExpandableAction(
+                            iconRes = R.drawable.ic_sound,
+                            label = if (isSpeakerphoneOn) "스피커 ON" else "스피커 OFF",
+                            isExpanded = expandedAction == ActionType.Speaker,
+                            iconSizeOverride = scaledDp(34, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                setExpandedAction(ActionType.Speaker)
+                                onToggleSpeakerphone()
                             }
                         )
                         ExpandableAction(
@@ -232,12 +288,18 @@ fun PTTLinkScreen(
                         )
                         ExpandableAction(
                             iconRes = R.drawable.connection_filled,
-                            label = "사용자 $displayConnectedCount",
+                            label = if (onOpenUserList == null) {
+                                "사용자 $displayConnectedCount"
+                            } else {
+                                "사용자 DB $displayConnectedCount"
+                            },
                             isExpanded = expandedAction == ActionType.Count,
                             iconSizeOverride = scaledDp(32, scale),
                             showLabelAlways = showActionLabelsAlways,
                             onClick = {
-                                if (expandedAction == ActionType.Count) {
+                                if (onOpenUserList != null) {
+                                    onOpenUserList()
+                                } else if (expandedAction == ActionType.Count) {
                                     setExpandedAction(null)
                                     showMeshMap = true
                                 } else {
@@ -296,7 +358,7 @@ fun PTTLinkScreen(
                 }
             }
 
-            if (showMeshMap) {
+            if (showMeshMap && canShowMeshMap) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -333,19 +395,93 @@ fun PTTLinkScreen(
                             color = AppColors.Gray400,
                             fontSize = scaledSp(12, scale)
                         )
-                        val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
-                        val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
-                        Text(
-                            text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(11, scale),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(10, scale)
-                        )
+                    }
+                }
+            }
+            if (showDebugModal) {
+                Dialog(onDismissRequest = { showDebugModal = false }) {
+                    Surface(
+                        color = AppColors.Gray900,
+                        shape = RoundedCornerShape(scaledDp(18, scale)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(24, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(scaledDp(18, scale)),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "디버그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(16, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+                            Text(
+                                text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(12, scale)
+                            )
+                            val callLabel = callPeerName?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                            val callStatus = if (isInCall) {
+                                if (isCallConnected) "연결됨$callLabel" else "연결 중$callLabel"
+                            } else {
+                                "대기"
+                            }
+                            Text(
+                                text = "통화 상태: $callStatus",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
+                            val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
+                            Text(
+                                text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+                            Text(
+                                text = "통신 로그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            val displayedLogs = connectionLogs.takeLast(12)
+                            if (displayedLogs.isEmpty()) {
+                                Text(
+                                    text = "로그 없음",
+                                    color = AppColors.Gray500,
+                                    fontSize = scaledSp(10, scale)
+                                )
+                            } else {
+                                displayedLogs.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = AppColors.Gray400,
+                                        fontSize = scaledSp(10, scale)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                            Text(
+                                text = "닫기",
+                                color = AppColors.Green,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .align(Alignment.End)
+                                    .clickable { showDebugModal = false }
+                            )
+                        }
                     }
                 }
             }
@@ -437,9 +573,56 @@ private fun ExpandableAction(
 
 private enum class ActionType {
     Power,
+    Speaker,
     Disconnect,
     Chat,
     Count
+}
+
+data class SurvivorCallRequest(
+    val callerName: String,
+    val wifiAware: Boolean,
+    val wifiDirect: Boolean,
+    val useOpus: Boolean
+)
+
+@Composable
+private fun CallRequestCard(
+    callerName: String,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    val scale = LocalAppScale.current
+    Surface(
+        color = AppColors.Gray900,
+        shape = RoundedCornerShape(scaledDp(18, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(14, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "$callerName 님이 통화를 요청했습니다.",
+                color = AppColors.White,
+                fontSize = scaledSp(14, scale),
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(12, scale))
+            ) {
+                OutlinedButton(onClick = onDecline) {
+                    Text("거절")
+                }
+                Button(onClick = onAccept) {
+                    Text("수락")
+                }
+            }
+        }
+    }
 }
 
 @Composable

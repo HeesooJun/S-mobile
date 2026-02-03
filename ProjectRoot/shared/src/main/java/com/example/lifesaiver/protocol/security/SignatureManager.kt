@@ -71,6 +71,10 @@ class SignatureManager(
     }
 
     fun verify(packet: Packet, pathLabel: String? = null): Boolean {
+        if (packet.header.type == PacketType.CALL_HANDSHAKE) {
+            logEvent(packet, SignatureLogResult.SKIPPED, "CALL_HANDSHAKE 서명 검증 생략", pathLabel)
+            return true
+        }
         if (!shouldVerify(packet.header.type)) {
             logEvent(packet, SignatureLogResult.SKIPPED, "검증 대상 아님", pathLabel)
             return true
