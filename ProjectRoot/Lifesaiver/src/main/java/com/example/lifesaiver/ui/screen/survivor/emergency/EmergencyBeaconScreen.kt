@@ -28,8 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import com.example.lifesaiver.R
 import com.example.lifesaiver.presentation.screen.EmergencyBeaconUiState
 import com.example.lifesaiver.ui.components.ScreenScaffold
-import com.example.lifesaiver.ui.components.SecondaryButton
-import com.example.lifesaiver.ui.components.SecondaryButtonVariant
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
@@ -100,7 +98,7 @@ fun EmergencyBeaconScreen(
                         )
                 )
                 Image(
-                    painter = painterResource(id = R.drawable.ic_sound),
+                    painter = painterResource(id = R.drawable.ic_emergency_sound),
                     contentDescription = "구조 신호",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.size(scaledDp(56, scale))
@@ -127,15 +125,6 @@ fun EmergencyBeaconScreen(
 
             Spacer(modifier = Modifier.height(scaledDp(36, scale)))
             Spacer(modifier = Modifier.weight(1f))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = scaledDp(24, scale)),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SecondaryButton(label = uiState.prevLabel, variant = SecondaryButtonVariant.Gray, onClick = onPrev)
-            }
         }
     }
 }
