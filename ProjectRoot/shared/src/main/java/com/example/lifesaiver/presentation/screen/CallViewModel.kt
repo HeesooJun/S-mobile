@@ -40,13 +40,16 @@ class CallViewModel(
         peerWifiDirectSupported: Boolean,
         isServer: Boolean,
         useOpus: Boolean,
-        targetDirectAddress: String? = null
+        targetDirectAddress: String? = null,
+        localPeerId: String? = null,
+        targetPeerId: String? = null
     ): Boolean {
         if (_isInCall.value) {
             callManager.stopCallSession()
         }
         _targetSurvivor.value = survivor
         _isInCall.value = true
+        callManager.configureAwareCallContext(localPeerId, targetPeerId ?: survivor.peerId)
         callManager.configureDirectConnection(targetDirectAddress)
         callManager.setServerRole(isServer)
         callManager.setUseOpus(useOpus)
