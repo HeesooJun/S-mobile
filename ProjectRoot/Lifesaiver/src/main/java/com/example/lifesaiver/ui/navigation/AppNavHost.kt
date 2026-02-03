@@ -121,7 +121,7 @@ fun AppNavHost(
     val minSosDurationMs = 1_000L
     val audioEngine = remember(appContext) { RealtimeAudioStreamEngine(appContext) }
     val localOpusSupported = remember(audioEngine) { audioEngine.isOpusSupported() }
-    val forceDirectOnly = true
+    val forceDirectOnly = false
     val autoAcceptCalls = true
     val callManager = remember(appViewModel) {
         RealTimeCallManager(

@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.apply
 import kotlin.code
 import kotlin.collections.copyOfRange
@@ -45,13 +46,16 @@ import kotlin.text.toByteArray
  */
 @SuppressLint("MissingPermission")
 class RealtimeAudioStreamEngine(private val context: Context) {
-    private val sampleRate = 16000
+    private val sampleRate = 48000
     private val channelCount = 1
     private val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
     private val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val opusMime = MediaFormat.MIMETYPE_AUDIO_OPUS
     private val opusBitrate = 16_000
+    private val opusReferenceSampleRate = 48_000
+    private val opusPreSkipSamples = 312
+    private val opusSeekPreRollSamples = 3_840
     private val frameDurationMs = 20
     private val pcmBytesPerFrame = sampleRate / 1000 * frameDurationMs * 2
 
@@ -166,7 +170,11 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
             if (audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
                 val sessionId = audioRecord!!.audioSessionId
-                if (AcousticEchoCanceler.isAvailable()) {
+                val disableVoiceFx = shouldDisableVoiceEffectsForDevice()
+                if (disableVoiceFx) {
+                    Log.w("AudioEngine", "Disable AEC/NS for device compatibility: ${Build.MANUFACTURER} ${Build.MODEL}")
+                }
+                if (!disableVoiceFx && AcousticEchoCanceler.isAvailable()) {
                     val aec = AcousticEchoCanceler.create(sessionId)
                     if (aec != null) {
                         echoCanceler = aec
@@ -192,7 +200,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                         }
                     }
                 }
-                if (NoiseSuppressor.isAvailable()) {
+                if (!disableVoiceFx && NoiseSuppressor.isAvailable()) {
                     val ns = NoiseSuppressor.create(sessionId)
                     if (ns != null) {
                         noiseSuppressor = ns
@@ -288,6 +296,15 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         }
     }
 
+    private fun shouldDisableVoiceEffectsForDevice(): Boolean {
+        val manufacturer = Build.MANUFACTURER ?: return false
+        val model = Build.MODEL ?: return false
+        if (!manufacturer.equals("samsung", ignoreCase = true)) return false
+        // Galaxy Note9 family (SM-N960*)
+        return model.startsWith("SM-N960", ignoreCase = true) ||
+            model.contains("Note9", ignoreCase = true)
+    }
+
     /**
      * 네트워크에서 받은 오디오 데이터 재생
      */
@@ -371,8 +388,8 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
     fun isOpusSupported(): Boolean {
         return try {
-            val encoderName = findSoftwareCodecName(opusMime, isEncoder = true) ?: return false
-            val decoderName = findSoftwareCodecName(opusMime, isEncoder = false) ?: return false
+            val encoderName = findPreferredCodecName(opusMime, isEncoder = true) ?: return false
+            val decoderName = findPreferredCodecName(opusMime, isEncoder = false) ?: return false
             MediaCodec.createByCodecName(encoderName).release()
             MediaCodec.createByCodecName(decoderName).release()
             true
@@ -383,9 +400,9 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
     private fun setupOpusCodec(): Boolean {
         return try {
-            val encoderName = findSoftwareCodecName(opusMime, isEncoder = true)
+            val encoderName = findPreferredCodecName(opusMime, isEncoder = true)
                 ?: return false
-            val decoderName = findSoftwareCodecName(opusMime, isEncoder = false)
+            val decoderName = findPreferredCodecName(opusMime, isEncoder = false)
                 ?: return false
             val encoder = MediaCodec.createByCodecName(encoderName)
             val encoderFormat = MediaFormat.createAudioFormat(opusMime, sampleRate, channelCount).apply {
@@ -398,7 +415,13 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             val decoder = MediaCodec.createByCodecName(decoderName)
             val decoderFormat = MediaFormat.createAudioFormat(opusMime, sampleRate, channelCount).apply {
                 setByteBuffer("csd-0", ByteBuffer.wrap(buildOpusHead(sampleRate, channelCount)))
-                setByteBuffer("csd-1", ByteBuffer.wrap(buildOpusTags("lifesaiver")))
+                // For audio/opus, csd-1/csd-2 must be codec delay/seek preroll in ns.
+                val codecDelayNs =
+                    opusPreSkipSamples * 1_000_000_000L / opusReferenceSampleRate
+                val seekPreRollNs =
+                    opusSeekPreRollSamples * 1_000_000_000L / opusReferenceSampleRate
+                setByteBuffer("csd-1", ByteBuffer.wrap(buildNativeOrderLong(codecDelayNs)))
+                setByteBuffer("csd-2", ByteBuffer.wrap(buildNativeOrderLong(seekPreRollNs)))
             }
             decoder.configure(decoderFormat, null, null, 0)
             decoder.start()
@@ -407,7 +430,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             opusDecoder = decoder
             Log.d(
                 "AudioEngine",
-                "Opus codec enabled (software: $encoderName/$decoderName)"
+                "Opus codec enabled (enc=$encoderName, dec=$decoderName)"
             )
             true
         } catch (e: Exception) {
@@ -420,6 +443,18 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             releaseOpusCodec()
             false
         }
+    }
+
+    private fun findPreferredCodecName(mime: String, isEncoder: Boolean): String? {
+        return findSoftwareCodecName(mime, isEncoder) ?: findAnyCodecName(mime, isEncoder)
+    }
+
+    private fun findAnyCodecName(mime: String, isEncoder: Boolean): String? {
+        val codecInfos = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+        return codecInfos.firstOrNull { info ->
+            info.isEncoder == isEncoder &&
+                info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
+        }?.name
     }
 
     private fun findSoftwareCodecName(mime: String, isEncoder: Boolean): String? {
@@ -599,8 +634,8 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         System.arraycopy(signature, 0, head, 0, signature.size)
         head[8] = 0x01 // version
         head[9] = channels.toByte()
-        head[10] = 0x00 // pre-skip (LSB)
-        head[11] = 0x00 // pre-skip (MSB)
+        head[10] = (opusPreSkipSamples and 0xFF).toByte() // pre-skip (LSB)
+        head[11] = ((opusPreSkipSamples shr 8) and 0xFF).toByte() // pre-skip (MSB)
         head[12] = (sampleRate and 0xFF).toByte()
         head[13] = ((sampleRate shr 8) and 0xFF).toByte()
         head[14] = ((sampleRate shr 16) and 0xFF).toByte()
@@ -611,36 +646,11 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         return head
     }
 
-    private fun buildOpusTags(vendor: String): ByteArray {
-        val vendorBytes = vendor.toByteArray(Charsets.UTF_8)
-        val signature = byteArrayOf(
-            'O'.code.toByte(),
-            'p'.code.toByte(),
-            'u'.code.toByte(),
-            's'.code.toByte(),
-            'T'.code.toByte(),
-            'a'.code.toByte(),
-            'g'.code.toByte(),
-            's'.code.toByte()
-        )
-        val totalSize = 8 + 4 + vendorBytes.size + 4
-        val tags = ByteArray(totalSize)
-        var offset = 0
-        System.arraycopy(signature, 0, tags, offset, signature.size)
-        offset += signature.size
-        writeLeInt(tags, offset, vendorBytes.size)
-        offset += 4
-        System.arraycopy(vendorBytes, 0, tags, offset, vendorBytes.size)
-        offset += vendorBytes.size
-        writeLeInt(tags, offset, 0)
-        return tags
-    }
-
-    private fun writeLeInt(buffer: ByteArray, offset: Int, value: Int) {
-        buffer[offset] = (value and 0xFF).toByte()
-        buffer[offset + 1] = ((value shr 8) and 0xFF).toByte()
-        buffer[offset + 2] = ((value shr 16) and 0xFF).toByte()
-        buffer[offset + 3] = ((value shr 24) and 0xFF).toByte()
+    private fun buildNativeOrderLong(value: Long): ByteArray {
+        return ByteBuffer.allocate(8)
+            .order(ByteOrder.nativeOrder())
+            .putLong(value)
+            .array()
     }
 
     private fun shouldLog(now: Long, last: Long): Boolean {
