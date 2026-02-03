@@ -180,6 +180,15 @@ class RealTimeCallManager(
         }
     }
 
+    fun configureAwareCallContext(localPeerId: String?, peerId: String?) {
+        if (wifiAwareEnabled) {
+            wifiAwareRanger.configureCallContext(localPeerId, peerId)
+        }
+        _debugState.update {
+            it.copy(lastDecision = "aware target: ${peerId ?: "-"}")
+        }
+    }
+
     fun startCallSession(continuousTransmission: Boolean = false): CallTransportType {
         Log.d("RealTimeCall", "Session Start. Continuous: $continuousTransmission")
         ConnectionLog.add("Call", "start session, continuous=$continuousTransmission")
@@ -217,6 +226,7 @@ class RealTimeCallManager(
         audioEngine.stopStreaming()
         if (wifiAwareEnabled) {
             wifiAwareRanger.stop()
+            wifiAwareRanger.configureCallContext(null, null)
         }
         wifiDirectRanger.stop()
         wifiDirectRanger.setTargetDeviceAddress(null)

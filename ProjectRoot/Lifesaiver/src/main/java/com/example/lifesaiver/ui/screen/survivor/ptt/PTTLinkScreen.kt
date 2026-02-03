@@ -8,6 +8,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -16,15 +18,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
+import com.example.lifesaiver.R
 import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.ptt.PttActionType
@@ -187,7 +193,6 @@ fun PTTLinkScreen(
                 } else if (pendingCall != null) {
                     IncomingCallCard(
                         callerName = pendingCall.callerName,
-                        onAccept = onAcceptCall,
                         onDecline = onDeclineCall
                     )
                 } else {
@@ -226,7 +231,6 @@ fun PTTLinkScreen(
 @Composable
 private fun IncomingCallCard(
     callerName: String,
-    onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
     val scale = LocalAppScale.current
@@ -246,13 +250,15 @@ private fun IncomingCallCard(
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(scaledDp(10, scale)))
-            Row(horizontalArrangement = Arrangement.spacedBy(scaledDp(10, scale))) {
-                OutlinedButton(onClick = onDecline) {
-                    Text("거절")
-                }
-                Button(onClick = onAccept) {
-                    Text("수락")
-                }
+            Text(
+                text = "자동 수락 후 연결 중...",
+                color = AppColors.Gray500,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            OutlinedButton(onClick = onDecline) {
+                Text("취소")
             }
         }
     }
@@ -285,9 +291,14 @@ private fun CallActiveCard(
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(scaledDp(10, scale)))
-            Button(onClick = onEndCall) {
-                Text("통화 종료")
-            }
+            Image(
+                painter = painterResource(id = R.drawable.ic_call_end),
+                contentDescription = "통화 종료",
+                modifier = Modifier
+                    .size(scaledDp(56, scale))
+                    .clickable(onClick = onEndCall),
+                contentScale = ContentScale.Fit
+            )
         }
     }
 }

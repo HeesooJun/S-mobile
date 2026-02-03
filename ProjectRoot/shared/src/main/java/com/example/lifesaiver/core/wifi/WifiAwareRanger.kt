@@ -85,8 +85,12 @@ class WifiAwareRanger(private val context: Context) {
     private var dataPathEnabled = true
     private var isNdpInitiator = true
     private var peerRequestedNdp = false
+    private var ndpAckReceived = false
     private val ndpRequestMessage = "NDP_REQ"
+    private val ndpAckMessage = "NDP_ACK"
     private var nextMessageId = 1
+    private var localPeerIdForCall: String? = null
+    private var expectedPeerIdForCall: String? = null
 
     // Ranging 관련
     private val foundPeers = mutableListOf<PeerHandle>()
@@ -234,7 +238,20 @@ class WifiAwareRanger(private val context: Context) {
             _rttDistance.value = null
         }
         peerRequestedNdp = false
+        ndpAckReceived = false
         ConnectionLog.add("Aware", "ndp initiator=$isNdpInitiator")
+    }
+
+    fun configureCallContext(localPeerIdHex: String?, expectedPeerIdHex: String?) {
+        localPeerIdForCall = normalizePeerId(localPeerIdHex)
+        expectedPeerIdForCall = normalizePeerId(expectedPeerIdHex)
+        currentTargetPeer = null
+        peerRequestedNdp = false
+        ndpAckReceived = false
+        ConnectionLog.add(
+            "Aware",
+            "call ctx local=${localPeerIdForCall ?: "-"} target=${expectedPeerIdForCall ?: "-"}"
+        )
     }
 
     private fun checkPermissions(): Boolean {
@@ -284,24 +301,41 @@ class WifiAwareRanger(private val context: Context) {
                     foundPeers.add(peerHandle)
                 }
 
-                // 타겟 갱신 및 Ranging 시작
-                currentTargetPeer = peerHandle
                 if (isNdpInitiator && !_isConnectionReady.value && !isConnecting) {
-                    Log.i("WifiAware", "Service discovered. Connecting immediately...")
-                    ConnectionLog.add("Aware", "service discovered -> connect")
-                    sendNdpRequestToPeer(peerHandle)
-                    if (dataPathEnabled) {
-                        connectToCurrentPeer()
-                    } else {
-                        ConnectionLog.add("Aware", "data path disabled -> skip connect")
+                    if (currentTargetPeer != null && currentTargetPeer != peerHandle) {
+                        ConnectionLog.add("Aware", "service discovered ignored: target locked")
+                        return
                     }
+                    Log.i("WifiAware", "Service discovered. Sending NDP request...")
+                    ConnectionLog.add("Aware", "service discovered -> send ndp request")
+                    sendNdpRequestToPeer(peerHandle)
                 } else if (!isNdpInitiator) {
                     ConnectionLog.add("Aware", "service discovered -> wait initiator request")
                 }
-                if (isNdpInitiator && wifiRttManager != null && !isRanging) {
+                if (isNdpInitiator && wifiRttManager != null && !isRanging && currentTargetPeer != null) {
                     isRanging = true
                     ConnectionLog.add("Aware", "start RTT ranging")
                     startRangingLoop()
+                }
+            }
+
+            override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
+                if (!isNdpInitiator) return
+                val signal = parseNdpSignal(message) ?: return
+                if (signal.type != ndpAckMessage) return
+                if (!isExpectedAckSignal(signal)) {
+                    ConnectionLog.add("Aware", "ignore ndp ack from unexpected peer")
+                    return
+                }
+                if (currentTargetPeer != null && currentTargetPeer != peerHandle) {
+                    ConnectionLog.add("Aware", "ignore ndp ack: target locked")
+                    return
+                }
+                currentTargetPeer = peerHandle
+                ndpAckReceived = true
+                ConnectionLog.add("Aware", "received ndp ack from target")
+                if (!_isConnectionReady.value && !isConnecting && dataPathEnabled) {
+                    connectToCurrentPeer()
                 }
             }
         }, null)
@@ -325,14 +359,19 @@ class WifiAwareRanger(private val context: Context) {
 
             override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
                 if (isNdpInitiator) return
-                val text = try {
-                    message.toString(Charsets.US_ASCII)
-                } catch (_: Exception) {
-                    ""
+                val signal = parseNdpSignal(message) ?: return
+                if (signal.type != ndpRequestMessage) return
+                if (!isExpectedRequestSignal(signal)) {
+                    ConnectionLog.add("Aware", "ignore ndp request from unexpected peer")
+                    return
                 }
-                if (text != ndpRequestMessage) return
+                if (currentTargetPeer != null && currentTargetPeer != peerHandle) {
+                    ConnectionLog.add("Aware", "ignore ndp request: target locked")
+                    return
+                }
                 currentTargetPeer = peerHandle
                 peerRequestedNdp = true
+                sendNdpAckToPeer(peerHandle, signal.senderPeerId)
                 ConnectionLog.add("Aware", "received ndp request from initiator")
                 if (!_isConnectionReady.value && !isConnecting && dataPathEnabled) {
                     connectToCurrentPeer()
@@ -364,7 +403,17 @@ class WifiAwareRanger(private val context: Context) {
                 Log.d("WifiAware", "RTT distance=${dist}m")
                 ConnectionLog.add("Aware", "RTT distance=${dist}m")
                 _rttDistance.value = dist
-                currentTargetPeer = best.peerHandle
+                if (currentTargetPeer == null) {
+                    if (!requiresAckBeforeConnect()) {
+                        currentTargetPeer = best.peerHandle
+                    }
+                } else if (currentTargetPeer != best.peerHandle) {
+                    if (isNdpInitiator) {
+                        ConnectionLog.add("Aware", "ignore RTT from non-target peer")
+                    }
+                    if (isRanging) handler.postDelayed({ startRangingLoop() }, 1000)
+                    return
+                }
 
                 // [연결 트리거 로직]
                 // 30m 이내이고, 아직 연결 안됐고, 연결 시도 중이 아니면 -> 연결
@@ -393,9 +442,14 @@ class WifiAwareRanger(private val context: Context) {
     // 4. NDP 연결 및 소켓 설정 (실시간 통화용)
     // =========================================================================
     private fun connectToCurrentPeer() {
-        val canConnect = if (isNdpInitiator) true else peerRequestedNdp
+        val canConnect = when {
+            isNdpInitiator && requiresAckBeforeConnect() -> ndpAckReceived
+            isNdpInitiator -> true
+            else -> peerRequestedNdp
+        }
         if (!canConnect) {
-            ConnectionLog.add("Aware", "connect skipped: waiting initiator request")
+            val reason = if (isNdpInitiator) "waiting ndp ack" else "waiting initiator request"
+            ConnectionLog.add("Aware", "connect skipped: $reason")
             return
         }
         val connectSession: DiscoverySession = if (isNdpInitiator) {
@@ -712,6 +766,7 @@ class WifiAwareRanger(private val context: Context) {
         peerPort = null
         currentTargetPeer = null
         peerRequestedNdp = false
+        ndpAckReceived = false
         foundPeers.clear()
         isStarting = false
         ndpUnavailableCount = 0
@@ -810,12 +865,93 @@ class WifiAwareRanger(private val context: Context) {
         if (!isNdpInitiator) return
         val subscribe = subscribeSession ?: return
         val messageId = nextMessageId++
+        val payload = buildNdpRequestPayload()
         try {
-            subscribe.sendMessage(peerHandle, messageId, ndpRequestMessage.toByteArray(Charsets.US_ASCII))
+            subscribe.sendMessage(peerHandle, messageId, payload)
             ConnectionLog.add("Aware", "send ndp request id=$messageId")
         } catch (e: Exception) {
             ConnectionLog.add("Aware", "send ndp request failed: ${e.message}")
         }
+    }
+
+    private fun sendNdpAckToPeer(peerHandle: PeerHandle, targetPeerId: String) {
+        if (isNdpInitiator) return
+        val publish = publishSession ?: return
+        val messageId = nextMessageId++
+        val payload = buildNdpAckPayload(targetPeerId)
+        try {
+            publish.sendMessage(peerHandle, messageId, payload)
+            ConnectionLog.add("Aware", "send ndp ack id=$messageId")
+        } catch (e: Exception) {
+            ConnectionLog.add("Aware", "send ndp ack failed: ${e.message}")
+        }
+    }
+
+    private fun requiresAckBeforeConnect(): Boolean {
+        return !localPeerIdForCall.isNullOrBlank() && !expectedPeerIdForCall.isNullOrBlank()
+    }
+
+    private fun buildNdpRequestPayload(): ByteArray {
+        val local = localPeerIdForCall
+        val target = expectedPeerIdForCall
+        val message = if (!local.isNullOrBlank() && !target.isNullOrBlank()) {
+            "$ndpRequestMessage|$local|$target"
+        } else {
+            ndpRequestMessage
+        }
+        return message.toByteArray(Charsets.US_ASCII)
+    }
+
+    private fun buildNdpAckPayload(targetPeerId: String): ByteArray {
+        val local = localPeerIdForCall
+        val target = normalizePeerId(targetPeerId)
+        val message = if (!local.isNullOrBlank() && !target.isNullOrBlank()) {
+            "$ndpAckMessage|$local|$target"
+        } else {
+            ndpAckMessage
+        }
+        return message.toByteArray(Charsets.US_ASCII)
+    }
+
+    private data class NdpSignal(
+        val type: String,
+        val senderPeerId: String,
+        val targetPeerId: String
+    )
+
+    private fun parseNdpSignal(message: ByteArray): NdpSignal? {
+        val text = try {
+            message.toString(Charsets.US_ASCII)
+        } catch (_: Exception) {
+            return null
+        }
+        if (text.isBlank()) return null
+        val parts = text.split('|')
+        val type = parts.firstOrNull() ?: return null
+        val sender = normalizePeerId(parts.getOrNull(1)).orEmpty()
+        val target = normalizePeerId(parts.getOrNull(2)).orEmpty()
+        return NdpSignal(type = type, senderPeerId = sender, targetPeerId = target)
+    }
+
+    private fun isExpectedRequestSignal(signal: NdpSignal): Boolean {
+        if (signal.type != ndpRequestMessage) return false
+        if (!requiresAckBeforeConnect()) return true
+        val local = localPeerIdForCall ?: return false
+        val expected = expectedPeerIdForCall ?: return false
+        return signal.senderPeerId == expected && signal.targetPeerId == local
+    }
+
+    private fun isExpectedAckSignal(signal: NdpSignal): Boolean {
+        if (signal.type != ndpAckMessage) return false
+        if (!requiresAckBeforeConnect()) return true
+        val local = localPeerIdForCall ?: return false
+        val expected = expectedPeerIdForCall ?: return false
+        return signal.senderPeerId == expected && signal.targetPeerId == local
+    }
+
+    private fun normalizePeerId(peerId: String?): String? {
+        val normalized = peerId?.trim()?.lowercase()
+        return normalized?.takeIf { it.isNotBlank() }
     }
 
     private fun shouldLog(now: Long, last: Long): Boolean {

@@ -369,7 +369,9 @@ fun AppNavHost(
             peerWifiDirectSupported = profile.isWifiDirect,
             isServer = false,
             useOpus = useOpus,
-            targetDirectAddress = appState.incomingCallDirectAddress
+            targetDirectAddress = appState.incomingCallDirectAddress,
+            localPeerId = myPeerId,
+            targetPeerId = peerId
         )
         if (!started) {
             Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
@@ -474,7 +476,9 @@ fun AppNavHost(
             peerWifiDirectSupported = peerDirect,
             isServer = true,
             useOpus = useOpus,
-            targetDirectAddress = targetDirectAddress
+            targetDirectAddress = targetDirectAddress,
+            localPeerId = myPeerId,
+            targetPeerId = peerId
         )
         if (!started) {
             Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
@@ -656,7 +660,9 @@ fun AppNavHost(
                         peerWifiDirectSupported = peerWifiDirect,
                         isServer = false,
                         useOpus = useOpus,
-                        targetDirectAddress = appState.incomingCallDirectAddress
+                        targetDirectAddress = appState.incomingCallDirectAddress,
+                        localPeerId = myPeerId,
+                        targetPeerId = peerId
                     )
                     if (!started) {
                         Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
