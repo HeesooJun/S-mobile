@@ -462,14 +462,8 @@ class RealTimeCallManager(
         if (reason == lastAwareFailureReason && now - lastAwareFailureAt < 3_000L) return
         lastAwareFailureReason = reason
         lastAwareFailureAt = now
-        if (pendingStart) {
-            ConnectionLog.add("Call", "aware setup failure -> restart attempt ($reason)")
-            _debugState.update { it.copy(lastDecision = "aware setup retry ($reason)") }
-            startCallAttemptSequence()
-            return
-        }
         awareTemporarilyDisabled = true
-        ConnectionLog.add("Call", "aware failure -> disable ($reason)")
+        ConnectionLog.add("Call", "aware failure -> direct fallback ($reason)")
         _debugState.update { it.copy(lastDecision = "aware failure -> direct ($reason)") }
         if (activeTransport == CallTransportType.WIFI_AWARE || pendingStart) {
             startCallAttemptSequence()
