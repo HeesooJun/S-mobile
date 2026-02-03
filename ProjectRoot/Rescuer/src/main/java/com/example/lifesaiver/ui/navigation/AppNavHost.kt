@@ -115,9 +115,6 @@ fun AppNavHost(
     var sttEnabled by remember { mutableStateOf(false) }
     var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
     var awareReadyAckPeerId by remember { mutableStateOf<String?>(null) }
-    var clientCallTimeoutPeerId by remember { mutableStateOf<String?>(null) }
-    var clientCallTimeoutToken by remember { mutableStateOf(0L) }
-    var clientCallTimeoutStartAt by remember { mutableStateOf(0L) }
     val minSosDurationMs = 1_000L
     val audioEngine = remember(appContext) { RealtimeAudioStreamEngine(appContext) }
     val localOpusSupported = remember(audioEngine) { audioEngine.isOpusSupported() }
@@ -387,9 +384,6 @@ fun AppNavHost(
             appViewModel.clearIncomingCall(peerId)
             return@LaunchedEffect
         }
-        clientCallTimeoutPeerId = peerId
-        clientCallTimeoutStartAt = 0L
-        clientCallTimeoutToken = System.currentTimeMillis()
         autoAcceptedPeerId = peerId
         if (currentRoute != AppRoute.SurvivorPTT.route) {
             navController.navigate(AppRoute.SurvivorPTT.route) { launchSingleTop = true }
@@ -402,44 +396,31 @@ fun AppNavHost(
         }
     }
 
-    LaunchedEffect(clientCallTimeoutToken, callDebugState.activeTransport, isInCall) {
-        val peerId = clientCallTimeoutPeerId ?: return@LaunchedEffect
-        if (!isInCall) return@LaunchedEffect
-        val transportStats = when (callDebugState.activeTransport) {
-            CallTransportType.WIFI_AWARE -> callDebugState.wifiAware
-            CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect
-            CallTransportType.NONE -> null
-        }
-        if (transportStats?.isReady != true) {
-            return@LaunchedEffect
-        }
-        if (clientCallTimeoutStartAt == 0L) {
-            clientCallTimeoutStartAt = System.currentTimeMillis()
-        }
-        kotlinx.coroutines.delay(5_000L)
-        if (!isInCall) return@LaunchedEffect
-        val recvCount = transportStats.recvCount
-        if (recvCount > 0) return@LaunchedEffect
-        val currentTarget = targetSurvivor?.peerId
-        if (currentTarget != null && currentTarget != peerId) return@LaunchedEffect
-        Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
-        val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
-        val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
-        appViewModel.sendCallHandshake(
-            targetPeerIdHex = peerId,
-            action = CallHandshakeAction.END,
-            callerName = profileState.name.ifBlank { "생존자" },
-            wifiAwareSupported = localWifiAware,
-            wifiDirectSupported = localWifiDirect,
-            useOpus = localOpusSupported
-        )
-        callViewModel.endCall()
-    }
-
     LaunchedEffect(appState.callPeerId, isInCall) {
         if (appState.callPeerId == null && isInCall) {
             callViewModel.endCall()
         }
+    }
+
+    LaunchedEffect(isInCall, callDebugState.activeTransport, callDebugState.lastDecision) {
+        if (!isInCall) return@LaunchedEffect
+        if (callDebugState.activeTransport != CallTransportType.NONE) return@LaunchedEffect
+        if (callDebugState.lastDecision != "stopped") return@LaunchedEffect
+        val peerId = targetSurvivor?.peerId ?: appState.callPeerId.orEmpty()
+        if (peerId.isNotBlank()) {
+            val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
+            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+            appViewModel.sendCallHandshake(
+                targetPeerIdHex = peerId,
+                action = CallHandshakeAction.END,
+                callerName = profileState.name.ifBlank { "구조자" },
+                wifiAwareSupported = localWifiAware,
+                wifiDirectSupported = localWifiDirect,
+                useOpus = localOpusSupported
+            )
+        }
+        Toast.makeText(context, "통화 세션이 종료되었습니다.", Toast.LENGTH_SHORT).show()
+        callViewModel.endCall()
     }
 
     LaunchedEffect(isInCall, targetSurvivor?.peerId, callDebugState.activeTransport, callDebugState.wifiAware.isReady) {
