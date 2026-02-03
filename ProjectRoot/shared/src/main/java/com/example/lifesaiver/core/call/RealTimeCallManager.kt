@@ -218,17 +218,27 @@ class RealTimeCallManager(
     fun stopCallSession() {
         Log.d("RealTimeCall", "Session Stop")
         ConnectionLog.add("Call", "stop session")
+        val previousTransport = activeTransport
+        val wasPendingStart = pendingStart
         _isTransmitting.value = false
         pendingStart = false
         isCallActive = false
         awareTemporarilyDisabled = false
         activeTransport = CallTransportType.NONE
         audioEngine.stopStreaming()
+        when (previousTransport) {
+            CallTransportType.WIFI_AWARE -> if (wifiAwareEnabled) wifiAwareRanger.stop()
+            CallTransportType.WIFI_DIRECT -> wifiDirectRanger.stop()
+            CallTransportType.NONE -> {
+                if (wasPendingStart) {
+                    if (wifiAwareEnabled) wifiAwareRanger.stop()
+                    wifiDirectRanger.stop()
+                }
+            }
+        }
         if (wifiAwareEnabled) {
-            wifiAwareRanger.stop()
             wifiAwareRanger.configureCallContext(null, null)
         }
-        wifiDirectRanger.stop()
         wifiDirectRanger.setTargetDeviceAddress(null)
         wifiDirectRanger.setLockToFirstPeer(false)
         isStreaming = false

@@ -298,6 +298,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearLocalCallState(peerIdHex: String) {
+        _uiState.update { s ->
+            val clearIncoming = s.incomingCallPeerId == peerIdHex
+            val clearPeer = s.callPeerId == peerIdHex
+            if (!clearIncoming && !clearPeer) {
+                s
+            } else {
+                s.copy(
+                    incomingCallPeerId = if (clearIncoming) null else s.incomingCallPeerId,
+                    incomingCallName = if (clearIncoming) null else s.incomingCallName,
+                    incomingCallWifiAware = if (clearIncoming) false else s.incomingCallWifiAware,
+                    incomingCallWifiDirect = if (clearIncoming) false else s.incomingCallWifiDirect,
+                    incomingCallUseOpus = if (clearIncoming) false else s.incomingCallUseOpus,
+                    incomingCallState = if (clearIncoming) null else s.incomingCallState,
+                    incomingCallRttCm = if (clearIncoming) null else s.incomingCallRttCm,
+                    incomingCallDirectAddress = if (clearIncoming) null else s.incomingCallDirectAddress,
+                    callPeerWifiAware = if (clearPeer) null else s.callPeerWifiAware,
+                    callPeerWifiDirect = if (clearPeer) null else s.callPeerWifiDirect,
+                    callPeerUseOpus = if (clearPeer) null else s.callPeerUseOpus,
+                    callPeerId = if (clearPeer) null else s.callPeerId,
+                    callPeerState = if (clearPeer) null else s.callPeerState,
+                    callPeerRttCm = if (clearPeer) null else s.callPeerRttCm,
+                    callPeerDirectAddress = if (clearPeer) null else s.callPeerDirectAddress
+                )
+            }
+        }
+    }
+
     private fun handleCallHandshake(peerIdHex: String, payload: CallHandshakePayload) {
         when (payload.action) {
             CallHandshakeAction.START -> {
@@ -312,24 +340,37 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val announcedDirect = peerDirectAddresses[peerIdHex]
                 val resolvedDirect = directFromPayload ?: announcedDirect
                 _uiState.update {
-                    it.copy(
-                        incomingCallPeerId = peerIdHex,
-                        incomingCallName = payload.callerName ?: "구조자",
-                        incomingCallWifiAware = wa,
-                        incomingCallWifiDirect = wd,
-                        incomingCallUseOpus = payload.useOpus,
-                        incomingCallState = payload.state,
-                        incomingCallRttCm = payload.rttCm,
-                        incomingCallDirectAddress = resolvedDirect,
-                        callPeerWifiAware = wa,
-                        callPeerWifiDirect = wd,
-                        callPeerUseOpus = payload.useOpus,
-                        callPeerId = peerIdHex,
-                        callPeerState = payload.state,
-                        callPeerRttCm = payload.rttCm,
-                        callPeerDirectAddress = resolvedDirect,
-                        peerDirectAddresses = peerDirectAddresses.toMap()
-                    )
+                    val inActiveCallWithPeer = it.isCallConnected && it.callPeerId == peerIdHex
+                    if (inActiveCallWithPeer) {
+                        it.copy(
+                            callPeerWifiAware = wa,
+                            callPeerWifiDirect = wd,
+                            callPeerUseOpus = payload.useOpus,
+                            callPeerState = payload.state,
+                            callPeerRttCm = payload.rttCm,
+                            callPeerDirectAddress = resolvedDirect,
+                            peerDirectAddresses = peerDirectAddresses.toMap()
+                        )
+                    } else {
+                        it.copy(
+                            incomingCallPeerId = peerIdHex,
+                            incomingCallName = payload.callerName ?: "구조자",
+                            incomingCallWifiAware = wa,
+                            incomingCallWifiDirect = wd,
+                            incomingCallUseOpus = payload.useOpus,
+                            incomingCallState = payload.state,
+                            incomingCallRttCm = payload.rttCm,
+                            incomingCallDirectAddress = resolvedDirect,
+                            callPeerWifiAware = wa,
+                            callPeerWifiDirect = wd,
+                            callPeerUseOpus = payload.useOpus,
+                            callPeerId = peerIdHex,
+                            callPeerState = payload.state,
+                            callPeerRttCm = payload.rttCm,
+                            callPeerDirectAddress = resolvedDirect,
+                            peerDirectAddresses = peerDirectAddresses.toMap()
+                        )
+                    }
                 }
             }
             CallHandshakeAction.END -> {
@@ -340,8 +381,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         s.copy(
                             incomingCallPeerId = if (ci) null else s.incomingCallPeerId,
+                            incomingCallName = if (ci) null else s.incomingCallName,
+                            incomingCallWifiAware = if (ci) false else s.incomingCallWifiAware,
+                            incomingCallWifiDirect = if (ci) false else s.incomingCallWifiDirect,
+                            incomingCallUseOpus = if (ci) false else s.incomingCallUseOpus,
+                            incomingCallState = if (ci) null else s.incomingCallState,
+                            incomingCallRttCm = if (ci) null else s.incomingCallRttCm,
                             incomingCallDirectAddress = if (ci) null else s.incomingCallDirectAddress,
+                            callPeerWifiAware = if (cp) null else s.callPeerWifiAware,
+                            callPeerWifiDirect = if (cp) null else s.callPeerWifiDirect,
+                            callPeerUseOpus = if (cp) null else s.callPeerUseOpus,
                             callPeerId = if (cp) null else s.callPeerId,
+                            callPeerState = if (cp) null else s.callPeerState,
+                            callPeerRttCm = if (cp) null else s.callPeerRttCm,
                             callPeerDirectAddress = if (cp) null else s.callPeerDirectAddress
                         )
                     }
@@ -447,7 +499,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 PacketType.FILE_TRANSFER -> viewModelScope.launch(Dispatchers.IO) { val p = FileTransferPayload.decode(packet.payload) ?: return@launch; val s = FileTransferStorage.storeIncoming(app, p, packet.header.timestamp) ?: return@launch; addMessage(ChatMessage(text = FileTransferStorage.buildMarker(s), isMine = false, path = path)) }
                 PacketType.REQUEST_SYNC -> gossipSyncManager.handleRequestSync(packet.header.senderId, RequestSyncPayload.decode(packet.payload) ?: return@setOnPacketReceived)
-                PacketType.CALL_HANDSHAKE -> handleCallHandshake(peer, CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived)
+                PacketType.CALL_HANDSHAKE -> {
+                    val recipient = packet.header.recipientId
+                    if (recipient != null && !recipient.contentEquals(senderId)) {
+                        return@setOnPacketReceived
+                    }
+                    handleCallHandshake(peer, CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived)
+                }
                 else -> Unit
             }
         }
@@ -529,7 +587,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(peerDirectAddresses = peerDirectAddresses.toMap()) }
         refreshSurvivorCapabilities()
     }
-    private fun observeCallConnection() { viewModelScope.launch { wifiDirectRanger.isConnectionReady.collect { r -> _uiState.update { it.copy(isCallConnected = r) } } } }
+    private fun observeCallConnection() {
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                wifiAwareRanger.isConnectionReady,
+                wifiDirectRanger.isConnectionReady
+            ) { awareReady, directReady ->
+                awareReady || directReady
+            }.collect { connected ->
+                _uiState.update { it.copy(isCallConnected = connected) }
+            }
+        }
+    }
     fun isWifiAwareSupportedLocally(): Boolean = if (wifiAwareEnabled) {
         (getCurrentCapabilityFlags() and 0x01) != 0
     } else {
