@@ -157,6 +157,13 @@ class WifiAwareRanger(private val context: Context) {
         cancelAttachRetry()
         pendingRestartRunnable?.let { handler.removeCallbacks(it) }
         pendingRestartRunnable = null
+        _debugStats.update {
+            it.copy(
+                isReady = false,
+                lastSendError = null,
+                lastRecvError = null
+            )
+        }
 
         val hasFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
         val serviceExists = context.getSystemService(Context.WIFI_AWARE_SERVICE) != null
@@ -694,7 +701,13 @@ class WifiAwareRanger(private val context: Context) {
         session = null
         _isConnectionReady.value = false
         _rttDistance.value = null
-        _debugStats.update { it.copy(isReady = false) }
+        _debugStats.update {
+            it.copy(
+                isReady = false,
+                lastSendError = null,
+                lastRecvError = null
+            )
+        }
         peerAddress = null
         peerPort = null
         currentTargetPeer = null
