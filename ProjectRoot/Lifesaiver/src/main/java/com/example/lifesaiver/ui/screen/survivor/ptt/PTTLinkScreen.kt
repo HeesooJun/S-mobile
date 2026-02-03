@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.protocol.mesh.MeshGraphRegistry
@@ -35,8 +38,16 @@ import com.example.lifesaiver.ui.theme.scaledSp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
+
+data class SurvivorCallRequest(
+    val callerName: String,
+    val wifiAware: Boolean,
+    val wifiDirect: Boolean,
+    val useOpus: Boolean
+)
 
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -52,11 +63,19 @@ fun PTTLinkScreen(
     meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
     isConnected: Boolean,
+    isMicOn: Boolean = false,
+    isCallConnected: Boolean = false,
+    isInCall: Boolean = false,
+    callPeerName: String? = null,
+    pendingCall: SurvivorCallRequest? = null,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onProfile: () -> Unit,
     onPanicClear: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onAcceptCall: () -> Unit = {},
+    onDeclineCall: () -> Unit = {},
+    onEndCall: () -> Unit = {}
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
@@ -159,20 +178,34 @@ fun PTTLinkScreen(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .width(scaledDp(28, scale))
-                        .height(scaledDp(28, scale)),
-                    color = AppColors.Green,
-                    strokeWidth = scaledDp(4, scale)
-                )
-                Spacer(modifier = Modifier.width(scaledDp(10, scale)))
-                Text(
-                    text = "구조자 연결 요청 대기중",
-                    color = AppColors.Gray500,
-                    fontSize = scaledSp(11, scale),
-                    fontWeight = FontWeight.Medium
-                )
+                if (isInCall) {
+                    CallActiveCard(
+                        isCallConnected = isCallConnected,
+                        callPeerName = callPeerName,
+                        onEndCall = onEndCall
+                    )
+                } else if (pendingCall != null) {
+                    IncomingCallCard(
+                        callerName = pendingCall.callerName,
+                        onAccept = onAcceptCall,
+                        onDecline = onDeclineCall
+                    )
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(scaledDp(28, scale))
+                            .height(scaledDp(28, scale)),
+                        color = AppColors.Green,
+                        strokeWidth = scaledDp(4, scale)
+                    )
+                    Spacer(modifier = Modifier.width(scaledDp(10, scale)))
+                    Text(
+                        text = "구조자 연결 요청 대기중",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             if (showMeshMap) {
@@ -185,6 +218,75 @@ fun PTTLinkScreen(
                     bleDebugStats = bleDebugStats,
                     onClose = { showMeshMap = false }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun IncomingCallCard(
+    callerName: String,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    val scale = LocalAppScale.current
+    Surface(
+        color = AppColors.Gray900,
+        shape = RoundedCornerShape(scaledDp(16, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "$callerName 님이 통화를 요청했습니다",
+                color = AppColors.White,
+                fontSize = scaledSp(13, scale),
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            Row(horizontalArrangement = Arrangement.spacedBy(scaledDp(10, scale))) {
+                OutlinedButton(onClick = onDecline) {
+                    Text("거절")
+                }
+                Button(onClick = onAccept) {
+                    Text("수락")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallActiveCard(
+    isCallConnected: Boolean,
+    callPeerName: String?,
+    onEndCall: () -> Unit
+) {
+    val scale = LocalAppScale.current
+    Surface(
+        color = AppColors.Gray900,
+        shape = RoundedCornerShape(scaledDp(16, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = if (isCallConnected) {
+                    "통화 연결됨${callPeerName?.let { " · $it" } ?: ""}"
+                } else {
+                    "통화 연결 중${callPeerName?.let { " · $it" } ?: ""}"
+                },
+                color = if (isCallConnected) AppColors.Green else AppColors.Yellow,
+                fontSize = scaledSp(13, scale),
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            Button(onClick = onEndCall) {
+                Text("통화 종료")
             }
         }
     }
