@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,9 +39,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
+import com.example.lifesaiver.core.log.ConnectionLog
+import com.example.lifesaiver.presentation.MeshVisualEvent
+import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.ui.components.DistanceTrack
-import com.example.lifesaiver.ui.components.DistanceTrend
+import com.example.lifesaiver.core.location.DistanceMeasurementSource
+import com.example.lifesaiver.core.location.DistanceTrend
+import com.example.lifesaiver.ui.components.MeshEdge
+import com.example.lifesaiver.ui.components.MeshMap
+import com.example.lifesaiver.ui.components.MeshNode
 import com.example.lifesaiver.ui.components.MicButton
 import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
@@ -51,31 +61,56 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun RescuerPTTLinkScreen(
     batteryLevel: Int,
     connectedCount: Int,
     meshPeerCount: Int,
+    myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>,
+    meshGraphSnapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
+    meshVisualEvents: SharedFlow<MeshVisualEvent>,
+    bleDebugStats: BleDebugStats,
+    callStatusLabel: String,
+    callDecisionLabel: String? = null,
+    isInCall: Boolean,
     isConnected: Boolean,
     isMicOn: Boolean,
+    isSpeakerphoneOn: Boolean = true,
+    distanceMeters: Float?,
+    distanceTrend: DistanceTrend,
+    distanceSource: DistanceMeasurementSource,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
     onOpenSurvivorDb: () -> Unit,
-    onPanicClear: () -> Unit
+    onPanicClear: () -> Unit,
+    onToggleSpeakerphone: () -> Unit = {}
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
+    var showDebugModal by remember { mutableStateOf(false) }
+    val connectionLogs by ConnectionLog.logs.collectAsState()
     val showActionLabelsAlways = true
     val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
     val displayConnectedCount = meshDisplayCount
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
+    val meshGraphState = remember(meshGraphSnapshot, myPeerId, myNickname, peerNicknames) {
+        buildMeshGraphState(
+            snapshot = meshGraphSnapshot,
+            myPeerId = myPeerId,
+            myNickname = myNickname,
+            peerNicknames = peerNicknames
+        )
+    }
 
     LaunchedEffect(expandedAction) {
         if (
@@ -112,22 +147,28 @@ fun RescuerPTTLinkScreen(
                     .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
                     .tripleClickable(onTripleClick = onPanicClear)
             )
+            Text(
+                text = "디버그",
+                color = AppColors.Gray400,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = scaledDp(20, scale), top = scaledDp(16, scale))
+                    .clickable { showDebugModal = true }
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = scaledDp(32, scale)),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // TODO: 거리 데이터 연동 시 실제 값으로 교체
-                val distanceMeters: Float? = null
-                // val distanceMeters: Float? = 12.4f
-                val trend: DistanceTrend = DistanceTrend.Approaching
-
                 Spacer(modifier = Modifier.height(scaledDp(30, scale)))
                 DistanceTrack(
                     distanceMeters = distanceMeters,
-                    trend = trend,
+                    trend = distanceTrend,
                     maxMeters = 30f,
+                    measurementSource = distanceSource,
                     modifier = Modifier.padding(top = scaledDp(12, scale))
                 )
 
@@ -162,6 +203,17 @@ fun RescuerPTTLinkScreen(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        ExpandableAction(
+                            iconRes = R.drawable.ic_sound,
+                            label = if (isSpeakerphoneOn) "스피커 ON" else "스피커 OFF",
+                            isExpanded = expandedAction == ActionType.Speaker,
+                            iconSizeOverride = scaledDp(34, scale),
+                            showLabelAlways = showActionLabelsAlways,
+                            onClick = {
+                                setExpandedAction(ActionType.Speaker)
+                                onToggleSpeakerphone()
+                            }
+                        )
                         ExpandableAction(
                             iconRes = R.drawable.connection_lost,
                             label = "연결 끊기",
@@ -227,6 +279,43 @@ fun RescuerPTTLinkScreen(
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = "PDA 지도",
+                    color = AppColors.White,
+                    fontSize = scaledSp(13, scale),
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .align(Alignment.Start)
+                        .padding(start = scaledDp(6, scale), bottom = scaledDp(8, scale))
+                )
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(scaledDp(170, scale)),
+                    shape = RoundedCornerShape(scaledDp(18, scale)),
+                    color = AppColors.Gray800
+                ) {
+                    if (isInCall) {
+                        MeshMap(
+                            nodes = meshGraphState.nodes,
+                            edges = meshGraphState.edges,
+                            visualEvents = meshVisualEvents,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "통화 연결 후 지도가 표시됩니다",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(12, scale)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -247,6 +336,94 @@ fun RescuerPTTLinkScreen(
                         )
                     }
                     Spacer(modifier = Modifier.size(scaledDp(36, scale)))
+                }
+            }
+            if (showDebugModal) {
+                Dialog(onDismissRequest = { showDebugModal = false }) {
+                    Surface(
+                        color = AppColors.Gray900,
+                        shape = RoundedCornerShape(scaledDp(18, scale)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(24, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(scaledDp(18, scale)),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "디버그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(16, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+                            Text(
+                                text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(12, scale)
+                            )
+                            val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
+                            val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
+                            Text(
+                                text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "통화 상태: $callStatusLabel",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (!callDecisionLabel.isNullOrBlank()) {
+                                Text(
+                                    text = "결정: $callDecisionLabel",
+                                    color = AppColors.Gray500,
+                                    fontSize = scaledSp(10, scale)
+                                )
+                            }
+                            Text(
+                                text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+                            Text(
+                                text = "통신 로그",
+                                color = AppColors.White,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            val displayedLogs = connectionLogs.takeLast(12)
+                            if (displayedLogs.isEmpty()) {
+                                Text(
+                                    text = "로그 없음",
+                                    color = AppColors.Gray500,
+                                    fontSize = scaledSp(10, scale)
+                                )
+                            } else {
+                                displayedLogs.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = AppColors.Gray400,
+                                        fontSize = scaledSp(10, scale)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                            Text(
+                                text = "닫기",
+                                color = AppColors.Green,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .align(Alignment.End)
+                                    .clickable { showDebugModal = false }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -336,7 +513,88 @@ private fun ExpandableAction(
 
 private enum class ActionType {
     Power,
+    Speaker,
     Disconnect,
     Chat,
     Count
+}
+
+private data class MeshGraphUiState(
+    val nodes: List<MeshNode>,
+    val edges: List<MeshEdge>
+)
+
+private fun buildMeshGraphState(
+    snapshot: com.example.lifesaiver.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
+    myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>
+): MeshGraphUiState {
+    if (snapshot.nodes.isEmpty()) {
+        val selfId = myPeerId.trim().ifBlank { "self" }
+        val selfLabel = myNickname.trim().ifBlank { selfId }
+        return MeshGraphUiState(
+            nodes = listOf(
+                MeshNode(id = selfId, hop = 0, signal = 1f, isSelf = true, label = selfLabel)
+            ),
+            edges = emptyList()
+        )
+    }
+
+    val selfId = myPeerId
+    val adjacency = mutableMapOf<String, MutableSet<String>>()
+    snapshot.edges.forEach { edge ->
+        adjacency.getOrPut(edge.a) { mutableSetOf() }.add(edge.b)
+        adjacency.getOrPut(edge.b) { mutableSetOf() }.add(edge.a)
+    }
+
+    val hops = mutableMapOf<String, Int>()
+    val queue = ArrayDeque<String>()
+    hops[selfId] = 0
+    queue.add(selfId)
+    while (queue.isNotEmpty()) {
+        val current = queue.removeFirst()
+        val nextHop = (hops[current] ?: 0) + 1
+        adjacency[current].orEmpty().forEach { neighbor ->
+            if (hops.containsKey(neighbor)) return@forEach
+            hops[neighbor] = nextHop
+            queue.add(neighbor)
+        }
+    }
+
+    val nodes = mutableListOf<MeshNode>()
+    val selfLabel = myNickname.trim().ifBlank { myPeerId.trim().ifBlank { "self" } }
+    nodes.add(MeshNode(id = selfId, hop = 0, signal = 1f, isSelf = true, label = selfLabel))
+
+    snapshot.nodes.forEach { node ->
+        if (node.peerId == selfId) return@forEach
+        val hop = (hops[node.peerId] ?: 2).coerceAtLeast(1)
+        val signal = when (hop) {
+            1 -> 0.8f
+            2 -> 0.55f
+            else -> 0.4f
+        }
+        val label = node.nickname?.takeIf { it.isNotBlank() }
+            ?: peerNicknames[node.peerId]
+            ?: node.peerId
+        nodes.add(
+            MeshNode(
+                id = node.peerId,
+                hop = hop,
+                signal = signal,
+                label = label
+            )
+        )
+    }
+
+    val edges = snapshot.edges.map { edge ->
+        MeshEdge(
+            a = edge.a,
+            b = edge.b,
+            isConfirmed = edge.isConfirmed,
+            confirmedBy = edge.confirmedBy
+        )
+    }
+
+    return MeshGraphUiState(nodes = nodes, edges = edges)
 }

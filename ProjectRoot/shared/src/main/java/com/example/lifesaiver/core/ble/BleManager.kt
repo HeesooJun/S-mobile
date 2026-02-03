@@ -976,6 +976,21 @@ class BleManager(
         return values.sum() / values.size
     }
 
+    fun getPeerRssiSnapshot(): Map<String, Int> {
+        val addressToPeer = synchronized(addressPeerMap) { addressPeerMap.toMap() }
+        val connection = synchronized(connectionRssi) { connectionRssi.toMap() }
+        val scan = synchronized(scanRssi) { scanRssi.toMap() }
+        val result = mutableMapOf<String, Int>()
+        addressToPeer.forEach { (address, peerId) ->
+            val rssi = connection[address] ?: scan[address] ?: return@forEach
+            val existing = result[peerId]
+            if (existing == null || rssi > existing) {
+                result[peerId] = rssi
+            }
+        }
+        return result
+    }
+
     fun getConnectedPeerCount(): Int {
         val addresses = getAllConnectedAddresses()
         val peerIds = mutableSetOf<String>()
