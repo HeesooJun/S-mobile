@@ -159,6 +159,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             add(Manifest.permission.BLUETOOTH_ADVERTISE)
             add(Manifest.permission.BLUETOOTH_CONNECT)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.UWB_RANGING)
+        }
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         add(Manifest.permission.RECORD_AUDIO)
@@ -533,10 +536,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         false
     }
     fun isWifiDirectSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x04) != 0
+    fun isUwbSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x02) != 0
     private fun getCurrentCapabilityFlags(): Int {
         var f = 0; val pm = app.packageManager; val wifi = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val wa = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) pm.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE) else false
         if (wifiAwareEnabled && wa && wifi?.isWifiEnabled == true) f = f or 0x01
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            pm.hasSystemFeature(PackageManager.FEATURE_UWB) &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.UWB_RANGING) == PackageManager.PERMISSION_GRANTED
+        ) {
+            f = f or 0x02
+        }
         if (pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) f = f or 0x04
         return f
     }

@@ -3,6 +3,7 @@ package com.example.lifesaiver.core.audio
 data class AudioDebugStats(
     val isStreaming: Boolean = false,
     val useOpus: Boolean = false,
+    val speakerphoneEnabled: Boolean = true,
     val encodedFrames: Long = 0,
     val decodedFrames: Long = 0,
     val encodeFailCount: Long = 0,
