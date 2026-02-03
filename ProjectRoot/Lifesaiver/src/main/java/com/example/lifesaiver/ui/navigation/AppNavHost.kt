@@ -142,6 +142,7 @@ fun AppNavHost(
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
     val minSosDurationMs = 1_000L
+    var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
     val currentRoute = backStackEntry?.destination?.route
     val footerEnabledRoutes = setOf(
         AppRoute.SurvivorPTT.route,
@@ -256,6 +257,71 @@ fun AppNavHost(
     LaunchedEffect(appState.callPeerId, isInCall) {
         if (isInCall && appState.callPeerId == null) {
             callViewModel.endCall()
+        }
+    }
+
+    fun acceptIncomingCall(peerId: String): Boolean {
+        if (!appViewModel.ensureWifiAwarePermissions()) return false
+        val localAware = appViewModel.isWifiAwareSupportedLocally()
+        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+        val peerAware = appState.incomingCallWifiAware
+        val peerDirect = appState.incomingCallWifiDirect
+        appViewModel.sendCallHandshake(
+            targetPeerIdHex = peerId,
+            action = CallHandshakeAction.ACK,
+            callerName = profileState.name.ifBlank { "생존자" },
+            wifiAwareSupported = localAware,
+            wifiDirectSupported = localDirect,
+            useOpus = localOpusSupported
+        )
+        val useOpus = localOpusSupported && appState.incomingCallUseOpus
+        val started = callViewModel.startRealTimeCall(
+            survivor = SurvivorProfile(
+                name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자",
+                isWifiAware = peerAware,
+                isWifiDirect = peerDirect,
+                isUwb = appState.survivors.firstOrNull { it.peerId == peerId }?.isUwb ?: false,
+                peerId = peerId
+            ),
+            localWifiAwareSupported = localAware,
+            localWifiDirectSupported = localDirect,
+            peerWifiAwareSupported = peerAware,
+            peerWifiDirectSupported = peerDirect,
+            isServer = false,
+            useOpus = useOpus,
+            targetDirectAddress = appState.incomingCallDirectAddress,
+            localPeerId = myPeerId,
+            targetPeerId = peerId
+        )
+        if (!started) {
+            Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
+            appViewModel.sendCallHandshake(
+                targetPeerIdHex = peerId,
+                action = CallHandshakeAction.END,
+                callerName = profileState.name.ifBlank { "생존자" },
+                wifiAwareSupported = localAware,
+                wifiDirectSupported = localDirect,
+                useOpus = localOpusSupported
+            )
+            appViewModel.clearIncomingCall(peerId)
+            return false
+        }
+        return true
+    }
+
+    LaunchedEffect(appState.incomingCallPeerId) {
+        if (appState.incomingCallPeerId == null) {
+            autoAcceptedPeerId = null
+        }
+    }
+
+    LaunchedEffect(appState.incomingCallPeerId, isInCall, backStackEntry) {
+        val peerId = appState.incomingCallPeerId ?: return@LaunchedEffect
+        if (isInCall || autoAcceptedPeerId == peerId) return@LaunchedEffect
+        val currentRoute = backStackEntry?.destination?.route
+        if (currentRoute != AppRoute.SurvivorPTT.route) return@LaunchedEffect
+        if (acceptIncomingCall(peerId)) {
+            autoAcceptedPeerId = peerId
         }
     }
 
@@ -405,48 +471,7 @@ fun AppNavHost(
                     onSettings = { navigateBottomTab(AppRoute.Settings.route) },
                     onAcceptCall = {
                         val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
-                        if (!appViewModel.ensureWifiAwarePermissions()) return@PTTLinkScreen
-                        val localAware = appViewModel.isWifiAwareSupportedLocally()
-                        val localDirect = appViewModel.isWifiDirectSupportedLocally()
-                        val peerAware = appState.incomingCallWifiAware
-                        val peerDirect = appState.incomingCallWifiDirect
-                        appViewModel.sendCallHandshake(
-                            targetPeerIdHex = peerId,
-                            action = CallHandshakeAction.ACK,
-                            callerName = profileState.name.ifBlank { "생존자" },
-                            wifiAwareSupported = localAware,
-                            wifiDirectSupported = localDirect,
-                            useOpus = localOpusSupported
-                        )
-                        val useOpus = localOpusSupported && appState.incomingCallUseOpus
-                        val started = callViewModel.startRealTimeCall(
-                            survivor = SurvivorProfile(
-                                name = appState.incomingCallName?.ifBlank { "구조자" } ?: "구조자",
-                                isWifiAware = peerAware,
-                                isWifiDirect = peerDirect,
-                                isUwb = appState.survivors.firstOrNull { it.peerId == peerId }?.isUwb ?: false,
-                                peerId = peerId
-                            ),
-                            localWifiAwareSupported = localAware,
-                            localWifiDirectSupported = localDirect,
-                            peerWifiAwareSupported = peerAware,
-                            peerWifiDirectSupported = peerDirect,
-                            isServer = false,
-                            useOpus = useOpus,
-                            targetDirectAddress = appState.incomingCallDirectAddress
-                        )
-                        if (!started) {
-                            Toast.makeText(context, "통화 연결 실패", Toast.LENGTH_SHORT).show()
-                            appViewModel.sendCallHandshake(
-                                targetPeerIdHex = peerId,
-                                action = CallHandshakeAction.END,
-                                callerName = profileState.name.ifBlank { "생존자" },
-                                wifiAwareSupported = localAware,
-                                wifiDirectSupported = localDirect,
-                                useOpus = localOpusSupported
-                            )
-                            appViewModel.clearIncomingCall(peerId)
-                        }
+                        acceptIncomingCall(peerId)
                     },
                     onDeclineCall = {
                         val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
