@@ -42,6 +42,10 @@ private val ColorSwitchOff = Color(0xFF8E8E93)
 fun SettingsScreen(
     isVoiceOn: Boolean,
     isShockOn: Boolean,
+    profileName: String = "",
+    profileGender: String = "",
+    profileBirthDate: String = "",
+    profileNotes: String = "",
     onVoiceToggle: (Boolean) -> Unit,
     onShockToggle: (Boolean) -> Unit,
     onBack: () -> Unit = {},
@@ -68,7 +72,7 @@ fun SettingsScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             HeaderSection(scale)
-            UserInfoCard(scale, "홍길동", "남성", "2000.01.01", "제가 특이해요", onEditProfile)
+            UserInfoCard(scale, profileName, profileGender, profileBirthDate, profileNotes, onEditProfile)
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
 
             SettingsControlCard(
