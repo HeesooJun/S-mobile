@@ -26,6 +26,7 @@ import android.os.ParcelUuid
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.actor
@@ -108,9 +109,18 @@ class BleManager(
     private val connectionAttempts = mutableMapOf<String, ConnectionAttempt>()
     private var connectionAttemptCleanupJob: Job? = null
 
-    private val rssiUpdateIntervalMs: Long = 10_000L
+    private val baseRssiUpdateIntervalMs: Long = 10_000L
+    private val activeRssiUpdateIntervalMs: Long = 3_000L
+    private val idleRssiUpdateIntervalMs: Long = 15_000L
+    private val rssiDataStaleMs: Long = 20_000L
+    private val rssiDataExpireMs: Long = 60_000L
+    @Volatile
+    private var rssiActiveModeEnabled: Boolean = false
     private val scanRssi = mutableMapOf<String, Int>()
+    private val scanRssiUpdatedAtMs = mutableMapOf<String, Long>()
     private val connectionRssi = mutableMapOf<String, Int>()
+    private val connectionRssiUpdatedAtMs = mutableMapOf<String, Long>()
+    private val pendingRssiReadAddresses = mutableSetOf<String>()
     private var rssiMonitorJob: Job? = null
 
     private data class ConnectionAttempt(
@@ -167,6 +177,10 @@ class BleManager(
 
     fun setRssiThresholdDbm(threshold: Int) {
         rssiThresholdDbm = threshold
+    }
+
+    fun setRssiActiveMode(enabled: Boolean) {
+        rssiActiveModeEnabled = enabled
     }
 
     fun isLongRangeSupported(): Boolean {
@@ -279,14 +293,72 @@ class BleManager(
         rssiMonitorJob = ioScope.launch {
             while (isActive) {
                 val snapshot = synchronized(clientConnections) { clientConnections.toMap() }
-                snapshot.values.forEach { gatt ->
+                snapshot.forEach { (address, gatt) ->
+                    if (!markRssiReadPending(address)) return@forEach
                     try {
-                        gatt.readRemoteRssi()
+                        val requested = gatt.readRemoteRssi()
+                        if (!requested) {
+                            clearRssiReadPending(address)
+                        }
                     } catch (_: Exception) {
+                        clearRssiReadPending(address)
                     }
                 }
-                delay(rssiUpdateIntervalMs)
+                delay(currentRssiPollingIntervalMs(snapshot.size))
             }
+        }
+    }
+
+    private fun currentRssiPollingIntervalMs(connectionCount: Int): Long {
+        if (connectionCount <= 0) return idleRssiUpdateIntervalMs
+        return if (rssiActiveModeEnabled) activeRssiUpdateIntervalMs else baseRssiUpdateIntervalMs
+    }
+
+    private fun markRssiReadPending(address: String): Boolean {
+        synchronized(pendingRssiReadAddresses) {
+            if (pendingRssiReadAddresses.contains(address)) return false
+            pendingRssiReadAddresses.add(address)
+            return true
+        }
+    }
+
+    private fun clearRssiReadPending(address: String) {
+        synchronized(pendingRssiReadAddresses) {
+            pendingRssiReadAddresses.remove(address)
+        }
+    }
+
+    private fun clearRssiState(address: String) {
+        synchronized(scanRssi) {
+            scanRssi.remove(address)
+        }
+        synchronized(scanRssiUpdatedAtMs) {
+            scanRssiUpdatedAtMs.remove(address)
+        }
+        synchronized(connectionRssi) {
+            connectionRssi.remove(address)
+        }
+        synchronized(connectionRssiUpdatedAtMs) {
+            connectionRssiUpdatedAtMs.remove(address)
+        }
+        clearRssiReadPending(address)
+    }
+
+    private fun clearAllRssiState() {
+        synchronized(scanRssi) {
+            scanRssi.clear()
+        }
+        synchronized(scanRssiUpdatedAtMs) {
+            scanRssiUpdatedAtMs.clear()
+        }
+        synchronized(connectionRssi) {
+            connectionRssi.clear()
+        }
+        synchronized(connectionRssiUpdatedAtMs) {
+            connectionRssiUpdatedAtMs.clear()
+        }
+        synchronized(pendingRssiReadAddresses) {
+            pendingRssiReadAddresses.clear()
         }
     }
 
@@ -389,6 +461,9 @@ class BleManager(
             if (deviceMonitor.isBlocked(address)) return
             synchronized(scanRssi) {
                 scanRssi[address] = result.rssi
+            }
+            synchronized(scanRssiUpdatedAtMs) {
+                scanRssiUpdatedAtMs[address] = SystemClock.elapsedRealtime()
             }
             if (result.rssi < rssiThresholdDbm) return
             val peerId = extractPeerId(result)
@@ -512,6 +587,7 @@ class BleManager(
                 synchronized(clientConnections) {
                     clientConnections.remove(address)
                 }
+                clearRssiState(address)
                 clearPeerId(address)
                 clearPending(address)
                 notifyConnectionState()
@@ -535,10 +611,14 @@ class BleManager(
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
-            if (status != BluetoothGatt.GATT_SUCCESS) return
             val address = gatt.device.address
+            clearRssiReadPending(address)
+            if (status != BluetoothGatt.GATT_SUCCESS) return
             synchronized(connectionRssi) {
                 connectionRssi[address] = rssi
+            }
+            synchronized(connectionRssiUpdatedAtMs) {
+                connectionRssiUpdatedAtMs[address] = SystemClock.elapsedRealtime()
             }
         }
 
@@ -634,6 +714,7 @@ class BleManager(
                 synchronized(connectedPeers) {
                     connectedPeers.remove(device.address)
                 }
+                clearRssiState(device.address)
                 clearPeerId(device.address)
                 notifyConnectionState()
                 deviceMonitor.onDeviceDisconnected(device.address, status != BluetoothGatt.GATT_SUCCESS)
@@ -831,15 +912,24 @@ class BleManager(
 
     private fun notifyConnectionState() {
         val activeAddresses = getSystemConnectedAddresses()
+        val removedAddresses = mutableSetOf<String>()
         if (!activeAddresses.isNullOrEmpty()) {
             synchronized(connectedPeers) {
-                connectedPeers.retainAll(activeAddresses)
+                val iterator = connectedPeers.iterator()
+                while (iterator.hasNext()) {
+                    val address = iterator.next()
+                    if (!activeAddresses.contains(address)) {
+                        removedAddresses.add(address)
+                        iterator.remove()
+                    }
+                }
             }
             synchronized(clientConnections) {
                 val iterator = clientConnections.keys.iterator()
                 while (iterator.hasNext()) {
                     val address = iterator.next()
                     if (!activeAddresses.contains(address)) {
+                        removedAddresses.add(address)
                         iterator.remove()
                     }
                 }
@@ -849,11 +939,13 @@ class BleManager(
                 while (iterator.hasNext()) {
                     val address = iterator.next()
                     if (!activeAddresses.contains(address)) {
+                        removedAddresses.add(address)
                         iterator.remove()
                     }
                 }
             }
         }
+        removedAddresses.forEach { address -> clearRssiState(address) }
         val count = getAllConnectedAddresses().size
         isConnected = count > 0
         connectionCallback(isConnected, getConnectedPeerCount())
@@ -976,13 +1068,52 @@ class BleManager(
         return values.sum() / values.size
     }
 
+    private fun pickPeerRssi(
+        connectionValue: Int?,
+        connectionUpdatedAtMs: Long?,
+        scanValue: Int?,
+        scanUpdatedAtMs: Long?,
+        nowMs: Long
+    ): Int? {
+        fun isWithin(updatedAtMs: Long?, thresholdMs: Long): Boolean {
+            if (updatedAtMs == null) return false
+            return nowMs - updatedAtMs <= thresholdMs
+        }
+
+        val hasFreshConnection = connectionValue != null && isWithin(connectionUpdatedAtMs, rssiDataStaleMs)
+        val hasFreshScan = scanValue != null && isWithin(scanUpdatedAtMs, rssiDataStaleMs)
+        if (hasFreshConnection && hasFreshScan) {
+            return if ((connectionUpdatedAtMs ?: 0L) >= (scanUpdatedAtMs ?: 0L)) connectionValue else scanValue
+        }
+        if (hasFreshConnection) return connectionValue
+        if (hasFreshScan) return scanValue
+
+        val hasConnection = connectionValue != null && isWithin(connectionUpdatedAtMs, rssiDataExpireMs)
+        val hasScan = scanValue != null && isWithin(scanUpdatedAtMs, rssiDataExpireMs)
+        return when {
+            hasConnection && hasScan -> if ((connectionUpdatedAtMs ?: 0L) >= (scanUpdatedAtMs ?: 0L)) connectionValue else scanValue
+            hasConnection -> connectionValue
+            hasScan -> scanValue
+            else -> null
+        }
+    }
+
     fun getPeerRssiSnapshot(): Map<String, Int> {
         val addressToPeer = synchronized(addressPeerMap) { addressPeerMap.toMap() }
         val connection = synchronized(connectionRssi) { connectionRssi.toMap() }
+        val connectionUpdatedAt = synchronized(connectionRssiUpdatedAtMs) { connectionRssiUpdatedAtMs.toMap() }
         val scan = synchronized(scanRssi) { scanRssi.toMap() }
+        val scanUpdatedAt = synchronized(scanRssiUpdatedAtMs) { scanRssiUpdatedAtMs.toMap() }
+        val now = SystemClock.elapsedRealtime()
         val result = mutableMapOf<String, Int>()
         addressToPeer.forEach { (address, peerId) ->
-            val rssi = connection[address] ?: scan[address] ?: return@forEach
+            val rssi = pickPeerRssi(
+                connectionValue = connection[address],
+                connectionUpdatedAtMs = connectionUpdatedAt[address],
+                scanValue = scan[address],
+                scanUpdatedAtMs = scanUpdatedAt[address],
+                nowMs = now
+            ) ?: return@forEach
             val existing = result[peerId]
             if (existing == null || rssi > existing) {
                 result[peerId] = rssi
@@ -1070,10 +1201,12 @@ class BleManager(
         synchronized(connectionAttempts) {
             connectionAttempts.clear()
         }
+        clearAllRssiState()
         notifyConnectionState()
     }
 
     private fun disconnectAddress(address: String) {
+        clearRssiReadPending(address)
         synchronized(clientConnections) {
             clientConnections[address]
         }?.let { gatt ->
@@ -1175,12 +1308,7 @@ class BleManager(
         synchronized(connectionAttempts) {
             connectionAttempts.clear()
         }
-        synchronized(scanRssi) {
-            scanRssi.clear()
-        }
-        synchronized(connectionRssi) {
-            connectionRssi.clear()
-        }
+        clearAllRssiState()
         gattServer?.close()
         gattServer = null
         isConnected = false
@@ -1214,12 +1342,7 @@ class BleManager(
             synchronized(connectionAttempts) {
                 connectionAttempts.clear()
             }
-            synchronized(scanRssi) {
-                scanRssi.clear()
-            }
-            synchronized(connectionRssi) {
-                connectionRssi.clear()
-            }
+            clearAllRssiState()
             // 코루틴 취소 (메모리 릭 방지)
             job.cancel()
             logCallback("BleManager resources released.")
