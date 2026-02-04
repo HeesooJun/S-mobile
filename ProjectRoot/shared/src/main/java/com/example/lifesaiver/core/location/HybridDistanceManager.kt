@@ -57,8 +57,9 @@ class HybridDistanceManager(
         localSupportsUwb,
         peerSupportsUwb
     ) { sensors, transport, localUwb, peerUwb ->
-        val uwbReady = localUwb && hasUwbHardware
+        val uwbLocalReady = localUwb && hasUwbHardware
         val uwbPeerKnown = peerUwb
+        val uwbReady = uwbLocalReady && uwbPeerKnown
         val primary = when {
             uwbReady && sensors.uwbDist != null -> MeasurementSelection(
                 distance = sensors.uwbDist,
@@ -78,7 +79,7 @@ class HybridDistanceManager(
             DistanceMeasurementSource.RSSI -> "Tracking via Wi-Fi Direct RSSI"
             DistanceMeasurementSource.NONE -> when {
                 uwbReady && uwbPeerKnown -> "UWB ranging is initializing..."
-                uwbReady -> "UWB available (waiting for peer session)..."
+                uwbLocalReady -> "UWB available (waiting for peer session)..."
                 transport == CallTransportType.WIFI_AWARE -> "Searching RTT signal..."
                 transport == CallTransportType.WIFI_DIRECT -> "Searching RSSI signal..."
                 else -> "Searching for signal..."
@@ -144,6 +145,7 @@ class HybridDistanceManager(
             (transport == CallTransportType.WIFI_AWARE || transport == CallTransportType.NONE)
         val runUwb = hasUwbHardware &&
             localSupportsUwb.value &&
+            peerSupportsUwb.value &&
             uwbRanger.isSupported() &&
             uwbRanger.hasPermission()
 
