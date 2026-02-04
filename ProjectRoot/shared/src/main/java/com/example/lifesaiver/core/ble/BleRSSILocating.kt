@@ -28,6 +28,7 @@ class BleRSSILocating(
     private var targetPeerId: String? = targetPeerIdHex?.lowercase()
     private val peerRssi = mutableMapOf<String, Int>()
     private val peerLastSeen = mutableMapOf<String, Long>()
+    private val peerRssiFilters = mutableMapOf<String, RssiKalmanFilter>()
     private val peerTimeoutMs = 6_000L
 
     private val serviceUuid: UUID = Constants.SERVICE_UUID
@@ -37,16 +38,19 @@ class BleRSSILocating(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val peerId = extractPeerId(result) ?: return
-            val rssi = result.rssi
             val now = System.currentTimeMillis()
-            peerRssi[peerId] = rssi
+            val filteredRssi = peerRssiFilters
+                .getOrPut(peerId) { RssiKalmanFilter() }
+                .update(result.rssi)
+            peerRssi[peerId] = filteredRssi
             peerLastSeen[peerId] = now
+            cleanupStalePeers(now)
 
             val selected = targetPeerId
             if (selected != null) {
                 if (peerId != selected) return
                 _trackedPeerId.value = selected
-                _distance.value = calculateDistance(rssi)
+                _distance.value = calculateDistance(filteredRssi)
                 return
             }
 
@@ -73,6 +77,17 @@ class BleRSSILocating(
             .filterKeys { peerLastSeen[it]?.let { last -> last >= cutoff } == true }
         if (candidates.isEmpty()) return null
         return candidates.maxByOrNull { it.value }?.key
+    }
+
+    private fun cleanupStalePeers(now: Long) {
+        val cutoff = now - peerTimeoutMs
+        val stalePeers = peerLastSeen.filterValues { it < cutoff }.keys
+        if (stalePeers.isEmpty()) return
+        stalePeers.forEach { peerId ->
+            peerLastSeen.remove(peerId)
+            peerRssi.remove(peerId)
+            peerRssiFilters.remove(peerId)
+        }
     }
 
     private fun calculateDistance(rssi: Int): Float {
@@ -104,6 +119,9 @@ class BleRSSILocating(
     @SuppressLint("MissingPermission")
     fun stopTracking() {
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+        peerRssi.clear()
+        peerLastSeen.clear()
+        peerRssiFilters.clear()
         _distance.value = null
         _trackedPeerId.value = null
     }

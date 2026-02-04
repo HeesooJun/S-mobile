@@ -25,7 +25,8 @@ data class HybridLocationState(
 class HybridDistanceManager(
     private val context: Context,
     private val bleLocating: BleRSSILocating,
-    private val wifiRanger: WifiAwareRanger
+    private val wifiRanger: WifiAwareRanger,
+    private val uwbRanger: UwbRanger = UwbRanger(context)
 ) {
     private val wifiAwareEnabled = true
     private val hasBleHardware = context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
@@ -33,7 +34,6 @@ class HybridDistanceManager(
     private val hasUwbHardware =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_UWB)
-    private val uwbRanger = UwbRanger(context)
 
     private val activeTransport = MutableStateFlow(CallTransportType.NONE)
     private val localSupportsUwb = MutableStateFlow(hasUwbHardware)
@@ -57,7 +57,9 @@ class HybridDistanceManager(
         localSupportsUwb,
         peerSupportsUwb
     ) { sensors, transport, localUwb, peerUwb ->
-        val uwbReady = localUwb && peerUwb && hasUwbHardware
+        val uwbLocalReady = localUwb && hasUwbHardware
+        val uwbPeerKnown = peerUwb
+        val uwbReady = uwbLocalReady && uwbPeerKnown
         val primary = when {
             uwbReady && sensors.uwbDist != null -> MeasurementSelection(
                 distance = sensors.uwbDist,
@@ -76,7 +78,8 @@ class HybridDistanceManager(
             DistanceMeasurementSource.RTT -> "Tracking via Wi-Fi RTT"
             DistanceMeasurementSource.RSSI -> "Tracking via Wi-Fi Direct RSSI"
             DistanceMeasurementSource.NONE -> when {
-                uwbReady -> "UWB ranging is initializing..."
+                uwbReady && uwbPeerKnown -> "UWB ranging is initializing..."
+                uwbLocalReady -> "UWB available (waiting for peer session)..."
                 transport == CallTransportType.WIFI_AWARE -> "Searching RTT signal..."
                 transport == CallTransportType.WIFI_DIRECT -> "Searching RSSI signal..."
                 else -> "Searching for signal..."
