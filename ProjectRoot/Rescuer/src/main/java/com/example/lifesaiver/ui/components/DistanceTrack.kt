@@ -156,8 +156,14 @@ fun DistanceTrack(
         Spacer(modifier = Modifier.height(scaledDp(24, scale)))
 
         if (isSearching) {
+            val waitingText = when (measurementSource) {
+                DistanceMeasurementSource.UWB -> "UWB 연결/측정 중"
+                DistanceMeasurementSource.RTT -> "RTT 측정 중"
+                DistanceMeasurementSource.RSSI -> "30m 이내로 접근하면 거리 표시"
+                DistanceMeasurementSource.NONE -> "신호 탐색 중"
+            }
             Text(
-                text = "30m 이내로 접근하면 거리 표시",
+                text = waitingText,
                 color = AppColors.Gray500,
                 fontSize = scaledSp(14, scale),
                 fontWeight = FontWeight.Medium

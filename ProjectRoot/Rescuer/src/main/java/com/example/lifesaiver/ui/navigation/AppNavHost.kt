@@ -35,8 +35,8 @@ import com.example.lifesaiver.core.profile.ProfileStore
 import com.example.lifesaiver.core.profile.SurvivorProfile
 import com.example.lifesaiver.core.service.CallAudioService
 import com.example.lifesaiver.core.ble.BleRSSILocating
+import com.example.lifesaiver.core.location.DistanceMeasurementSource
 import com.example.lifesaiver.core.location.HybridDistanceManager
-import com.example.lifesaiver.core.wifi.WifiAwareRanger
 import com.example.lifesaiver.presentation.AppViewModel
 import com.example.lifesaiver.presentation.BleDebugStats
 import com.example.lifesaiver.presentation.MeshVisualEvent
@@ -65,6 +65,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.pow
 
 @Composable
 fun AppNavHost(
@@ -113,6 +114,7 @@ fun AppNavHost(
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     val appState by appViewModel.uiState.collectAsState()
     var pendingSosNavigation by remember { mutableStateOf(false) }
+    var pendingSosRoute by remember { mutableStateOf<String?>(null) }
     var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
@@ -148,17 +150,30 @@ fun AppNavHost(
     val callDebugState by callViewModel.debugState.collectAsState()
     val pendingTarget by callViewModel.pendingTarget.collectAsState()
     var selectedTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
-    val distanceTargetPeerId = targetSurvivor?.peerId ?: selectedTargetPeerId
+    var selectedTargetSurvivor by remember { mutableStateOf<SurvivorProfile?>(null) }
+    var knownSurvivorPeerIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var survivorSignalTrackingReady by remember { mutableStateOf(false) }
+    var lastUwbSyncRequestAtMs by rememberSaveable { mutableStateOf(0L) }
+    val distanceTargetPeerId = targetSurvivor?.peerId ?: selectedTargetPeerId ?: selectedTargetSurvivor?.peerId
     val distanceTargetSupportsUwb = appState.survivors.firstOrNull { it.peerId == distanceTargetPeerId }?.isUwb
+        ?: selectedTargetSurvivor?.isUwb
         ?: targetSurvivor?.isUwb
         ?: false
+    val currentRoute = backStackEntry?.destination?.route
+    val shouldRunDistanceTracking = isInCall ||
+        currentRoute == AppRoute.RescuerPTT.route ||
+        currentRoute == AppRoute.RescuerSurvivorDb.route
     val distanceViewModelFactory = remember(appContext) {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val wifiRanger = WifiAwareRanger(appContext)
                 val bleLocating = BleRSSILocating(appContext, targetPeerIdHex = null)
-                val hybridManager = HybridDistanceManager(appContext, bleLocating, wifiRanger)
+                val hybridManager = HybridDistanceManager(
+                    context = appContext,
+                    bleLocating = bleLocating,
+                    wifiRanger = appViewModel.wifiAwareRanger,
+                    uwbRanger = appViewModel.uwbRanger
+                )
                 return DistanceViewModel(hybridManager) as T
             }
         }
@@ -167,6 +182,14 @@ fun AppNavHost(
         viewModelStoreOwner = context as ViewModelStoreOwner,
         factory = distanceViewModelFactory
     )
+    LaunchedEffect(shouldRunDistanceTracking) {
+        appViewModel.setBleRssiActiveMode(shouldRunDistanceTracking)
+        if (shouldRunDistanceTracking) {
+            distanceViewModel.start()
+        } else {
+            distanceViewModel.stop()
+        }
+    }
     val navigateSingleRoute: (String) -> Unit = nav@{ targetRoute ->
         val currentRoute = navController.currentBackStackEntry?.destination?.route
         if (pendingNavigateRoute != null || currentRoute == targetRoute) return@nav
@@ -176,6 +199,121 @@ fun AppNavHost(
                 launchSingleTop = true
             }
         }
+    }
+    fun endCurrentRescuerCall() {
+        val targetPeerId = targetSurvivor?.peerId ?: appState.callPeerId.orEmpty()
+        if (targetPeerId.isNotBlank()) {
+            val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
+            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+            appViewModel.sendCallHandshake(
+                targetPeerIdHex = targetPeerId,
+                action = CallHandshakeAction.END,
+                callerName = profileState.name.ifBlank { "구조자" },
+                wifiAwareSupported = localWifiAware,
+                wifiDirectSupported = localWifiDirect,
+                useOpus = localOpusSupported
+            )
+            appViewModel.clearLocalCallState(targetPeerId)
+        }
+        callViewModel.endCall()
+        callingTargetPeerId = null
+        callAttemptStartedAtMs = 0L
+    }
+    fun requestRescuerCall(survivor: SurvivorProfile) {
+        if (callingTargetPeerId != null) {
+            val pendingPeerId = callingTargetPeerId.orEmpty()
+            if (pendingPeerId == survivor.peerId) {
+                Toast.makeText(context, "통화 연결 시도 중입니다.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (pendingPeerId.isNotBlank()) {
+                val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
+                val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                appViewModel.sendCallHandshake(
+                    targetPeerIdHex = pendingPeerId,
+                    action = CallHandshakeAction.END,
+                    callerName = profileState.name.ifBlank { "구조자" },
+                    wifiAwareSupported = localWifiAware,
+                    wifiDirectSupported = localWifiDirect,
+                    useOpus = localOpusSupported
+                )
+                appViewModel.clearLocalCallState(pendingPeerId)
+            }
+            callViewModel.clearPendingCall()
+            callingTargetPeerId = null
+            callAttemptStartedAtMs = 0L
+        }
+        val currentPeerId = targetSurvivor?.peerId.orEmpty()
+        if (isInCall) {
+            if (currentPeerId.isNotBlank() && currentPeerId != survivor.peerId) {
+                endCurrentRescuerCall()
+            } else {
+                Toast.makeText(context, "이미 통화 중입니다.", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        if (!appViewModel.ensureWifiAwarePermissions()) return
+        val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
+        val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+        val targetPeerId = survivor.peerId.ifBlank { directPeerIds.firstOrNull().orEmpty() }
+        if (targetPeerId.isBlank()) {
+            Toast.makeText(context, "연결된 BLE 피어가 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        selectedTargetPeerId = targetPeerId
+        val hasBleLink = directPeerIds.contains(targetPeerId)
+        val peerWifiAware = if (forceDirectOnly) false else survivor.isWifiAware || hasBleLink
+        val peerDirectAddress = appState.peerDirectAddresses[targetPeerId]
+        val peerWifiDirect = survivor.isWifiDirect || hasBleLink || !peerDirectAddress.isNullOrBlank()
+        val canUseAware = localWifiAware && peerWifiAware
+        val canUseDirect = localWifiDirect && peerWifiDirect
+        if (!canUseAware && !canUseDirect) {
+            Toast.makeText(context, "통화 불가: Aware/Direct 미지원", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val initialState = if (canUseAware) {
+            CallHandshakeState.AWARE_TRY
+        } else {
+            CallHandshakeState.DIRECT_TRY
+        }
+        appViewModel.sendCallHandshake(
+            targetPeerIdHex = targetPeerId,
+            action = CallHandshakeAction.START,
+            callerName = profileState.name.ifBlank { "구조자" },
+            wifiAwareSupported = localWifiAware,
+            wifiDirectSupported = localWifiDirect,
+            useOpus = localOpusSupported,
+            state = initialState
+        )
+        callViewModel.requestCall(
+            survivor.copy(
+                peerId = targetPeerId,
+                isWifiAware = peerWifiAware,
+                isWifiDirect = peerWifiDirect
+            )
+        )
+        selectedTargetSurvivor = survivor.copy(
+            peerId = targetPeerId,
+            isWifiAware = peerWifiAware,
+            isWifiDirect = peerWifiDirect
+        )
+        callingTargetPeerId = targetPeerId
+        callAttemptStartedAtMs = System.currentTimeMillis()
+        Toast.makeText(context, "통화 요청 전송됨", Toast.LENGTH_SHORT).show()
+    }
+    fun resolveSelectedSurvivorForCall(): SurvivorProfile? {
+        val selectedPeerId = selectedTargetPeerId.orEmpty()
+        if (selectedPeerId.isNotBlank()) {
+            val selected = appState.survivors.firstOrNull { it.peerId == selectedPeerId }
+            if (selected != null) return selected
+            val cachedSelected = selectedTargetSurvivor
+            if (cachedSelected != null && cachedSelected.peerId == selectedPeerId) {
+                return cachedSelected
+            }
+            return null
+        }
+        selectedTargetSurvivor?.let { return it }
+        return appState.survivors.singleOrNull()
     }
 
     fun startCallAudioService() {
@@ -242,7 +380,9 @@ fun AppNavHost(
                 delay(minSosDurationMs - elapsed)
             }
             pendingSosNavigation = false
-            navController.navigate(AppRoute.SurvivorPTT.route)
+            val targetRoute = pendingSosRoute ?: AppRoute.SurvivorPTT.route
+            pendingSosRoute = null
+            navigateSingleRoute(targetRoute)
         }
     }
 
@@ -262,6 +402,11 @@ fun AppNavHost(
             }
             if (!pendingSosNavigation) {
                 pendingSosNavigation = true
+                pendingSosRoute = if (isRescuerRoute) {
+                    AppRoute.RescuerSurvivorDb.route
+                } else {
+                    AppRoute.SurvivorPTT.route
+                }
                 sosStartedAt = System.currentTimeMillis()
             }
             if (currentRoute != targetRoute) {
@@ -310,10 +455,48 @@ fun AppNavHost(
         distanceViewModel.setUwbCapability(localSupported = localUwb, peerSupported = peerUwb)
     }
 
-    LaunchedEffect(appState.survivors) {
-        val selected = selectedTargetPeerId
-        if (selected != null && appState.survivors.none { it.peerId == selected }) {
+    LaunchedEffect(
+        appState.survivors,
+        backStackEntry?.destination?.route,
+        isInCall,
+        callingTargetPeerId
+    ) {
+        val selected = selectedTargetPeerId ?: return@LaunchedEffect
+        appState.survivors.firstOrNull { it.peerId == selected }?.let { liveSelected ->
+            selectedTargetSurvivor = liveSelected
+            return@LaunchedEffect
+        }
+        val currentRoute = backStackEntry?.destination?.route
+        val keepSelection =
+            currentRoute == AppRoute.RescuerPTT.route ||
+                isInCall ||
+                callingTargetPeerId != null
+        if (!keepSelection) {
             selectedTargetPeerId = null
+            selectedTargetSurvivor = null
+        }
+    }
+
+    LaunchedEffect(appState.survivors, backStackEntry?.destination?.route, isInCall) {
+        val peerIds = appState.survivors
+            .map { it.peerId }
+            .filter { it.isNotBlank() }
+            .toSet()
+        if (!survivorSignalTrackingReady) {
+            knownSurvivorPeerIds = peerIds
+            survivorSignalTrackingReady = true
+            return@LaunchedEffect
+        }
+        val hasNewSurvivorSignal = (peerIds - knownSurvivorPeerIds).isNotEmpty()
+        knownSurvivorPeerIds = peerIds
+        if (!hasNewSurvivorSignal || isInCall) return@LaunchedEffect
+        val currentRoute = backStackEntry?.destination?.route
+        val shouldAutoOpenDb = currentRoute == AppRoute.RescuerStandby.route ||
+            currentRoute == AppRoute.RescuerPTT.route ||
+            currentRoute == AppRoute.RescuerChat.route ||
+            currentRoute == AppRoute.RescuerMeshMap.route
+        if (shouldAutoOpenDb) {
+            navigateSingleRoute(AppRoute.RescuerSurvivorDb.route)
         }
     }
 
@@ -599,6 +782,7 @@ fun AppNavHost(
                 onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
                 onSos = {
                     pendingSosNavigation = true
+                    pendingSosRoute = AppRoute.SurvivorPTT.route
                     sosStartedAt = System.currentTimeMillis()
                     navigateSingleRoute(AppRoute.SurvivorEmergency.route)
                 }
@@ -831,12 +1015,7 @@ fun AppNavHost(
                 onStartAutoConnect()
             }
             val distanceState by distanceViewModel.uiState.collectAsState()
-            DisposableEffect(Unit) {
-                distanceViewModel.start()
-                onDispose {
-                    distanceViewModel.stop()
-                }
-            }
+            val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
             val callTransportReady = when (callDebugState.activeTransport) {
                 CallTransportType.WIFI_AWARE -> callDebugState.wifiAware.isReady
                 CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect.isReady
@@ -854,6 +1033,64 @@ fun AppNavHost(
             } else {
                 "연결 중 ($callTransportLabel)"
             }
+            val pttTargetPeerId = selectedTargetPeerId
+                ?: selectedTargetSurvivor?.peerId
+                ?: targetSurvivor?.peerId
+                ?: appState.callPeerId
+            val pttTargetSupportsUwb = appState.survivors.firstOrNull { it.peerId == pttTargetPeerId }?.isUwb
+                ?: selectedTargetSurvivor?.isUwb
+                ?: targetSurvivor?.isUwb
+                ?: false
+            val preferUwbOnDetail = appViewModel.isUwbSupportedLocally() && pttTargetSupportsUwb
+            LaunchedEffect(pttTargetPeerId, preferUwbOnDetail, isInCall) {
+                if (!isInCall && preferUwbOnDetail && !pttTargetPeerId.isNullOrBlank()) {
+                    appViewModel.requestUwbSession(pttTargetPeerId)
+                }
+            }
+            LaunchedEffect(
+                pttTargetPeerId,
+                preferUwbOnDetail,
+                distanceState.measurementSource,
+                distanceState.distanceMeters
+            ) {
+                if (!preferUwbOnDetail || pttTargetPeerId.isNullOrBlank()) return@LaunchedEffect
+                val hasUwbDistance =
+                    distanceState.measurementSource == DistanceMeasurementSource.UWB &&
+                        distanceState.distanceMeters != null
+                if (hasUwbDistance) return@LaunchedEffect
+                val now = System.currentTimeMillis()
+                if (now - lastUwbSyncRequestAtMs < 3_000L) return@LaunchedEffect
+                lastUwbSyncRequestAtMs = now
+                appViewModel.requestUwbSession(pttTargetPeerId)
+            }
+            val isCallingOnPtt = callingTargetPeerId != null &&
+                (pttTargetPeerId == null || callingTargetPeerId == pttTargetPeerId)
+            val peerRttDistanceMeters = appState.callPeerRttCm?.toFloat()?.div(100f)
+            val pttPeerRssi = pttTargetPeerId?.let { appState.peerRssi[it] }
+            val rssiFallbackDistanceMeters = pttPeerRssi?.let { estimateDistanceMetersFromRssi(it) }
+            val isAwareCallActive = isInCall && callDebugState.activeTransport == CallTransportType.WIFI_AWARE
+            val awareRttDistanceMeters = liveAwareRttMeters ?: peerRttDistanceMeters
+            val hasUwbDistance =
+                distanceState.measurementSource == DistanceMeasurementSource.UWB &&
+                    distanceState.distanceMeters != null
+            val displayDistanceMeters = when {
+                hasUwbDistance -> distanceState.distanceMeters
+                preferUwbOnDetail -> null
+                isAwareCallActive && awareRttDistanceMeters != null -> awareRttDistanceMeters
+                distanceState.distanceMeters != null -> distanceState.distanceMeters
+                isInCall && peerRttDistanceMeters != null -> peerRttDistanceMeters
+                rssiFallbackDistanceMeters != null -> rssiFallbackDistanceMeters
+                else -> null
+            }
+            val displayDistanceSource = when {
+                hasUwbDistance -> DistanceMeasurementSource.UWB
+                preferUwbOnDetail -> DistanceMeasurementSource.UWB
+                isAwareCallActive && awareRttDistanceMeters != null -> DistanceMeasurementSource.RTT
+                distanceState.distanceMeters != null -> distanceState.measurementSource
+                isInCall && peerRttDistanceMeters != null -> DistanceMeasurementSource.RTT
+                rssiFallbackDistanceMeters != null -> DistanceMeasurementSource.RSSI
+                else -> distanceState.measurementSource
+            }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
                 connectedCount = connectedCount,
@@ -867,15 +1104,26 @@ fun AppNavHost(
                 callStatusLabel = callStatusLabel,
                 callDecisionLabel = callDebugState.lastDecision,
                 isInCall = isInCall,
+                isCalling = isCallingOnPtt,
                 isConnected = isConnected,
-                isMicOn = isMicOn,
                 isSpeakerphoneOn = callDebugState.audio.speakerphoneEnabled,
-                distanceMeters = distanceState.distanceMeters,
+                distanceMeters = displayDistanceMeters,
                 distanceTrend = distanceState.trend,
-                distanceSource = distanceState.measurementSource,
-                onMicPress = onMicPress,
-                onMicRelease = onMicRelease,
-                onBack = { navController.popBackStack() },
+                distanceSource = displayDistanceSource,
+                onRequestCall = {
+                    val survivor = resolveSelectedSurvivorForCall()
+                    if (survivor == null) {
+                        Toast.makeText(context, "생존자를 먼저 선택해 주세요.", Toast.LENGTH_SHORT).show()
+                        navigateSingleRoute(AppRoute.RescuerSurvivorDb.route)
+                    } else {
+                        if (survivor.peerId.isNotBlank()) {
+                            selectedTargetPeerId = survivor.peerId
+                        }
+                        requestRescuerCall(survivor)
+                    }
+                },
+                onEndCall = { endCurrentRescuerCall() },
+                onBack = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
                 onDisconnect = {
                     if (isInCall) {
                         val targetPeerId = targetSurvivor?.peerId.orEmpty()
@@ -908,80 +1156,13 @@ fun AppNavHost(
             LaunchedEffect(Unit) {
                 onStartAutoConnect()
             }
+            val dbDistanceState by distanceViewModel.uiState.collectAsState()
+            val dbDistanceTargetPeerId = selectedTargetPeerId ?: targetSurvivor?.peerId ?: appState.callPeerId
             RescuerSurvivorDbScreen(
                 survivors = appState.survivors,
                 peerRssiMap = appState.peerRssi,
-                onBack = { navController.popBackStack() },
-                onCallClick = { survivor ->
-                    if (callingTargetPeerId != null) {
-                        Toast.makeText(context, "통화 연결 시도 중입니다.", Toast.LENGTH_SHORT).show()
-                        return@RescuerSurvivorDbScreen
-                    }
-                    val currentPeerId = targetSurvivor?.peerId.orEmpty()
-                    if (isInCall) {
-                        if (currentPeerId.isNotBlank() && currentPeerId != survivor.peerId) {
-                            val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
-                            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
-                            appViewModel.sendCallHandshake(
-                                targetPeerIdHex = currentPeerId,
-                                action = CallHandshakeAction.END,
-                                callerName = profileState.name.ifBlank { "구조자" },
-                                wifiAwareSupported = localWifiAware,
-                                wifiDirectSupported = localWifiDirect,
-                                useOpus = localOpusSupported
-                            )
-                            appViewModel.clearLocalCallState(currentPeerId)
-                            callViewModel.endCall()
-                        } else {
-                            Toast.makeText(context, "이미 통화 중입니다.", Toast.LENGTH_SHORT).show()
-                            return@RescuerSurvivorDbScreen
-                        }
-                    }
-                    if (!appViewModel.ensureWifiAwarePermissions()) return@RescuerSurvivorDbScreen
-                    val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
-                    val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
-                    val targetPeerId = survivor.peerId.ifBlank { directPeerIds.firstOrNull().orEmpty() }
-                    if (targetPeerId.isBlank()) {
-                        Toast.makeText(context, "연결된 BLE 피어가 없습니다.", Toast.LENGTH_SHORT).show()
-                        return@RescuerSurvivorDbScreen
-                    }
-                    val hasBleLink = directPeerIds.contains(targetPeerId)
-                    val peerWifiAware = if (forceDirectOnly) false else survivor.isWifiAware || hasBleLink
-                    val peerDirectAddress = appState.peerDirectAddresses[targetPeerId]
-                    val peerWifiDirect = survivor.isWifiDirect || hasBleLink || !peerDirectAddress.isNullOrBlank()
-                    val canUseAware = localWifiAware && peerWifiAware
-                    val canUseDirect = localWifiDirect && peerWifiDirect
-                    if (!canUseAware && !canUseDirect) {
-                        Toast.makeText(context, "통화 불가: Aware/Direct 미지원", Toast.LENGTH_SHORT).show()
-                        return@RescuerSurvivorDbScreen
-                    }
-                    val initialState = if (canUseAware) {
-                        com.example.lifesaiver.protocol.model.CallHandshakeState.AWARE_TRY
-                    } else {
-                        com.example.lifesaiver.protocol.model.CallHandshakeState.DIRECT_TRY
-                    }
-                    appViewModel.sendCallHandshake(
-                        targetPeerIdHex = targetPeerId,
-                        action = CallHandshakeAction.START,
-                        callerName = profileState.name.ifBlank { "구조자" },
-                        wifiAwareSupported = localWifiAware,
-                        wifiDirectSupported = localWifiDirect,
-                        useOpus = localOpusSupported,
-                        state = initialState
-                    )
-                    callViewModel.requestCall(
-                        survivor.copy(
-                            peerId = targetPeerId,
-                            isWifiAware = peerWifiAware,
-                            isWifiDirect = peerWifiDirect
-                        )
-                    )
-                    callingTargetPeerId = targetPeerId
-                    callAttemptStartedAtMs = System.currentTimeMillis()
-                    Toast.makeText(context, "통화 요청 전송됨", Toast.LENGTH_SHORT).show()
-                },
-                onEndCall = {
-                    val targetPeerId = targetSurvivor?.peerId.orEmpty()
+                onDisconnectClick = {
+                    val targetPeerId = callingTargetPeerId ?: targetSurvivor?.peerId.orEmpty()
                     if (targetPeerId.isNotBlank()) {
                         val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
                         val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
@@ -995,22 +1176,49 @@ fun AppNavHost(
                         )
                         appViewModel.clearLocalCallState(targetPeerId)
                     }
+                    callViewModel.clearPendingCall()
                     callViewModel.endCall()
                     callingTargetPeerId = null
                     callAttemptStartedAtMs = 0L
+                    onDisconnect()
+                    navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
+                onCallClick = { survivor ->
+                    selectedTargetPeerId = survivor.peerId.ifBlank { selectedTargetPeerId }
+                    selectedTargetSurvivor = survivor
+                    distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
+                    distanceViewModel.setUwbCapability(
+                        localSupported = appViewModel.isUwbSupportedLocally(),
+                        peerSupported = survivor.isUwb
+                    )
+                    navigateSingleRoute(AppRoute.RescuerPTT.route)
+                    requestRescuerCall(survivor)
+                },
+                onEndCall = { endCurrentRescuerCall() },
                 onOpenMeshMap = { navigateSingleRoute(AppRoute.RescuerMeshMap.route) },
+                onOpenGroupChat = { navigateSingleRoute(AppRoute.RescuerChat.route) },
                 selectedTargetPeerId = selectedTargetPeerId,
                 onSelectTarget = { survivor ->
-                    selectedTargetPeerId = if (selectedTargetPeerId == survivor.peerId) {
-                        null
-                    } else {
-                        survivor.peerId
+                    selectedTargetPeerId = survivor.peerId
+                    selectedTargetSurvivor = survivor
+                    distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
+                    distanceViewModel.setUwbCapability(
+                        localSupported = appViewModel.isUwbSupportedLocally(),
+                        peerSupported = survivor.isUwb
+                    )
+                    if (survivor.isUwb && survivor.peerId.isNotBlank()) {
+                        appViewModel.requestUwbSession(survivor.peerId)
                     }
+                    navigateSingleRoute(AppRoute.RescuerPTT.route)
                 },
                 activeSurvivor = targetSurvivor,
                 isInCall = isInCall,
-                callingPeerId = callingTargetPeerId
+                callingPeerId = callingTargetPeerId,
+                callPeerId = appState.callPeerId,
+                callPeerRttCm = appState.callPeerRttCm,
+                activeDistancePeerId = dbDistanceTargetPeerId,
+                activeDistanceMeters = dbDistanceState.distanceMeters,
+                activeDistanceSource = dbDistanceState.measurementSource
             )
         }
 
@@ -1064,4 +1272,10 @@ fun AppNavHost(
             )
         }
     }
+}
+
+private fun estimateDistanceMetersFromRssi(rssi: Int): Float {
+    val txPower = -59
+    val pathLossExponent = 2.0
+    return 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
 }
