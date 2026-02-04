@@ -5,7 +5,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -46,6 +52,7 @@ import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.model.CallHandshakeAction
 import com.example.lifesaiver.protocol.model.CallHandshakeState
+import com.example.lifesaiver.protocol.model.DeviceControlCommand
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.screen.survivor.ptt.PTTLinkScreen
@@ -53,6 +60,8 @@ import com.example.lifesaiver.ui.screen.rescuer.chat.RescuerChatScreen
 import com.example.lifesaiver.ui.screen.rescuer.db.RescuerSurvivorDbScreen
 import com.example.lifesaiver.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaiver.ui.screen.rescuer.mesh.RescuerMeshMapScreen
+import com.example.lifesaiver.ui.screen.rescuer.ptt.RssiFeedbackLevel
+import com.example.lifesaiver.ui.screen.rescuer.ptt.RssiFeedbackMode
 import com.example.lifesaiver.ui.screen.rescuer.ptt.RescuerPTTLinkScreen
 import com.example.lifesaiver.ui.screen.rescuer.standby.RescuerStandbyScreen
 import com.example.lifesaiver.ui.screen.survivor.standby.StandbyStatusScreen
@@ -65,7 +74,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 @Composable
 fun AppNavHost(
@@ -150,15 +161,28 @@ fun AppNavHost(
     val callDebugState by callViewModel.debugState.collectAsState()
     val pendingTarget by callViewModel.pendingTarget.collectAsState()
     var selectedTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
+    var directChatPeerId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedTargetSurvivor by remember { mutableStateOf<SurvivorProfile?>(null) }
     var knownSurvivorPeerIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var survivorSignalTrackingReady by remember { mutableStateOf(false) }
     var lastUwbSyncRequestAtMs by rememberSaveable { mutableStateOf(0L) }
+    var lastAwareRttReportAtMs by rememberSaveable { mutableStateOf(0L) }
+    var lastAwareRttReportCm by rememberSaveable { mutableStateOf<Int?>(null) }
+    var rssiFeedbackMode by rememberSaveable { mutableStateOf(RssiFeedbackMode.OFF.name) }
+    var rssiFeedbackLevel by rememberSaveable { mutableStateOf(RssiFeedbackLevel.MEDIUM.name) }
+    var lastRssiGuidanceAtMs by rememberSaveable { mutableStateOf(0L) }
+    val rssiToneGenerator = remember { ToneGenerator(AudioManager.STREAM_ALARM, 95) }
+    fun resolvePeerSupportsUwb(peerId: String?): Boolean {
+        if (peerId.isNullOrBlank()) return false
+        return appState.survivors.firstOrNull { it.peerId == peerId }?.isUwb == true
+    }
+    fun resolvePeerSupportsAware(peerId: String?): Boolean {
+        if (peerId.isNullOrBlank()) return false
+        val fromSurvivor = appState.survivors.firstOrNull { it.peerId == peerId }?.isWifiAware == true
+        return fromSurvivor || (appState.callPeerId == peerId && appState.callPeerWifiAware == true)
+    }
     val distanceTargetPeerId = targetSurvivor?.peerId ?: selectedTargetPeerId ?: selectedTargetSurvivor?.peerId
-    val distanceTargetSupportsUwb = appState.survivors.firstOrNull { it.peerId == distanceTargetPeerId }?.isUwb
-        ?: selectedTargetSurvivor?.isUwb
-        ?: targetSurvivor?.isUwb
-        ?: false
+    val distanceTargetSupportsUwb = resolvePeerSupportsUwb(distanceTargetPeerId)
     val currentRoute = backStackEntry?.destination?.route
     val shouldRunDistanceTracking = isInCall ||
         currentRoute == AppRoute.RescuerPTT.route ||
@@ -182,12 +206,23 @@ fun AppNavHost(
         viewModelStoreOwner = context as ViewModelStoreOwner,
         factory = distanceViewModelFactory
     )
+    LaunchedEffect(Unit) {
+        // Keep RTT enabled in both idle and in-call states.
+        appViewModel.wifiAwareRanger.setRttEnabled(true)
+    }
     LaunchedEffect(shouldRunDistanceTracking) {
         appViewModel.setBleRssiActiveMode(shouldRunDistanceTracking)
         if (shouldRunDistanceTracking) {
             distanceViewModel.start()
         } else {
             distanceViewModel.stop()
+        }
+    }
+    LaunchedEffect(isConnected, meshPeerCount, isInCall) {
+        if (!isConnected && meshPeerCount <= 0 && !isInCall) {
+            rssiFeedbackMode = RssiFeedbackMode.OFF.name
+            rssiFeedbackLevel = RssiFeedbackLevel.MEDIUM.name
+            lastRssiGuidanceAtMs = 0L
         }
     }
     val navigateSingleRoute: (String) -> Unit = nav@{ targetRoute ->
@@ -200,9 +235,24 @@ fun AppNavHost(
             }
         }
     }
+    fun resetRssiFeedbackDefaults() {
+        rssiFeedbackMode = RssiFeedbackMode.OFF.name
+        rssiFeedbackLevel = RssiFeedbackLevel.MEDIUM.name
+        lastRssiGuidanceAtMs = 0L
+    }
+    fun sendRemoteStopIfNeeded(peerId: String?) {
+        if (peerId.isNullOrBlank()) return
+        appViewModel.sendDeviceControl(
+            targetPeerIdHex = peerId,
+            command = DeviceControlCommand.STOP_ALERTS,
+            durationMs = 300,
+            intensity = 0
+        )
+    }
     fun endCurrentRescuerCall() {
         val targetPeerId = targetSurvivor?.peerId ?: appState.callPeerId.orEmpty()
         if (targetPeerId.isNotBlank()) {
+            sendRemoteStopIfNeeded(targetPeerId)
             val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
             val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
             appViewModel.sendCallHandshake(
@@ -218,6 +268,7 @@ fun AppNavHost(
         callViewModel.endCall()
         callingTargetPeerId = null
         callAttemptStartedAtMs = 0L
+        resetRssiFeedbackDefaults()
     }
     fun requestRescuerCall(survivor: SurvivorProfile) {
         if (callingTargetPeerId != null) {
@@ -256,6 +307,11 @@ fun AppNavHost(
         val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
         val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
         val targetPeerId = survivor.peerId.ifBlank { directPeerIds.firstOrNull().orEmpty() }
+        val peerSupportsUwb = resolvePeerSupportsUwb(targetPeerId)
+        if (!peerSupportsUwb) {
+            appViewModel.stopUwbSession()
+            lastUwbSyncRequestAtMs = 0L
+        }
         if (targetPeerId.isBlank()) {
             Toast.makeText(context, "연결된 BLE 피어가 없습니다.", Toast.LENGTH_SHORT).show()
             return
@@ -422,6 +478,11 @@ fun AppNavHost(
             }
         }
     }
+    DisposableEffect(rssiToneGenerator) {
+        onDispose {
+            runCatching { rssiToneGenerator.release() }
+        }
+    }
 
     LaunchedEffect(appState.incomingCallPeerId, isInCall, backStackEntry) {
         val currentRoute = backStackEntry?.destination?.route
@@ -453,6 +514,10 @@ fun AppNavHost(
         val localUwb = appViewModel.isUwbSupportedLocally()
         val peerUwb = distanceTargetPeerId != null && distanceTargetSupportsUwb
         distanceViewModel.setUwbCapability(localSupported = localUwb, peerSupported = peerUwb)
+        if (!peerUwb) {
+            appViewModel.stopUwbSession()
+            lastUwbSyncRequestAtMs = 0L
+        }
     }
 
     LaunchedEffect(
@@ -510,6 +575,7 @@ fun AppNavHost(
             startCallAudioService()
         } else {
             stopCallAudioService()
+            lastRssiGuidanceAtMs = 0L
         }
     }
 
@@ -631,6 +697,7 @@ fun AppNavHost(
         callViewModel.endCall()
         callingTargetPeerId = null
         callAttemptStartedAtMs = 0L
+        resetRssiFeedbackDefaults()
     }
 
     LaunchedEffect(isInCall, targetSurvivor?.peerId, callDebugState.activeTransport, callDebugState.wifiAware.isReady) {
@@ -713,6 +780,7 @@ fun AppNavHost(
         callViewModel.endCall()
         callingTargetPeerId = null
         callAttemptStartedAtMs = 0L
+        resetRssiFeedbackDefaults()
         Toast.makeText(context, "통화 연결 시간 초과(15초)", Toast.LENGTH_SHORT).show()
     }
 
@@ -875,6 +943,7 @@ fun AppNavHost(
                     if (isInCall) {
                         val targetPeerId = targetSurvivor?.peerId.orEmpty()
                         if (targetPeerId.isNotBlank()) {
+                            sendRemoteStopIfNeeded(targetPeerId)
                             val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
                             val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
                             appViewModel.sendCallHandshake(
@@ -889,6 +958,7 @@ fun AppNavHost(
                         }
                         callViewModel.endCall()
                     }
+                    resetRssiFeedbackDefaults()
                     onDisconnect()
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
@@ -1037,11 +1107,13 @@ fun AppNavHost(
                 ?: selectedTargetSurvivor?.peerId
                 ?: targetSurvivor?.peerId
                 ?: appState.callPeerId
-            val pttTargetSupportsUwb = appState.survivors.firstOrNull { it.peerId == pttTargetPeerId }?.isUwb
-                ?: selectedTargetSurvivor?.isUwb
-                ?: targetSurvivor?.isUwb
-                ?: false
+            val pttTargetSupportsUwb = resolvePeerSupportsUwb(pttTargetPeerId)
+            val pttTargetSupportsAware = resolvePeerSupportsAware(pttTargetPeerId)
             val preferUwbOnDetail = appViewModel.isUwbSupportedLocally() && pttTargetSupportsUwb
+            val preferRttOnDetail =
+                !forceDirectOnly &&
+                    appViewModel.isWifiAwareSupportedLocally() &&
+                    pttTargetSupportsAware
             LaunchedEffect(pttTargetPeerId, preferUwbOnDetail, isInCall) {
                 if (!isInCall && preferUwbOnDetail && !pttTargetPeerId.isNullOrBlank()) {
                     appViewModel.requestUwbSession(pttTargetPeerId)
@@ -1070,12 +1142,53 @@ fun AppNavHost(
             val rssiFallbackDistanceMeters = pttPeerRssi?.let { estimateDistanceMetersFromRssi(it) }
             val isAwareCallActive = isInCall && callDebugState.activeTransport == CallTransportType.WIFI_AWARE
             val awareRttDistanceMeters = liveAwareRttMeters ?: peerRttDistanceMeters
+            LaunchedEffect(
+                isInCall,
+                callDebugState.activeTransport,
+                callDebugState.wifiAware.isReady,
+                pttTargetPeerId,
+                liveAwareRttMeters
+            ) {
+                val peerId = pttTargetPeerId
+                if (!isInCall || peerId.isNullOrBlank()) {
+                    lastAwareRttReportAtMs = 0L
+                    lastAwareRttReportCm = null
+                    return@LaunchedEffect
+                }
+                val awareReady =
+                    callDebugState.activeTransport == CallTransportType.WIFI_AWARE &&
+                        callDebugState.wifiAware.isReady
+                if (!awareReady) return@LaunchedEffect
+                val rttMeters = liveAwareRttMeters ?: return@LaunchedEffect
+                val rttCm = (rttMeters * 100f).roundToInt().coerceIn(0, 0xFFFF)
+                val now = System.currentTimeMillis()
+                val lastCm = lastAwareRttReportCm
+                val changedEnough = lastCm == null || abs(rttCm - lastCm) >= 30
+                if (!changedEnough && now - lastAwareRttReportAtMs < 4_000L) return@LaunchedEffect
+                if (now - lastAwareRttReportAtMs < 1_200L) return@LaunchedEffect
+                val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
+                val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
+                appViewModel.sendCallHandshake(
+                    targetPeerIdHex = peerId,
+                    action = CallHandshakeAction.ACK,
+                    callerName = profileState.name.ifBlank { "구조자" },
+                    wifiAwareSupported = localWifiAware,
+                    wifiDirectSupported = localWifiDirect,
+                    useOpus = localOpusSupported,
+                    state = CallHandshakeState.AWARE_OK,
+                    rttCm = rttCm
+                )
+                lastAwareRttReportCm = rttCm
+                lastAwareRttReportAtMs = now
+            }
             val hasUwbDistance =
                 distanceState.measurementSource == DistanceMeasurementSource.UWB &&
                     distanceState.distanceMeters != null
             val displayDistanceMeters = when {
                 hasUwbDistance -> distanceState.distanceMeters
-                preferUwbOnDetail -> null
+                // Prefer RTT only when it is actually measured; otherwise keep RSSI fallback.
+                preferRttOnDetail && awareRttDistanceMeters != null -> awareRttDistanceMeters
+                // Capability is only a hint. Final selection must prefer measured values.
                 isAwareCallActive && awareRttDistanceMeters != null -> awareRttDistanceMeters
                 distanceState.distanceMeters != null -> distanceState.distanceMeters
                 isInCall && peerRttDistanceMeters != null -> peerRttDistanceMeters
@@ -1084,12 +1197,92 @@ fun AppNavHost(
             }
             val displayDistanceSource = when {
                 hasUwbDistance -> DistanceMeasurementSource.UWB
-                preferUwbOnDetail -> DistanceMeasurementSource.UWB
+                preferRttOnDetail && awareRttDistanceMeters != null -> DistanceMeasurementSource.RTT
                 isAwareCallActive && awareRttDistanceMeters != null -> DistanceMeasurementSource.RTT
+                isAwareCallActive && displayDistanceMeters == null -> DistanceMeasurementSource.RTT
                 distanceState.distanceMeters != null -> distanceState.measurementSource
                 isInCall && peerRttDistanceMeters != null -> DistanceMeasurementSource.RTT
                 rssiFallbackDistanceMeters != null -> DistanceMeasurementSource.RSSI
                 else -> distanceState.measurementSource
+            }
+            val resolvedRssiMode = runCatching {
+                RssiFeedbackMode.valueOf(rssiFeedbackMode)
+            }.getOrElse {
+                RssiFeedbackMode.BOTH
+            }
+            val resolvedRssiLevel = runCatching {
+                RssiFeedbackLevel.valueOf(rssiFeedbackLevel)
+            }.getOrElse {
+                RssiFeedbackLevel.MEDIUM
+            }
+            val remoteControlEnabled = !pttTargetPeerId.isNullOrBlank()
+            val remoteDurationMs = when (resolvedRssiLevel) {
+                RssiFeedbackLevel.LOW -> 1_600
+                RssiFeedbackLevel.MEDIUM -> 2_900
+                RssiFeedbackLevel.HIGH -> 4_200
+            }
+            // Keep a perceptible pause between repeated remote alerts so they do not overlap unnaturally.
+            val remoteRepeatIntervalMs = (remoteDurationMs + 1_400L).coerceIn(2_600L, 8_000L)
+            val remoteIntensity = when (resolvedRssiLevel) {
+                RssiFeedbackLevel.LOW -> 1
+                RssiFeedbackLevel.MEDIUM -> 2
+                RssiFeedbackLevel.HIGH -> 3
+            }
+            LaunchedEffect(
+                pttTargetPeerId,
+                displayDistanceMeters,
+                displayDistanceSource,
+                resolvedRssiMode,
+                resolvedRssiLevel
+            ) {
+                if (pttTargetPeerId.isNullOrBlank()) {
+                    lastRssiGuidanceAtMs = 0L
+                    return@LaunchedEffect
+                }
+                if (resolvedRssiMode == RssiFeedbackMode.OFF) return@LaunchedEffect
+                val distance = displayDistanceMeters ?: return@LaunchedEffect
+                if (displayDistanceSource != DistanceMeasurementSource.RSSI) return@LaunchedEffect
+                val now = System.currentTimeMillis()
+                val clampedDistance = distance.coerceIn(0f, 10f)
+                val normalizedProximity = (10f - clampedDistance) / 10f
+                val baseIntervalMs = (1_600f - (normalizedProximity * 1_520f)).roundToInt().toLong()
+                val adjustedIntervalMs = when (resolvedRssiLevel) {
+                    RssiFeedbackLevel.LOW -> (baseIntervalMs * 1.25f).roundToInt().toLong()
+                    RssiFeedbackLevel.MEDIUM -> baseIntervalMs
+                    RssiFeedbackLevel.HIGH -> (baseIntervalMs * 0.82f).roundToInt().toLong()
+                }.coerceIn(
+                    when (resolvedRssiMode) {
+                        RssiFeedbackMode.SOUND -> 55L
+                        RssiFeedbackMode.BOTH -> 95L
+                        else -> 220L
+                    },
+                    2_400L
+                )
+                if (now - lastRssiGuidanceAtMs < adjustedIntervalMs) return@LaunchedEffect
+                lastRssiGuidanceAtMs = now
+                if (resolvedRssiMode == RssiFeedbackMode.VIBRATION || resolvedRssiMode == RssiFeedbackMode.BOTH) {
+                    triggerRescuerRssiVibration(context, resolvedRssiLevel)
+                }
+                if (resolvedRssiMode == RssiFeedbackMode.SOUND || resolvedRssiMode == RssiFeedbackMode.BOTH) {
+                    val toneType = when {
+                        clampedDistance <= 1.2f -> ToneGenerator.TONE_CDMA_HIGH_SS
+                        clampedDistance <= 3f -> ToneGenerator.TONE_CDMA_HIGH_L
+                        clampedDistance <= 6f -> ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD
+                        else -> ToneGenerator.TONE_PROP_BEEP
+                    }
+                    val baseToneDurationMs = when (resolvedRssiLevel) {
+                        RssiFeedbackLevel.LOW -> 45
+                        RssiFeedbackLevel.MEDIUM -> 60
+                        RssiFeedbackLevel.HIGH -> 78
+                    }
+                    val nearBoostMs = (normalizedProximity * 70f).roundToInt()
+                    val toneDurationMs = if (clampedDistance <= 0.9f) {
+                        (adjustedIntervalMs * 0.94f).roundToInt().coerceIn(110, 320)
+                    } else {
+                        (baseToneDurationMs + nearBoostMs).coerceIn(45, 220)
+                    }
+                    rssiToneGenerator.startTone(toneType, toneDurationMs)
+                }
             }
             RescuerPTTLinkScreen(
                 batteryLevel = batteryLevel,
@@ -1124,31 +1317,71 @@ fun AppNavHost(
                 },
                 onEndCall = { endCurrentRescuerCall() },
                 onBack = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
-                onDisconnect = {
-                    if (isInCall) {
-                        val targetPeerId = targetSurvivor?.peerId.orEmpty()
-                        if (targetPeerId.isNotBlank()) {
-                            val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
-                            val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
-                            appViewModel.sendCallHandshake(
-                                targetPeerIdHex = targetPeerId,
-                                action = CallHandshakeAction.END,
-                                callerName = profileState.name.ifBlank { "구조자" },
-                                wifiAwareSupported = localWifiAware,
-                                wifiDirectSupported = localWifiDirect,
-                                useOpus = localOpusSupported
-                            )
-                            appViewModel.clearLocalCallState(targetPeerId)
-                        }
-                        callViewModel.endCall()
-                    }
-                    onDisconnect()
-                    navigateSingleRoute(AppRoute.RescuerStandby.route)
-                },
-                onChat = { navigateSingleRoute(AppRoute.RescuerChat.route) },
-                onOpenSurvivorDb = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
                 onPanicClear = onClearDeviceMonitoring,
-                onToggleSpeakerphone = { callViewModel.toggleSpeakerphone() }
+                onToggleSpeakerphone = {
+                    val nextSpeakerEnabled = !callDebugState.audio.speakerphoneEnabled
+                    callViewModel.setSpeakerphoneEnabled(nextSpeakerEnabled)
+                    applyRescuerSpeakerRoute(context, nextSpeakerEnabled)
+                },
+                rssiFeedbackMode = resolvedRssiMode,
+                rssiFeedbackLevel = resolvedRssiLevel,
+                onCycleRssiFeedbackMode = {
+                    rssiFeedbackMode = when (resolvedRssiMode) {
+                        RssiFeedbackMode.OFF -> RssiFeedbackMode.VIBRATION.name
+                        RssiFeedbackMode.VIBRATION -> RssiFeedbackMode.SOUND.name
+                        RssiFeedbackMode.SOUND -> RssiFeedbackMode.BOTH.name
+                        RssiFeedbackMode.BOTH -> RssiFeedbackMode.OFF.name
+                    }
+                },
+                onCycleRssiFeedbackLevel = {
+                    rssiFeedbackLevel = when (resolvedRssiLevel) {
+                        RssiFeedbackLevel.LOW -> RssiFeedbackLevel.MEDIUM.name
+                        RssiFeedbackLevel.MEDIUM -> RssiFeedbackLevel.HIGH.name
+                        RssiFeedbackLevel.HIGH -> RssiFeedbackLevel.LOW.name
+                    }
+                },
+                remoteControlEnabled = remoteControlEnabled,
+                remoteRepeatIntervalMs = remoteRepeatIntervalMs,
+                onSendRemoteWake = {
+                    val peerId = pttTargetPeerId ?: return@RescuerPTTLinkScreen
+                    appViewModel.sendDeviceControl(
+                        targetPeerIdHex = peerId,
+                        command = DeviceControlCommand.WAKE_SCREEN,
+                        durationMs = 1_200,
+                        intensity = remoteIntensity
+                    )
+                },
+                onSendRemoteBeep = {
+                    val peerId = pttTargetPeerId ?: return@RescuerPTTLinkScreen
+                    appViewModel.sendDeviceControl(
+                        targetPeerIdHex = peerId,
+                        command = DeviceControlCommand.BEEP,
+                        durationMs = remoteDurationMs,
+                        intensity = remoteIntensity
+                    )
+                },
+                onSendRemoteVibrate = {
+                    val peerId = pttTargetPeerId ?: return@RescuerPTTLinkScreen
+                    appViewModel.sendDeviceControl(
+                        targetPeerIdHex = peerId,
+                        command = DeviceControlCommand.VIBRATE,
+                        durationMs = remoteDurationMs,
+                        intensity = remoteIntensity
+                    )
+                },
+                onSendRemoteHighTone = {
+                    val peerId = pttTargetPeerId ?: return@RescuerPTTLinkScreen
+                    appViewModel.sendDeviceControl(
+                        targetPeerIdHex = peerId,
+                        command = DeviceControlCommand.HIGH_TONE,
+                        durationMs = remoteDurationMs,
+                        intensity = remoteIntensity,
+                        frequencyHz = 17_500
+                    )
+                },
+                onSendRemoteStop = {
+                    sendRemoteStopIfNeeded(pttTargetPeerId)
+                }
             )
         }
 
@@ -1161,9 +1394,11 @@ fun AppNavHost(
             RescuerSurvivorDbScreen(
                 survivors = appState.survivors,
                 peerRssiMap = appState.peerRssi,
+                peerBatteryMap = appState.peerBatteryLevels,
                 onDisconnectClick = {
                     val targetPeerId = callingTargetPeerId ?: targetSurvivor?.peerId.orEmpty()
                     if (targetPeerId.isNotBlank()) {
+                        sendRemoteStopIfNeeded(targetPeerId)
                         val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
                         val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
                         appViewModel.sendCallHandshake(
@@ -1180,34 +1415,54 @@ fun AppNavHost(
                     callViewModel.endCall()
                     callingTargetPeerId = null
                     callAttemptStartedAtMs = 0L
+                    resetRssiFeedbackDefaults()
                     onDisconnect()
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
                 onCallClick = { survivor ->
                     selectedTargetPeerId = survivor.peerId.ifBlank { selectedTargetPeerId }
                     selectedTargetSurvivor = survivor
+                    val supportsUwb = resolvePeerSupportsUwb(survivor.peerId)
                     distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
                     distanceViewModel.setUwbCapability(
                         localSupported = appViewModel.isUwbSupportedLocally(),
-                        peerSupported = survivor.isUwb
+                        peerSupported = supportsUwb
                     )
+                    if (!supportsUwb) {
+                        appViewModel.stopUwbSession()
+                        lastUwbSyncRequestAtMs = 0L
+                    }
                     navigateSingleRoute(AppRoute.RescuerPTT.route)
                     requestRescuerCall(survivor)
                 },
                 onEndCall = { endCurrentRescuerCall() },
                 onOpenMeshMap = { navigateSingleRoute(AppRoute.RescuerMeshMap.route) },
-                onOpenGroupChat = { navigateSingleRoute(AppRoute.RescuerChat.route) },
+                onOpenGroupChat = {
+                    directChatPeerId = null
+                    navigateSingleRoute(AppRoute.RescuerChat.route)
+                },
+                onOpenDirectChat = { survivor ->
+                    val peerId = survivor.peerId
+                    if (peerId.isNotBlank()) {
+                        directChatPeerId = peerId
+                        navigateSingleRoute(AppRoute.RescuerChat.route)
+                    }
+                },
                 selectedTargetPeerId = selectedTargetPeerId,
                 onSelectTarget = { survivor ->
                     selectedTargetPeerId = survivor.peerId
                     selectedTargetSurvivor = survivor
+                    val supportsUwb = resolvePeerSupportsUwb(survivor.peerId)
                     distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
                     distanceViewModel.setUwbCapability(
                         localSupported = appViewModel.isUwbSupportedLocally(),
-                        peerSupported = survivor.isUwb
+                        peerSupported = supportsUwb
                     )
-                    if (survivor.isUwb && survivor.peerId.isNotBlank()) {
+                    if (supportsUwb && survivor.peerId.isNotBlank()) {
                         appViewModel.requestUwbSession(survivor.peerId)
+                    } else {
+                        appViewModel.stopUwbSession()
+                        lastUwbSyncRequestAtMs = 0L
                     }
                     navigateSingleRoute(AppRoute.RescuerPTT.route)
                 },
@@ -1236,17 +1491,41 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerChat.route) {
+            val directPeerId = directChatPeerId
+            val isDirectRoom = !directPeerId.isNullOrBlank()
+            val directPeerName = appState.survivors
+                .firstOrNull { it.peerId == directPeerId }
+                ?.name
+                ?.ifBlank { null }
+                ?: directPeerId?.let { peerNicknames[it]?.ifBlank { null } }
+                ?: "대상"
+            val chatMessages = if (isDirectRoom) {
+                messages.filter { message ->
+                    (message.isMine && message.recipientPeerId == directPeerId) ||
+                        (!message.isMine &&
+                            message.senderPeerId == directPeerId &&
+                            message.recipientPeerId == myPeerId)
+                }
+            } else {
+                messages.filter { it.recipientPeerId == null }
+            }
             RescuerChatScreen(
-                roomTitle = "전체 채팅",
+                roomTitle = if (isDirectRoom) "1:1 채팅 · $directPeerName" else "전체 채팅",
                 meshPeerCount = meshPeerCount,
-                messages = messages,
+                messages = chatMessages,
                 signatureLogs = signatureLogs,
                 profileLogs = profileLogs,
                 onClearSignatureLogs = onClearSignatureLogs,
                 onClearProfileLogs = onClearProfileLogs,
                 onSendProfileTest = onSendProfileTest,
                 onPrev = { navController.popBackStack() },
-                onSend = onSendMessage
+                onSend = { text ->
+                    if (isDirectRoom && !directPeerId.isNullOrBlank()) {
+                        appViewModel.onSendDirectMessage(directPeerId, text)
+                    } else {
+                        onSendMessage(text)
+                    }
+                }
             )
         }
 
@@ -1278,4 +1557,60 @@ private fun estimateDistanceMetersFromRssi(rssi: Int): Float {
     val txPower = -59
     val pathLossExponent = 2.0
     return 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
+}
+
+private fun triggerRescuerRssiVibration(
+    context: Context,
+    level: RssiFeedbackLevel
+) {
+    val durationMs = when (level) {
+        RssiFeedbackLevel.LOW -> 180L
+        RssiFeedbackLevel.MEDIUM -> 300L
+        RssiFeedbackLevel.HIGH -> 420L
+    }
+    val amplitude = when (level) {
+        RssiFeedbackLevel.LOW -> 120
+        RssiFeedbackLevel.MEDIUM -> 210
+        RssiFeedbackLevel.HIGH -> 255
+    }
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val manager = context.getSystemService(VibratorManager::class.java)
+        manager?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    } ?: return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        vibrator.vibrate(VibrationEffect.createOneShot(durationMs, amplitude))
+    } else {
+        @Suppress("DEPRECATION")
+        vibrator.vibrate(durationMs)
+    }
+}
+
+private fun applyRescuerSpeakerRoute(context: Context, speakerEnabled: Boolean) {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+    runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val targetType = if (speakerEnabled) {
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        } else {
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        }
+        val targetDevice = audioManager.availableCommunicationDevices.firstOrNull { it.type == targetType }
+        if (targetDevice != null) {
+            runCatching { audioManager.setCommunicationDevice(targetDevice) }
+        } else if (!speakerEnabled) {
+            runCatching { audioManager.clearCommunicationDevice() }
+        }
+    }
+    runCatching { audioManager.isSpeakerphoneOn = speakerEnabled }
+    if (!speakerEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val earpiece = audioManager.availableCommunicationDevices.firstOrNull {
+            it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        }
+        if (earpiece != null) {
+            runCatching { audioManager.setCommunicationDevice(earpiece) }
+        }
+    }
 }

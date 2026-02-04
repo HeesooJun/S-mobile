@@ -42,6 +42,8 @@ import com.example.lifesaiver.protocol.mesh.PeerIdentityRegistry
 import com.example.lifesaiver.protocol.model.CallHandshakeAction
 import com.example.lifesaiver.protocol.model.CallHandshakePayload
 import com.example.lifesaiver.protocol.model.CallHandshakeState
+import com.example.lifesaiver.protocol.model.DeviceControlCommand
+import com.example.lifesaiver.protocol.model.DeviceControlPayload
 import com.example.lifesaiver.protocol.model.FileTransferPayload
 import com.example.lifesaiver.protocol.model.IdentityAnnouncementPayload
 import com.example.lifesaiver.protocol.model.Packet
@@ -106,6 +108,7 @@ data class AppUiState(
     val myNickname: String = "",
     val peerNicknames: Map<String, String> = emptyMap(),
     val peerDirectAddresses: Map<String, String> = emptyMap(),
+    val peerBatteryLevels: Map<String, Int> = emptyMap(),
     val meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot = MeshGraphRegistry.GraphSnapshot(emptyList(), emptyList()),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
@@ -191,6 +194,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val announcedToPeers = mutableSetOf<String>()
     private val peerNicknames = mutableMapOf<String, String>()
     private val peerDirectAddresses = ConcurrentHashMap<String, String>()
+    private val peerBatteryLevels = ConcurrentHashMap<String, Int>()
     private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -272,9 +276,75 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun onMicPress() { if (_uiState.value.isMicOn) return; val outDir = File(app.filesDir, "voicenotes/outgoing"); if (!outDir.exists()) outDir.mkdirs(); val recorder = VoiceRecorder(outDir); val file = recorder.start() ?: return; voiceRecorder = recorder; recordingFile = file; _uiState.update { it.copy(isMicOn = true) } }
-    fun onMicRelease() { if (!_uiState.value.isMicOn) return; val recorder = voiceRecorder; val pendingFile = recordingFile; voiceRecorder = null; recordingFile = null; _uiState.update { it.copy(isMicOn = false) }; viewModelScope.launch(Dispatchers.IO) { delay(500); val file = recorder?.stop() ?: pendingFile; if (file == null || !file.exists()) return@launch; val bytes = file.readBytes(); val payload = FileTransferPayload(file.name, bytes.size.toLong(), "audio/mp4", bytes).encode(); protocolCore.broadcast(Packet(PacketHeader(2, PacketType.FILE_TRANSFER, ProtocolConstants.MESSAGE_TTL_HOPS, 0, payload.size, System.currentTimeMillis(), senderId), payload)); addMessage(ChatMessage(text = "[voice] ${file.absolutePath}", isMine = true)) } }
-    fun onSendMessage(text: String) { if (text.isBlank()) return; val packet = buildMessagePacket(text); val signed = signatureManager.sign(packet); gossipSyncManager.onPublicPacketSeen(signed); protocolCore.broadcast(signed); addMessage(ChatMessage(text = text, isMine = true)) }
-    fun ensureWifiAwarePermissions(): Boolean { val wifi = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager; if (wifi?.isWifiEnabled == false) { _uiEvents.tryEmit(UiEvent.Toast("Wi-Fi를 켜주세요.")); return false }; return true }
+    fun onMicRelease() { if (!_uiState.value.isMicOn) return; val recorder = voiceRecorder; val pendingFile = recordingFile; voiceRecorder = null; recordingFile = null; _uiState.update { it.copy(isMicOn = false) }; viewModelScope.launch(Dispatchers.IO) { delay(500); val file = recorder?.stop() ?: pendingFile; if (file == null || !file.exists()) return@launch; val bytes = file.readBytes(); val payload = FileTransferPayload(file.name, bytes.size.toLong(), "audio/mp4", bytes).encode(); protocolCore.broadcast(Packet(PacketHeader(2, PacketType.FILE_TRANSFER, ProtocolConstants.MESSAGE_TTL_HOPS, 0, payload.size, System.currentTimeMillis(), senderId), payload)); addMessage(ChatMessage(text = "[voice] ${file.absolutePath}", isMine = true, senderName = resolveMyDisplayName(), senderPeerId = bytesToHex(senderId))) } }
+    fun onSendMessage(text: String) {
+        if (text.isBlank()) return
+        val packet = buildMessagePacket(text)
+        val signed = signatureManager.sign(packet)
+        gossipSyncManager.onPublicPacketSeen(signed)
+        protocolCore.broadcast(signed)
+        addMessage(
+            ChatMessage(
+                text = text,
+                isMine = true,
+                senderName = resolveMyDisplayName(),
+                senderPeerId = bytesToHex(senderId)
+            )
+        )
+    }
+
+    fun onSendDirectMessage(targetPeerIdHex: String, text: String) {
+        val trimmed = text.trim()
+        if (targetPeerIdHex.isBlank() || trimmed.isBlank()) return
+        val recipientId = runCatching { hexToBytes(targetPeerIdHex) }.getOrNull() ?: return
+        val payload = trimmed.toByteArray()
+        val packet = Packet(
+            PacketHeader(
+                version = 2,
+                type = PacketType.MESSAGE,
+                ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                flags = 0,
+                length = payload.size,
+                timestamp = System.currentTimeMillis(),
+                senderId = senderId,
+                recipientId = recipientId
+            ),
+            payload
+        )
+        val signed = signatureManager.sign(packet)
+        protocolCore.send(signed)
+        addMessage(
+            ChatMessage(
+                text = trimmed,
+                isMine = true,
+                senderName = resolveMyDisplayName(),
+                senderPeerId = bytesToHex(senderId),
+                recipientPeerId = targetPeerIdHex
+            )
+        )
+    }
+    fun ensureWifiAwarePermissions(): Boolean {
+        val wifi = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (wifi?.isWifiEnabled == false) {
+            _uiEvents.tryEmit(UiEvent.Toast("Wi-Fi를 켜주세요."))
+            return false
+        }
+        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val locationEnabled = when {
+            locationManager == null -> false
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> locationManager.isLocationEnabled
+            else -> {
+                val gps = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+                val network = runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+                gps || network
+            }
+        }
+        if (!locationEnabled) {
+            _uiEvents.tryEmit(UiEvent.Toast("위치 서비스를 켜주세요."))
+            return false
+        }
+        return true
+    }
 
     fun sendProfileUpdate(profile: SurvivorProfile) {
         val now = System.currentTimeMillis()
@@ -412,6 +482,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
         }
+    }
+
+    fun stopUwbSession() {
+        uwbRanger.endSession()
+    }
+
+    fun sendDeviceControl(
+        targetPeerIdHex: String,
+        command: DeviceControlCommand,
+        durationMs: Int = 1_500,
+        intensity: Int = 2,
+        frequencyHz: Int? = null
+    ) {
+        if (targetPeerIdHex.isBlank()) return
+        val recipientId = runCatching { hexToBytes(targetPeerIdHex) }.getOrNull() ?: return
+        val payload = DeviceControlPayload(
+            command = command,
+            durationMs = durationMs,
+            intensity = intensity,
+            frequencyHz = frequencyHz
+        ).encode()
+        protocolCore.broadcast(
+            Packet(
+                header = PacketHeader(
+                    version = 2,
+                    type = PacketType.DEVICE_CONTROL,
+                    ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
+                    flags = 0,
+                    length = payload.size,
+                    timestamp = System.currentTimeMillis(),
+                    senderId = senderId,
+                    recipientId = recipientId
+                ),
+                payload = payload
+            )
+        )
+        ConnectionLog.add(
+            "DeviceControl",
+            "send ${command.name} -> $targetPeerIdHex d=${durationMs}ms i=$intensity f=${frequencyHz ?: 0}"
+        )
     }
 
     fun clearIncomingCall(peerIdHex: String) {
@@ -624,7 +734,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendLeaveOnShutdown() { if (::protocolCore.isInitialized) sendLeavePacket() }
     fun stopServicesForShutdown() { if (::bleManager.isInitialized) { bleManager.stopAdvertising(); bleManager.disconnect() }; try { app.startService(Intent(app, RescueService::class.java).apply { action = RescueService.ACTION_STOP_RESCUE }) } catch (e: Exception) {} }
     private fun initAudio() { try { audioEngine = AudioEngine() } catch (e: Exception) { _uiEvents.tryEmit(UiEvent.Toast("오디오 에러")) } }
-    private fun initBle() { bleManager = BleManager(app, logCallback = { Log.d("Ble", it) }, audioCallback = { pcm -> audioEngine?.playAudio(pcm) }, textCallback = { msg -> addMessage(ChatMessage(text = msg, isMine = false)) }, protocolCallback = { _, _ -> }, connectionCallback = { connected, count -> refreshDirectPeers() }); bleManager.setLocalPeerId(senderId); bleManager.setRssiActiveMode(bleRssiActiveMode); protocolCore.attachTransport(BleTransport(bleManager)); startBleDebugLoop() }
+    private fun initBle() { bleManager = BleManager(app, logCallback = { Log.d("Ble", it) }, audioCallback = { pcm -> audioEngine?.playAudio(pcm) }, textCallback = { msg -> addMessage(ChatMessage(text = msg, isMine = false, senderName = "상대방")) }, protocolCallback = { _, _ -> }, connectionCallback = { connected, count -> refreshDirectPeers() }); bleManager.setLocalPeerId(senderId); bleManager.setRssiActiveMode(bleRssiActiveMode); protocolCore.attachTransport(BleTransport(bleManager)); startBleDebugLoop() }
     private fun initProtocol() {
         val codec = BinaryPacketCodec(); signatureManager = SignatureManager(app, codec, ::appendSignatureLog); senderId = loadOrCreatePeerId(signatureManager)
         protocolCore = ProtocolCore(encoder = codec, decoder = codec, myPeerId = senderId, signatureManager = signatureManager)
@@ -643,11 +753,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (!decision.accept) return@setOnPacketReceived
                     announcedPeerLastSeen[peer] = now
                     val directAddress = announcement.wifiDirectAddress?.trim()?.lowercase()?.ifBlank { null }
+                    val remoteBattery = announcement.batteryLevel
                     if (announcement.nickname.isNotBlank()) {
                         peerNicknames[peer] = announcement.nickname
                     }
                     if (directAddress != null) {
                         peerDirectAddresses[peer] = directAddress
+                    }
+                    if (remoteBattery != null) {
+                        peerBatteryLevels[peer] = remoteBattery
                     }
                     _uiState.update { state ->
                         val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peer) {
@@ -663,6 +777,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         state.copy(
                             peerNicknames = peerNicknames.toMap(),
                             peerDirectAddresses = peerDirectAddresses.toMap(),
+                            peerBatteryLevels = peerBatteryLevels.toMap(),
                             incomingCallDirectAddress = incomingDirect,
                             callPeerDirectAddress = callPeerDirect
                         )
@@ -676,14 +791,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     meshRegistry.remove(peer)
                     announcedPeerLastSeen.remove(peer)
                     peerDirectAddresses.remove(peer)
-                    _uiState.update { it.copy(peerDirectAddresses = peerDirectAddresses.toMap()) }
+                    peerBatteryLevels.remove(peer)
+                    _uiState.update {
+                        it.copy(
+                            peerDirectAddresses = peerDirectAddresses.toMap(),
+                            peerBatteryLevels = peerBatteryLevels.toMap()
+                        )
+                    }
                     refreshSurvivorCapabilities()
                 }
                 PacketType.MESSAGE -> {
+                    val myPeerIdHex = bytesToHex(senderId)
+                    val recipientHex = packet.header.recipientId?.let { bytesToHex(it) }
+                    if (recipientHex != null && recipientHex != myPeerIdHex) {
+                        return@setOnPacketReceived
+                    }
                     val res = ProfileTlv.decodeIfProfile(packet.payload);
-                    if (res != null) profilePacketHandler.handle(packet, res, path) else addMessage(ChatMessage(text = packet.payload.toString(Charsets.UTF_8), isMine = false, path = path))
+                    if (res != null) {
+                        profilePacketHandler.handle(packet, res, path)
+                    } else {
+                        addMessage(
+                            ChatMessage(
+                                text = packet.payload.toString(Charsets.UTF_8),
+                                isMine = false,
+                                path = path,
+                                senderName = resolvePeerDisplayName(peer),
+                                senderPeerId = peer,
+                                recipientPeerId = recipientHex
+                            )
+                        )
+                    }
                 }
-                PacketType.FILE_TRANSFER -> viewModelScope.launch(Dispatchers.IO) { val p = FileTransferPayload.decode(packet.payload) ?: return@launch; val s = FileTransferStorage.storeIncoming(app, p, packet.header.timestamp) ?: return@launch; addMessage(ChatMessage(text = FileTransferStorage.buildMarker(s), isMine = false, path = path)) }
+                PacketType.FILE_TRANSFER -> viewModelScope.launch(Dispatchers.IO) { val p = FileTransferPayload.decode(packet.payload) ?: return@launch; val s = FileTransferStorage.storeIncoming(app, p, packet.header.timestamp) ?: return@launch; addMessage(ChatMessage(text = FileTransferStorage.buildMarker(s), isMine = false, path = path, senderName = resolvePeerDisplayName(peer), senderPeerId = peer)) }
                 PacketType.REQUEST_SYNC -> gossipSyncManager.handleRequestSync(packet.header.senderId, RequestSyncPayload.decode(packet.payload) ?: return@setOnPacketReceived)
                 PacketType.CALL_HANDSHAKE -> {
                     val recipient = packet.header.recipientId
@@ -701,6 +840,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun initBatteryMonitor() { app.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }
     private fun updateBatteryLevel(intent: Intent) { val l = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1); val s = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1); if (l >= 0 && s > 0) _uiState.update { it.copy(batteryLevel = (l * 100 / s)) } }
     private fun addMessage(m: ChatMessage) { _uiState.update { it.copy(messages = it.messages + m) } }
+    private fun defaultRescuerName(): String {
+        val peerSuffix = bytesToHex(senderId).take(4).ifBlank { "----" }
+        return "구조자[$peerSuffix]"
+    }
+    private fun resolveMyDisplayName(): String {
+        val peerSuffix = bytesToHex(senderId).take(4).ifBlank { "----" }
+        val nickname = cachedNickname.ifBlank { _uiState.value.myNickname }.trim()
+        return when {
+            nickname.isBlank() -> "구조자[$peerSuffix]"
+            nickname.endsWith("[$peerSuffix]") -> nickname
+            else -> "$nickname[$peerSuffix]"
+        }
+    }
+    private fun resolvePeerDisplayName(peerId: String?): String {
+        if (peerId.isNullOrBlank()) return "구조자[----]"
+        val peerSuffix = peerId.take(4)
+        val nickname = peerNicknames[peerId].orEmpty().trim()
+        return if (nickname.isNotBlank()) "$nickname[$peerSuffix]" else "구조자[$peerSuffix]"
+    }
     private fun emitMeshActivity(id: String) { _meshVisualEvents.tryEmit(MeshVisualEvent.PacketActivity(id)) }
     private fun refreshDirectPeers() {
         val ids = bleManager.getConnectedPeerIds()
@@ -740,11 +898,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun sendAnnounce() {
         wifiDirectRanger.refreshLocalDeviceAddress()
         val directAddress = wifiDirectRanger.getLocalDeviceAddress()
+        val localBattery = _uiState.value.batteryLevel.coerceIn(0, 100)
+        val announceName = cachedNickname
+            .ifBlank { _uiState.value.myNickname.trim() }
+            .ifBlank { defaultRescuerName() }
         val ann = IdentityAnnouncementPayload(
-            nickname = cachedNickname.ifBlank { bytesToHex(senderId) },
+            nickname = announceName,
             noisePublicKey = signatureManager.getNoisePublicKeyBytes(),
             signingPublicKey = signatureManager.getPublicKeyBytes(),
-            wifiDirectAddress = directAddress
+            wifiDirectAddress = directAddress,
+            batteryLevel = localBattery
         )
         val pay = (ann.encode() ?: return) + GossipTlv.encodeNeighbors(bleManager.getConnectedPeerIds())
         val pkt = Packet(PacketHeader(2, PacketType.ANNOUNCE, ProtocolConstants.MESSAGE_TTL_HOPS, getCurrentCapabilityFlags(), pay.size, System.currentTimeMillis(), senderId), pay)
@@ -754,9 +917,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeProfileState() {
         viewModelScope.launch {
             profileStore.profileFlow.collect { profile ->
-                cachedProfile = profile
-                cachedNickname = profile.name.trim()
-                _uiState.update { s -> s.copy(myNickname = cachedNickname) }
+                val profileName = profile.name.trim()
+                val resolvedName = profileName.ifBlank { defaultRescuerName() }
+                if (profileName.isBlank()) {
+                    viewModelScope.launch {
+                        profileStore.saveProfile(profile.copy(name = resolvedName))
+                    }
+                }
+                cachedProfile = profile.copy(name = resolvedName)
+                cachedNickname = resolvedName
+                _uiState.update { s -> s.copy(myNickname = resolvedName) }
                 val ui = _uiState.value
                 if (ui.isRescueSignalActive || ui.directPeerIds.isNotEmpty()) {
                     broadcastCachedProfileIfNeeded(force = false, reason = "profile-change")
@@ -775,7 +945,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 base.copy(
                     isWifiAware = info?.isWifiAware ?: base.isWifiAware,
                     isWifiDirect = info?.isWifiDirect ?: base.isWifiDirect,
-                    isUwb = info?.isUwb ?: base.isUwb,
+                    // Prefer live capability from announce/handshake; stale DB values should not force UWB UI.
+                    isUwb = info?.isUwb ?: false,
                     peerId = id
                 )
             }
@@ -789,8 +960,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stale.forEach {
             announcedPeerLastSeen.remove(it)
             peerDirectAddresses.remove(it)
+            peerBatteryLevels.remove(it)
         }
-        _uiState.update { it.copy(peerDirectAddresses = peerDirectAddresses.toMap()) }
+        _uiState.update {
+            it.copy(
+                peerDirectAddresses = peerDirectAddresses.toMap(),
+                peerBatteryLevels = peerBatteryLevels.toMap()
+            )
+        }
         refreshSurvivorCapabilities()
     }
     private fun observeCallConnection() {
