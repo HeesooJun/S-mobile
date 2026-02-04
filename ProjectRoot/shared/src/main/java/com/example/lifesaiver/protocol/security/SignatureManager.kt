@@ -18,8 +18,12 @@ import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import java.io.IOException
+import java.security.GeneralSecurityException
+import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
+import javax.crypto.AEADBadTagException
 
 enum class SignatureLogResult {
     VERIFIED,
@@ -184,16 +188,59 @@ class SignatureManager(
     }
 
     private fun createEncryptedPrefs(context: Context): SharedPreferences {
+        return try {
+            createAndVerifyEncryptedPrefs(context)
+        } catch (error: Exception) {
+            if (!isRecoverableEncryptedPrefsError(error)) {
+                throw error
+            }
+            context.deleteSharedPreferences(PREFS_NAME)
+            deleteMasterKeyEntry()
+            createAndVerifyEncryptedPrefs(context)
+        }
+    }
+
+    private fun createAndVerifyEncryptedPrefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context, MasterKey.DEFAULT_MASTER_KEY_ALIAS)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        return EncryptedSharedPreferences.create(
+        val prefs = EncryptedSharedPreferences.create(
             context,
             PREFS_NAME,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+        prefs.all
+        return prefs
+    }
+
+    private fun deleteMasterKeyEntry() {
+        runCatching {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
+            keyStore.load(null)
+            keyStore.deleteEntry(MasterKey.DEFAULT_MASTER_KEY_ALIAS)
+        }
+    }
+
+    private fun isRecoverableEncryptedPrefsError(error: Throwable): Boolean {
+        return hasCause(error) {
+            it is AEADBadTagException ||
+                it is GeneralSecurityException ||
+                it is SecurityException ||
+                it is IOException
+        }
+    }
+
+    private fun hasCause(error: Throwable, predicate: (Throwable) -> Boolean): Boolean {
+        var current: Throwable? = error
+        while (current != null) {
+            if (predicate(current)) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
     }
 
     private fun loadOrCreateSigningKeyPair(): Pair<Ed25519PrivateKeyParameters, Ed25519PublicKeyParameters> {
