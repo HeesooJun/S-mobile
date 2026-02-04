@@ -11,7 +11,8 @@ enum class PacketType(val code: Int) {
     FILE_TRANSFER(0x22),
     FILE_ACK(0x23),
     RESCUE_ID(0x30),
-    CALL_HANDSHAKE(0x31);
+    CALL_HANDSHAKE(0x31),
+    DEVICE_CONTROL(0x32);
 
     companion object {
         fun fromCode(code: Int): PacketType? {

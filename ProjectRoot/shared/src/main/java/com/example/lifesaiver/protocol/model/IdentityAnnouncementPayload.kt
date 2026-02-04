@@ -6,15 +6,18 @@ data class IdentityAnnouncementPayload(
     val nickname: String,
     val noisePublicKey: ByteArray,
     val signingPublicKey: ByteArray,
-    val wifiDirectAddress: String? = null
+    val wifiDirectAddress: String? = null,
+    val batteryLevel: Int? = null
 ) {
     fun encode(): ByteArray? {
         val nicknameBytes = nickname.toByteArray(Charsets.UTF_8)
         val directBytes = wifiDirectAddress?.let { macToBytes(it) }
+        val batteryBytes = batteryLevel?.coerceIn(0, 100)?.let { byteArrayOf(it.toByte()) }
         if (nicknameBytes.size > MAX_TLV_LENGTH ||
             noisePublicKey.size > MAX_TLV_LENGTH ||
             signingPublicKey.size > MAX_TLV_LENGTH ||
-            (directBytes != null && directBytes.size > MAX_TLV_LENGTH)
+            (directBytes != null && directBytes.size > MAX_TLV_LENGTH) ||
+            (batteryBytes != null && batteryBytes.size > MAX_TLV_LENGTH)
         ) {
             return null
         }
@@ -26,6 +29,9 @@ data class IdentityAnnouncementPayload(
         if (directBytes != null) {
             writeTlv(out, TLV_WIFI_DIRECT_ADDRESS, directBytes)
         }
+        if (batteryBytes != null) {
+            writeTlv(out, TLV_BATTERY_LEVEL, batteryBytes)
+        }
         return out.toByteArray()
     }
 
@@ -34,6 +40,7 @@ data class IdentityAnnouncementPayload(
         private const val TLV_NOISE_PUBLIC_KEY = 0x02
         private const val TLV_SIGNING_PUBLIC_KEY = 0x03
         private const val TLV_WIFI_DIRECT_ADDRESS = 0x05
+        private const val TLV_BATTERY_LEVEL = 0x06
         private const val MAX_TLV_LENGTH = 255
 
         fun decode(data: ByteArray): IdentityAnnouncementPayload? {
@@ -42,6 +49,7 @@ data class IdentityAnnouncementPayload(
             var noisePublicKey: ByteArray? = null
             var signingPublicKey: ByteArray? = null
             var wifiDirectAddress: String? = null
+            var batteryLevel: Int? = null
 
             while (offset + 2 <= data.size) {
                 val type = data[offset].toInt() and 0xFF
@@ -61,6 +69,11 @@ data class IdentityAnnouncementPayload(
                             wifiDirectAddress = bytesToMac(value, 0)
                         }
                     }
+                    TLV_BATTERY_LEVEL -> {
+                        if (value.isNotEmpty()) {
+                            batteryLevel = (value[0].toInt() and 0xFF).coerceIn(0, 100)
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -70,7 +83,8 @@ data class IdentityAnnouncementPayload(
                 nickname = nickname,
                 noisePublicKey = noisePublicKey,
                 signingPublicKey = signingPublicKey,
-                wifiDirectAddress = wifiDirectAddress
+                wifiDirectAddress = wifiDirectAddress,
+                batteryLevel = batteryLevel
             )
         }
 

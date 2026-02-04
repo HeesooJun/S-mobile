@@ -94,11 +94,20 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private var lastDropLogAt = 0L
     private var lastDecodeSkipLogAt = 0L
     private var lastGateLogAt = 0L
+    private var lastEchoLogAt = 0L
+    private var lastPlaybackRms = 0.0
+    private var lastPlaybackAt = 0L
     private val debugLogIntervalMs = 1000L
     private val silenceGateEnabled = false
     private val silenceGateRmsThreshold = 3.0
     private val silenceGateWarmupFrames = 50
     private val transmitGain = 0.7
+    private val echoMitigationEnabled = true
+    private val echoMitigationWindowMs = 240L
+    private val echoMitigationPlaybackRmsThresholdSpeaker = 700.0
+    private val echoMitigationPlaybackRmsThresholdEarpiece = 280.0
+    private val echoMitigationMaxRatioSpeaker = 1.25
+    private val echoMitigationMaxRatioEarpiece = 1.60
     private var captureFrameCount = 0
 
     private val _debugStats = MutableStateFlow(AudioDebugStats())
@@ -250,8 +259,9 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                                     continue
                                 }
                             }
-                            if (transmitGain in 0.0..0.999) {
-                                applyGainPcm16(buffer, readResult, transmitGain)
+                            val effectiveGain = resolveTransmitGain(rms)
+                            if (effectiveGain in 0.0..0.999) {
+                                applyGainPcm16(buffer, readResult, effectiveGain)
                             }
                             if (useOpus) {
                                 var offset = 0
@@ -315,6 +325,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             if (useOpus) {
                 decodeAndPlayOpus(data)
             } else {
+                updatePlaybackMonitor(calcRmsPcm16(data, data.size))
                 val written = audioTrack?.write(data, 0, data.size, AudioTrack.WRITE_BLOCKING) ?: 0
                 maybeLogPlay(data.size, written)
             }
@@ -367,6 +378,8 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             noiseSuppressor = null
             opusPcmOffset = 0
             captureFrameCount = 0
+            lastPlaybackRms = 0.0
+            lastPlaybackAt = 0L
 
             // 오디오 모드 원상복구
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -480,6 +493,17 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                 // Fallback for vendor stacks that do not honor setCommunicationDevice.
                 runCatching { audioManager.isSpeakerphoneOn = true }
                 speakerRouted = audioManager.isSpeakerphoneOn
+            } else if (!preferSpeakerphone && speakerRouted) {
+                // Some vendor stacks stay on speaker unless explicitly forced off.
+                val earpiece = available.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                if (earpiece != null) {
+                    runCatching { audioManager.setCommunicationDevice(earpiece) }
+                } else {
+                    runCatching { audioManager.clearCommunicationDevice() }
+                }
+                runCatching { audioManager.isSpeakerphoneOn = false }
+                communicationDeviceType = audioManager.communicationDevice?.type
+                speakerRouted = communicationDeviceType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER || audioManager.isSpeakerphoneOn
             }
         } else {
             audioManager.isSpeakerphoneOn = preferSpeakerphone
@@ -488,7 +512,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         // Re-assert after route selection in case policy daemon changed the mode.
         runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }
         val modeOk = audioManager.mode == AudioManager.MODE_IN_COMMUNICATION
-        if (!modeOk || (preferSpeakerphone && !speakerRouted)) {
+        if (!modeOk || (preferSpeakerphone && !speakerRouted) || (!preferSpeakerphone && speakerRouted)) {
             Log.w(
                 "AudioEngine",
                 "Speakerphone routing failed target=$preferSpeakerphone actual=$speakerRouted mode=${audioManager.mode} commType=$communicationDeviceType"
@@ -646,6 +670,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                             outBuffer.limit(decoderBufferInfo.offset + size)
                             val pcm = ByteArray(size)
                             outBuffer.get(pcm)
+                            updatePlaybackMonitor(calcRmsPcm16(pcm, pcm.size))
                             val written = audioTrack?.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING) ?: 0
                             maybeLogDecode(size)
                             maybeLogPlay(size, written)
@@ -734,6 +759,21 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         Log.d("AudioPipe", "GATE drop size=$size rms=%.2f threshold=%.2f".format(rms, silenceGateRmsThreshold))
     }
 
+    private fun maybeLogEchoSuppression(captureRms: Double, playbackRms: Double, gain: Double) {
+        val now = System.currentTimeMillis()
+        if (!shouldLog(now, lastEchoLogAt)) return
+        lastEchoLogAt = now
+        Log.d(
+            "AudioPipe",
+            "ECHO_SUPPRESS capture=%.1f playback=%.1f gain=%.2f speaker=%s".format(
+                captureRms,
+                playbackRms,
+                gain,
+                preferSpeakerphone
+            )
+        )
+    }
+
     private fun maybeLogPcmSend(size: Int) {
         val now = System.currentTimeMillis()
         if (!shouldLog(now, lastEncodeLogAt)) return
@@ -804,6 +844,47 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         }
         if (samples == 0) return 0.0
         return sqrt(sum / samples)
+    }
+
+    private fun updatePlaybackMonitor(rms: Double) {
+        if (rms <= 0.0) return
+        lastPlaybackRms = if (lastPlaybackRms <= 0.0) {
+            rms
+        } else {
+            (lastPlaybackRms * 0.65) + (rms * 0.35)
+        }
+        lastPlaybackAt = System.currentTimeMillis()
+    }
+
+    private fun resolveTransmitGain(captureRms: Double): Double {
+        var gain = if (preferSpeakerphone) transmitGain else (transmitGain * 0.8)
+        if (!echoMitigationEnabled) return gain
+        val now = System.currentTimeMillis()
+        if (now - lastPlaybackAt > echoMitigationWindowMs) return gain
+        val playbackRms = lastPlaybackRms
+        val threshold = if (preferSpeakerphone) {
+            echoMitigationPlaybackRmsThresholdSpeaker
+        } else {
+            echoMitigationPlaybackRmsThresholdEarpiece
+        }
+        if (playbackRms < threshold) return gain
+        val ratio = if (playbackRms <= 1.0) Double.MAX_VALUE else captureRms / playbackRms
+        val maxRatio = if (preferSpeakerphone) {
+            echoMitigationMaxRatioSpeaker
+        } else {
+            echoMitigationMaxRatioEarpiece
+        }
+        if (ratio <= maxRatio) {
+            gain *= when {
+                ratio < 0.70 -> 0.0
+                ratio < 0.95 -> if (preferSpeakerphone) 0.22 else 0.16
+                ratio < 1.10 -> if (preferSpeakerphone) 0.38 else 0.26
+                ratio < 1.30 -> if (preferSpeakerphone) 0.52 else 0.38
+                else -> if (preferSpeakerphone) 0.66 else 0.48
+            }
+            maybeLogEchoSuppression(captureRms, playbackRms, gain)
+        }
+        return gain
     }
 
     private fun applyGainPcm16(buffer: ByteArray, size: Int, gain: Double) {
