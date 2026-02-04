@@ -7,11 +7,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.wifi.WifiManager
 import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -49,13 +56,16 @@ import com.example.lifesaiver.protocol.util.sha256Bytes
 import com.example.lifesaiver.wakeup.SensorService
 import com.example.lifesaiver.wakeup.VoiceService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 data class BleDebugStats(
     val scanRssiAvg: Int? = null,
@@ -148,6 +158,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val meshVisualEvents: SharedFlow<MeshVisualEvent> = _meshVisualEvents.asSharedFlow()
+    private val _remotePowerSaveExitEvents = MutableSharedFlow<Long>(extraBufferCapacity = 8)
+    val remotePowerSaveExitEvents: SharedFlow<Long> = _remotePowerSaveExitEvents.asSharedFlow()
 
     // 권한 목록
     val requiredPermissions: Array<String> = buildList {
@@ -208,6 +220,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
+    private var highToneJob: Job? = null
     private var lastConnectionAnnounceMs: Long = 0L
     private val connectionAnnounceCooldownMs: Long = 3_000L
     private var lastProfileBroadcastFingerprint: String = ""
@@ -451,7 +464,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             protocolCore.broadcast(packet)
-            addMessage(ChatMessage(text = "[voice] ${file.absolutePath}", isMine = true))
+            addMessage(
+                ChatMessage(
+                    text = "[voice] ${file.absolutePath}",
+                    isMine = true,
+                    senderName = resolveMyDisplayName(),
+                    senderPeerId = bytesToHex(senderId)
+                )
+            )
         }
     }
 
@@ -461,7 +481,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val signedPacket = signatureManager.sign(packet)
         gossipSyncManager.onPublicPacketSeen(signedPacket)
         protocolCore.broadcast(signedPacket)
-        addMessage(ChatMessage(text = text, isMine = true))
+        addMessage(
+            ChatMessage(
+                text = text,
+                isMine = true,
+                senderName = resolveMyDisplayName(),
+                senderPeerId = bytesToHex(senderId)
+            )
+        )
     }
 
     fun sendProfileTestPacket() {
@@ -519,6 +546,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val wifi = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         if (wifi?.isWifiEnabled == false) {
             _uiEvents.tryEmit(UiEvent.Toast("Wi-Fi를 켜주세요."))
+            return false
+        }
+        val locationManager = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val locationEnabled = when {
+            locationManager == null -> false
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> locationManager.isLocationEnabled
+            else -> {
+                val gps = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+                val network = runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+                gps || network
+            }
+        }
+        if (!locationEnabled) {
+            _uiEvents.tryEmit(UiEvent.Toast("위치 서비스를 켜주세요."))
             return false
         }
         return true
@@ -794,6 +835,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             CallHandshakeAction.END -> {
+                stopAllRemoteAlerts()
                 var ended = false
                 _uiState.update { state ->
                     val clearIncoming = state.incomingCallPeerId == peerIdHex
@@ -872,6 +914,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun onDisconnect() {
         if (_uiState.value.isDisconnecting) return
         _uiState.update { it.copy(isDisconnecting = true) }
+        stopAllRemoteAlerts()
 
         sendLeavePacket()
         stopRescueSignal()
@@ -916,7 +959,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             app,
             logCallback = { msg -> Log.d("BleManager", msg) },
             audioCallback = { pcmData -> audioEngine?.playAudio(pcmData) },
-            textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false)) },
+            textCallback = { textMsg -> addMessage(ChatMessage(text = textMsg, isMine = false, senderName = "상대방")) },
             protocolCallback = { _, _ -> },
             connectionCallback = { connected, count ->
                 val directPeerIds = bleManager.getConnectedPeerIds()
@@ -1098,7 +1141,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         profilePacketHandler.handle(packet, profileResult, pathLabel)
                     } else {
                         val text = packet.payload.toString(Charsets.UTF_8)
-                        addMessage(ChatMessage(text = text, isMine = false, path = pathLabel))
+                        addMessage(
+                            ChatMessage(
+                                text = text,
+                                isMine = false,
+                                path = pathLabel,
+                                senderName = resolvePeerDisplayName(peerHex),
+                                senderPeerId = peerHex
+                            )
+                        )
                         if (packet.header.recipientId == null) {
                             gossipSyncManager.onPublicPacketSeen(packet)
                         }
@@ -1116,7 +1167,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             ChatMessage(
                                 text = FileTransferStorage.buildMarker(stored),
                                 isMine = false,
-                                path = pathLabel
+                                path = pathLabel,
+                                senderName = resolvePeerDisplayName(peerHex),
+                                senderPeerId = peerHex
                             )
                         )
                         if (packet.header.recipientId != null) {
@@ -1136,6 +1189,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val payload = CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived
                     handleCallHandshake(peerHex, payload)
+                }
+                PacketType.DEVICE_CONTROL -> {
+                    val recipient = packet.header.recipientId
+                    if (recipient != null && !recipient.contentEquals(senderId)) {
+                        return@setOnPacketReceived
+                    }
+                    val payload = DeviceControlPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    handleDeviceControl(peerHex, payload)
                 }
                 else -> Unit
             }
@@ -1163,6 +1224,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { current ->
             current.copy(messages = current.messages + message)
         }
+    }
+    private fun resolveMyDisplayName(): String {
+        return cachedNickname.ifBlank { _uiState.value.myNickname }.ifBlank { "나" }
+    }
+    private fun resolvePeerDisplayName(peerId: String?): String {
+        if (peerId.isNullOrBlank()) return "익명"
+        val nickname = peerNicknames[peerId].orEmpty().trim()
+        return if (nickname.isNotBlank()) nickname else "익명 (${peerId.take(4)})"
     }
 
     private fun updateMeshCount() {
@@ -1246,13 +1315,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         wifiDirectRanger.refreshLocalDeviceAddress()
         val directAddress = wifiDirectRanger.getLocalDeviceAddress()
         val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
+        val localBattery = _uiState.value.batteryLevel.coerceIn(0, 100)
         val noisePublicKey = signatureManager.getNoisePublicKeyBytes()
         val signingPublicKey = signatureManager.getPublicKeyBytes()
         val announcement = IdentityAnnouncementPayload(
             nickname = nickname,
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
-            wifiDirectAddress = directAddress
+            wifiDirectAddress = directAddress,
+            batteryLevel = localBattery
         )
         val basePayload = announcement.encode() ?: return
         val directPeers = bleManager.getConnectedPeerIds()
@@ -1298,6 +1369,134 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    private fun handleDeviceControl(peerIdHex: String, payload: DeviceControlPayload) {
+        when (payload.command) {
+            DeviceControlCommand.WAKE_SCREEN -> {
+                _remotePowerSaveExitEvents.tryEmit(System.currentTimeMillis())
+                _uiEvents.tryEmit(UiEvent.Toast("구조자 요청: 절전 모드 해제"))
+                ConnectionLog.add("DeviceControl", "wake requested by $peerIdHex")
+            }
+
+            DeviceControlCommand.BEEP -> {
+                val toneType = when (payload.intensity) {
+                    0 -> ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD
+                    1 -> ToneGenerator.TONE_CDMA_HIGH_L
+                    2 -> ToneGenerator.TONE_CDMA_HIGH_PBX_L
+                    else -> ToneGenerator.TONE_CDMA_HIGH_SS
+                }
+                runCatching { toneGenerator.stopTone() }
+                toneGenerator.startTone(toneType, payload.durationMs.coerceIn(220, 8_000))
+                ConnectionLog.add(
+                    "DeviceControl",
+                    "beep by $peerIdHex d=${payload.durationMs} i=${payload.intensity}"
+                )
+            }
+
+            DeviceControlCommand.VIBRATE -> {
+                triggerLocalVibration(payload.durationMs, payload.intensity)
+                ConnectionLog.add(
+                    "DeviceControl",
+                    "vibrate by $peerIdHex d=${payload.durationMs} i=${payload.intensity}"
+                )
+            }
+
+            DeviceControlCommand.HIGH_TONE -> {
+                val frequency = payload.frequencyHz ?: DEFAULT_HIGH_TONE_HZ
+                playHighTone(frequency, payload.durationMs, payload.intensity)
+                ConnectionLog.add(
+                    "DeviceControl",
+                    "high-tone by $peerIdHex f=${frequency} d=${payload.durationMs} i=${payload.intensity}"
+                )
+            }
+
+            DeviceControlCommand.STOP_ALERTS -> {
+                stopAllRemoteAlerts()
+                ConnectionLog.add("DeviceControl", "stop alerts by $peerIdHex")
+            }
+        }
+    }
+
+    private fun triggerLocalVibration(durationMs: Int, intensity: Int) {
+        val vibrator = getVibrator() ?: return
+        val safeDuration = durationMs.coerceIn(200, 8_000).toLong()
+        val amplitude = when (intensity.coerceIn(0, 3)) {
+            0 -> 120
+            1 -> 185
+            2 -> 235
+            else -> 255
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val effect = VibrationEffect.createOneShot(safeDuration, amplitude)
+            vibrator.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(safeDuration)
+        }
+    }
+
+    private fun playHighTone(frequencyHz: Int, durationMs: Int, intensity: Int) {
+        highToneJob?.cancel()
+        highToneJob = viewModelScope.launch(Dispatchers.Default) {
+            runCatching {
+                val sampleRate = 48_000
+                val safeFrequency = frequencyHz.coerceIn(500, 20_000)
+                val safeDurationMs = durationMs.coerceIn(220, 8_000)
+                val sampleCount = (sampleRate * (safeDurationMs / 1000.0)).toInt().coerceAtLeast(1)
+                val gain = when (intensity.coerceIn(0, 3)) {
+                    0 -> 0.20
+                    1 -> 0.32
+                    2 -> 0.45
+                    else -> 0.58
+                }
+                val pcm = ShortArray(sampleCount)
+                for (idx in 0 until sampleCount) {
+                    val angle = 2.0 * PI * safeFrequency * idx / sampleRate
+                    pcm[idx] = (sin(angle) * Short.MAX_VALUE * gain).toInt().toShort()
+                }
+                val track = AudioTrack(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build(),
+                    pcm.size * 2,
+                    AudioTrack.MODE_STATIC,
+                    AudioManager.AUDIO_SESSION_ID_GENERATE
+                )
+                try {
+                    track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
+                    track.play()
+                    delay(safeDurationMs.toLong() + 40L)
+                } finally {
+                    runCatching { track.stop() }
+                    runCatching { track.release() }
+                }
+            }.onFailure { throwable ->
+                Log.w("DeviceControl", "high-tone playback failed: ${throwable.message}")
+            }
+        }
+    }
+
+    private fun getVibrator(): Vibrator? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val manager = app.getSystemService(VibratorManager::class.java)
+            manager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }
+
+    private fun stopAllRemoteAlerts() {
+        runCatching { toneGenerator.stopTone() }
+        highToneJob?.cancel()
+        runCatching { getVibrator()?.cancel() }
     }
 
     private fun configureUwbFromHandshake(payload: CallHandshakePayload) {
@@ -1607,12 +1806,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val MAX_SIGNATURE_LOGS = 200
         const val MAX_PROFILE_LOGS = 200
+        const val DEFAULT_HIGH_TONE_HZ = 17_500
     }
 
     override fun onCleared() {
         AppShutdownHooks.clear()
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
+        stopAllRemoteAlerts()
         toneGenerator.release()
         if (wifiAwareEnabled) {
             wifiAwareRanger.stop()
@@ -1622,6 +1823,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         announceJob?.cancel()
         meshCleanupJob?.cancel()
         bleDebugJob?.cancel()
+        highToneJob?.cancel()
         if (::gossipSyncManager.isInitialized) {
             gossipSyncManager.stop()
         }

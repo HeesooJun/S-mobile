@@ -162,7 +162,10 @@ class UwbRanger(private val context: Context) {
     }
 
     fun stop() {
-        synchronized(lock) { trackingEnabled = false }
+        synchronized(lock) {
+            trackingEnabled = false
+            cancelSessionLocked()
+        }
         _distanceMeters.value = null
     }
 
@@ -308,6 +311,7 @@ class UwbRanger(private val context: Context) {
     }
 
     private fun cancelSessionLocked() {
+        sessionToken += 1L
         sessionJob?.cancel()
         sessionJob = null
     }

@@ -120,6 +120,8 @@ class BleManager(
     private val scanRssiUpdatedAtMs = mutableMapOf<String, Long>()
     private val connectionRssi = mutableMapOf<String, Int>()
     private val connectionRssiUpdatedAtMs = mutableMapOf<String, Long>()
+    private val scanRssiFilters = mutableMapOf<String, RssiKalmanFilter>()
+    private val connectionRssiFilters = mutableMapOf<String, RssiKalmanFilter>()
     private val pendingRssiReadAddresses = mutableSetOf<String>()
     private var rssiMonitorJob: Job? = null
 
@@ -335,11 +337,17 @@ class BleManager(
         synchronized(scanRssiUpdatedAtMs) {
             scanRssiUpdatedAtMs.remove(address)
         }
+        synchronized(scanRssiFilters) {
+            scanRssiFilters.remove(address)
+        }
         synchronized(connectionRssi) {
             connectionRssi.remove(address)
         }
         synchronized(connectionRssiUpdatedAtMs) {
             connectionRssiUpdatedAtMs.remove(address)
+        }
+        synchronized(connectionRssiFilters) {
+            connectionRssiFilters.remove(address)
         }
         clearRssiReadPending(address)
     }
@@ -351,14 +359,32 @@ class BleManager(
         synchronized(scanRssiUpdatedAtMs) {
             scanRssiUpdatedAtMs.clear()
         }
+        synchronized(scanRssiFilters) {
+            scanRssiFilters.clear()
+        }
         synchronized(connectionRssi) {
             connectionRssi.clear()
         }
         synchronized(connectionRssiUpdatedAtMs) {
             connectionRssiUpdatedAtMs.clear()
         }
+        synchronized(connectionRssiFilters) {
+            connectionRssiFilters.clear()
+        }
         synchronized(pendingRssiReadAddresses) {
             pendingRssiReadAddresses.clear()
+        }
+    }
+
+    private fun updateKalmanRssi(
+        address: String,
+        rssi: Int,
+        filters: MutableMap<String, RssiKalmanFilter>
+    ): Int {
+        synchronized(filters) {
+            return filters
+                .getOrPut(address) { RssiKalmanFilter() }
+                .update(rssi)
         }
     }
 
@@ -459,13 +485,14 @@ class BleManager(
             val device = result?.device ?: return
             val address = device.address
             if (deviceMonitor.isBlocked(address)) return
+            val filteredRssi = updateKalmanRssi(address, result.rssi, scanRssiFilters)
             synchronized(scanRssi) {
-                scanRssi[address] = result.rssi
+                scanRssi[address] = filteredRssi
             }
             synchronized(scanRssiUpdatedAtMs) {
                 scanRssiUpdatedAtMs[address] = SystemClock.elapsedRealtime()
             }
-            if (result.rssi < rssiThresholdDbm) return
+            if (filteredRssi < rssiThresholdDbm) return
             val peerId = extractPeerId(result)
             if (peerId != null && isPeerConnected(peerId)) return
             if (isConnectionKnown(address)) return
@@ -614,8 +641,9 @@ class BleManager(
             val address = gatt.device.address
             clearRssiReadPending(address)
             if (status != BluetoothGatt.GATT_SUCCESS) return
+            val filteredRssi = updateKalmanRssi(address, rssi, connectionRssiFilters)
             synchronized(connectionRssi) {
-                connectionRssi[address] = rssi
+                connectionRssi[address] = filteredRssi
             }
             synchronized(connectionRssiUpdatedAtMs) {
                 connectionRssiUpdatedAtMs[address] = SystemClock.elapsedRealtime()
