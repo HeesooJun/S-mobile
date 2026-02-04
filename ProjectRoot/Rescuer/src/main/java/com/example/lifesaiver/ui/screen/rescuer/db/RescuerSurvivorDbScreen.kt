@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -57,11 +58,13 @@ import kotlin.math.pow
 fun RescuerSurvivorDbScreen(
     survivors: List<SurvivorProfile>,
     peerRssiMap: Map<String, Int> = emptyMap(),
+    peerBatteryMap: Map<String, Int> = emptyMap(),
     onDisconnectClick: () -> Unit,
     onCallClick: (SurvivorProfile) -> Unit,
     onEndCall: () -> Unit,
     onOpenMeshMap: () -> Unit,
     onOpenGroupChat: () -> Unit,
+    onOpenDirectChat: (SurvivorProfile) -> Unit = {},
     selectedTargetPeerId: String? = null,
     onSelectTarget: (SurvivorProfile) -> Unit = {},
     isLive: Boolean = true,
@@ -284,6 +287,7 @@ fun RescuerSurvivorDbScreen(
                                 neonGreen = neonGreen,
                                 neonRed = neonRed,
                                 peerRssiMap = peerRssiMap,
+                                peerBatteryMap = peerBatteryMap,
                                 isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
                                 onSelectTarget = onSelectTarget,
                                 onCallClick = onCallClick,
@@ -292,6 +296,7 @@ fun RescuerSurvivorDbScreen(
                                 isInCallWithPeer = isInCall &&
                                     survivor.peerId.isNotBlank() &&
                                     survivor.peerId == (callPeerId ?: activeSurvivor?.peerId),
+                                onOpenDirectChat = onOpenDirectChat,
                                 liveDistanceMeters = if (
                                     survivor.peerId.isNotBlank() &&
                                     survivor.peerId == activeDistancePeerId
@@ -407,18 +412,21 @@ private fun SurvivorCard(
     neonGreen: Color,
     neonRed: Color,
     peerRssiMap: Map<String, Int>,
+    peerBatteryMap: Map<String, Int>,
     isSelected: Boolean,
     onSelectTarget: (SurvivorProfile) -> Unit,
     onCallClick: (SurvivorProfile) -> Unit,
     isCalling: Boolean,
     callButtonEnabled: Boolean,
     isInCallWithPeer: Boolean,
+    onOpenDirectChat: (SurvivorProfile) -> Unit,
     liveDistanceMeters: Float?,
     liveDistanceSource: DistanceMeasurementSource,
     rttDistanceMeters: Float?,
     onEndCall: () -> Unit
 ) {
     val rssi = peerRssiMap[survivor.peerId]
+    val battery = peerBatteryMap[survivor.peerId]?.coerceIn(0, 100)
     val rssiText = rssi?.let { "$it dBm" } ?: "-"
     val estimatedDistanceMeters = rssi?.let { estimateDistanceMeters(it) }
     val resolvedDistance = when {
@@ -461,6 +469,19 @@ private fun SurvivorCard(
         DistanceMeasurementSource.UWB -> neonGreen
         DistanceMeasurementSource.RTT -> neonGreen
         else -> AppColors.Gray400
+    }
+    val batteryChipText = battery?.let { "배터리 $it%" } ?: "배터리 미수신"
+    val batteryChipBg = when {
+        battery == null -> AppColors.Gray700.copy(alpha = 0.35f)
+        battery >= 70 -> AppColors.Green.copy(alpha = 0.14f)
+        battery >= 35 -> Color(0xFFFFB74D).copy(alpha = 0.18f)
+        else -> AppColors.Red.copy(alpha = 0.16f)
+    }
+    val batteryChipFg = when {
+        battery == null -> AppColors.Gray400
+        battery >= 70 -> AppColors.Green
+        battery >= 35 -> Color(0xFFFFB74D)
+        else -> AppColors.Red
     }
     val stateColor = when {
         isInCallWithPeer -> neonRed
@@ -532,6 +553,12 @@ private fun SurvivorCard(
                     fg = signalChipFg
                 )
                 Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                MiniChip(
+                    text = batteryChipText,
+                    bg = batteryChipBg,
+                    fg = batteryChipFg
+                )
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                 if (distanceText != null) {
                     MiniChip(
                         text = "$distancePrefix${distanceText}m",
@@ -584,6 +611,23 @@ private fun SurvivorCard(
                             tint = Color.Black
                         )
                     }
+                }
+                Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                FilledIconButton(
+                    onClick = { onOpenDirectChat(survivor) },
+                    enabled = survivor.peerId.isNotBlank(),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color(0xFFF9C22E),
+                        disabledContainerColor = Color(0xFFF9C22E).copy(alpha = 0.35f),
+                        contentColor = Color.Black,
+                        disabledContentColor = Color.Black.copy(alpha = 0.45f)
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Email,
+                        contentDescription = "1:1 채팅",
+                        tint = Color.Black
+                    )
                 }
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                 Box(
