@@ -1,5 +1,6 @@
 package com.example.lifesaiver.ui.screen.survivor.emergency
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -37,9 +40,15 @@ import com.example.lifesaiver.ui.theme.scaledSp
 fun EmergencyBeaconScreen(
     batteryLevel: Int,
     uiState: EmergencyBeaconUiState,
-    onPrev: () -> Unit
+    onPrev: () -> Unit,
 ) {
     val scale = LocalAppScale.current
+
+    // [추가됨] 시스템 뒤로가기(제스처/물리키) 눌러도 안전하게 종료되도록 처리
+    BackHandler {
+        onPrev()
+    }
+
     ScreenScaffold(
         gradient = listOf(AppColors.Black, AppColors.Black),
         vignetteColor = AppColors.Black.copy(alpha = 0f)
@@ -125,6 +134,26 @@ fun EmergencyBeaconScreen(
 
             Spacer(modifier = Modifier.height(scaledDp(36, scale)))
             Spacer(modifier = Modifier.weight(1f))
+
+            // [추가됨] 좌측 하단 뒤로가기 버튼
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = scaledDp(24, scale)), // 바닥에서 살짝 띄움
+                horizontalArrangement = Arrangement.Start // 좌측 정렬
+            ) {
+                IconButton(
+                    onClick = onPrev,
+                    modifier = Modifier.size(scaledDp(48, scale))
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_common_back),
+                        contentDescription = "뒤로가기",
+                        tint = AppColors.White,
+                        modifier = Modifier.size(scaledDp(24, scale))
+                    )
+                }
+            }
         }
     }
 }
