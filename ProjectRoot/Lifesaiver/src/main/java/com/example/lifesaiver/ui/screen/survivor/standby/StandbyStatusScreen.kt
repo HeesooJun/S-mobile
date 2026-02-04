@@ -68,14 +68,12 @@ fun StandbyStatusScreen(
                 hasTriggered = false
                 sttStatus = "🎙️ 대기 중"
                 lastHeardText = ""
-                if (sttEnabled) {
                     delay(30_000)
                     if (!hasTriggered) {
                         hasTriggered = true
                         sttStatus = "⏱️ 시간 초과로 자동 송출"
                         onSos()
                     }
-                }
             }
             DisposableEffect(context, sttResetToken, sttEnabled) {
                 if (!sttEnabled) {

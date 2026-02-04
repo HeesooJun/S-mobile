@@ -37,15 +37,5 @@ internal fun PttTopBar(
                 .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
                 .tripleClickable(onTripleClick = onPanicClear)
         )
-        Icon(
-            painter = painterResource(id = R.drawable.ic_ptt_settings),
-            contentDescription = "설정",
-            tint = AppColors.Gray500,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(end = scaledDp(20, scale), top = scaledDp(18, scale))
-                .size(scaledDp(24, scale))
-                .clickable { onSettings() }
-        )
     }
 }
