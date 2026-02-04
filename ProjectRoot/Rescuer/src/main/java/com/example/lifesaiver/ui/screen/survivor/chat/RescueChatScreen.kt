@@ -243,6 +243,9 @@ private fun MessageBubble(message: ChatMessage) {
     val scale = LocalAppScale.current
     val background = if (message.isMine) AppColors.GreenSoft else AppColors.Gray800
     val textColor = if (message.isMine) AppColors.Green else AppColors.White
+    val labelText = message.senderName?.takeIf { it.isNotBlank() }
+        ?: message.senderPeerId?.let { "구조자[${it.take(4)}]" }
+        ?: if (message.isMine) "구조자[----]" else "상대방"
     val voicePath = message.text.takeIf { it.startsWith(VOICE_PREFIX) }
         ?.removePrefix(VOICE_PREFIX)
         ?.trim()
@@ -254,6 +257,13 @@ private fun MessageBubble(message: ChatMessage) {
         Column(
             horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start
         ) {
+            Text(
+                text = labelText,
+                color = AppColors.Gray500,
+                fontSize = scaledSp(10, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(scaledDp(2, scale)))
             if (voicePath != null && voicePath.isNotBlank()) {
                 AudioMessageBubble(path = voicePath, isMine = message.isMine)
             } else {

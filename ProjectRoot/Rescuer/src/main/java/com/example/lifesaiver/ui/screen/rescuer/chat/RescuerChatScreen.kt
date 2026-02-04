@@ -236,6 +236,16 @@ private fun MessageBubble(message: ChatMessage) {
     val scale = LocalAppScale.current
     val background = if (message.isMine) AppColors.GreenSoft else AppColors.Gray800
     val textColor = if (message.isMine) AppColors.Green else AppColors.White
+    val labelText = if (message.isMine) {
+        "나"
+    } else {
+        val rawSender = message.senderName?.trim().orEmpty()
+        if (rawSender.isNotBlank()) {
+            rawSender.replace(Regex("\\[[^\\]]{4}\\]$"), "").trim().ifBlank { rawSender }
+        } else {
+            "상대방"
+        }
+    }
     val pathLabel = message.path?.takeIf { it.isNotBlank() }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -244,6 +254,13 @@ private fun MessageBubble(message: ChatMessage) {
         Column(
             horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start
         ) {
+            Text(
+                text = labelText,
+                color = AppColors.Gray500,
+                fontSize = scaledSp(10, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(scaledDp(2, scale)))
             Box(
                 modifier = Modifier
                     .background(background, shape = RoundedCornerShape(scaledDp(16, scale)))
