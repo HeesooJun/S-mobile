@@ -40,7 +40,10 @@ fun ChatMessageBubble(message: ChatMessage, senderName: String? = null) {
 
     // 피그마 디자인 색상 반영
     val bubbleColor = if (isMine) Color(0xFF2B2F33) else Color(0xFFF27B7B)
-    val labelText = if (isMine) "나" else (senderName ?: "조난자")
+    val resolvedSenderName = senderName
+        ?: message.senderName?.takeIf { it.isNotBlank() }
+        ?: message.senderPeerId?.let { "익명 (${it.take(4)})" }
+    val labelText = if (isMine) "나" else (resolvedSenderName ?: "조난자")
 
     Column(
         modifier = Modifier
