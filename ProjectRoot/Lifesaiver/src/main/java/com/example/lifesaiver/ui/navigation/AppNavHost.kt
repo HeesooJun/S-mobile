@@ -50,6 +50,7 @@ import com.example.lifesaiver.presentation.screen.EmergencyBeaconViewModel
 import com.example.lifesaiver.presentation.screen.RescueChatViewModel
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaiver.protocol.model.CallHandshakeAction
+import com.example.lifesaiver.protocol.model.CallHandshakeState
 import com.example.lifesaiver.protocol.security.SignatureLogEntry
 import com.example.lifesaiver.ui.components.ptt.PttBottomBar
 import com.example.lifesaiver.ui.components.ptt.PttBottomTab
@@ -64,10 +65,13 @@ import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.wakeup.SensorService
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.core.content.ContextCompat
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun AppNavHost(
@@ -137,6 +141,12 @@ fun AppNavHost(
     )
     val isInCall by callViewModel.isInCall.collectAsState()
     val targetSurvivor by callViewModel.targetSurvivor.collectAsState()
+    val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
+    val awareLinkReady by appViewModel.wifiAwareRanger.isConnectionReady.collectAsState()
+    LaunchedEffect(Unit) {
+        // Keep RTT enabled in both idle and in-call states.
+        appViewModel.wifiAwareRanger.setRttEnabled(true)
+    }
 
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
@@ -147,6 +157,9 @@ fun AppNavHost(
     val minSosDurationMs = 1_000L
     var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
     var connectingTargetPeerId by remember { mutableStateOf<String?>(null) }
+    var lastAwareRttReportAtMs by remember { mutableStateOf(0L) }
+    var lastAwareRttReportCm by remember { mutableStateOf<Int?>(null) }
+    var forceExitPowerSavingToken by remember { mutableStateOf(0L) }
     val callAttemptTimeoutMs = 15_000L
     val currentRoute = backStackEntry?.destination?.route
     var pendingBottomTabRoute by remember { mutableStateOf<String?>(null) }
@@ -323,6 +336,37 @@ fun AppNavHost(
         Toast.makeText(context, "통화 연결 시간 초과(15초)", Toast.LENGTH_SHORT).show()
     }
 
+    LaunchedEffect(isInCall, appState.callPeerId, awareLinkReady, liveAwareRttMeters) {
+        val peerId = appState.callPeerId ?: connectingTargetPeerId ?: targetSurvivor?.peerId
+        if (!isInCall || peerId.isNullOrBlank()) {
+            lastAwareRttReportAtMs = 0L
+            lastAwareRttReportCm = null
+            return@LaunchedEffect
+        }
+        if (!awareLinkReady) return@LaunchedEffect
+        val rttMeters = liveAwareRttMeters ?: return@LaunchedEffect
+        val rttCm = (rttMeters * 100f).roundToInt().coerceIn(0, 0xFFFF)
+        val now = System.currentTimeMillis()
+        val lastCm = lastAwareRttReportCm
+        val changedEnough = lastCm == null || abs(rttCm - lastCm) >= 30
+        if (!changedEnough && now - lastAwareRttReportAtMs < 4_000L) return@LaunchedEffect
+        if (now - lastAwareRttReportAtMs < 1_200L) return@LaunchedEffect
+        val localAware = appViewModel.isWifiAwareSupportedLocally()
+        val localDirect = appViewModel.isWifiDirectSupportedLocally()
+        appViewModel.sendCallHandshake(
+            targetPeerIdHex = peerId,
+            action = CallHandshakeAction.ACK,
+            callerName = profileState.name.ifBlank { "생존자" },
+            wifiAwareSupported = localAware,
+            wifiDirectSupported = localDirect,
+            useOpus = localOpusSupported,
+            state = CallHandshakeState.AWARE_OK,
+            rttCm = rttCm
+        )
+        lastAwareRttReportCm = rttCm
+        lastAwareRttReportAtMs = now
+    }
+
     fun acceptIncomingCall(peerId: String): Boolean {
         if (!appViewModel.ensureWifiAwarePermissions()) return false
         val localAware = appViewModel.isWifiAwareSupportedLocally()
@@ -388,6 +432,11 @@ fun AppNavHost(
         if (currentRoute != AppRoute.SurvivorPTT.route) return@LaunchedEffect
         if (acceptIncomingCall(peerId)) {
             autoAcceptedPeerId = peerId
+        }
+    }
+    LaunchedEffect(Unit) {
+        appViewModel.remotePowerSaveExitEvents.collect { token ->
+            forceExitPowerSavingToken = token
         }
     }
 
@@ -509,6 +558,7 @@ fun AppNavHost(
                     isInCall = isInCall,
                     callPeerName = targetSurvivor?.name,
                     pendingCall = pendingRequest,
+                    forceExitPowerSavingToken = forceExitPowerSavingToken,
                     onBack = { navController.popBackStack() },
                     onDisconnect = {
                         if (isInCall) {

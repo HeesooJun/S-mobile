@@ -50,10 +50,10 @@ class RealTimeCallManager(
     private var isStreaming = false
     private var pendingStart = false
     private var isCallActive = false
-    private val awareAttemptTimeoutMs = 10_000L
-    private val awareRetryCount = 2
-    private val awareRetryDelayMs = 1_200L
-    private val directAttemptTimeoutMs = 30_000L
+    private val awareAttemptTimeoutMs = 3_500L
+    private val awareRetryCount = 1
+    private val awareRetryDelayMs = 600L
+    private val directAttemptTimeoutMs = 12_000L
     private var attemptToken = 0L
     private var lastAwareFailureReason: String? = null
     private var lastAwareFailureAt = 0L
@@ -96,15 +96,17 @@ class RealTimeCallManager(
                 wifiAwareRanger.isConnectionReady,
                 wifiDirectRanger.isConnectionReady
             ) { awareReady, directReady ->
-                awareReady || directReady
-            }.collect { ready ->
-                if (ready && _isTransmitting.value && activeTransport != CallTransportType.NONE) {
-                    ensureStreaming()
+                awareReady to directReady
+            }.collect { (awareReady, directReady) ->
+                val activeReady = when (activeTransport) {
+                    CallTransportType.WIFI_AWARE -> wifiAwareEnabled && awareReady
+                    CallTransportType.WIFI_DIRECT -> directReady
+                    CallTransportType.NONE -> false
                 }
-                if (!ready && isStreaming) {
-                    audioEngine.stopStreaming()
-                    isStreaming = false
-                    ConnectionLog.add("Call", "streaming stopped (transport not ready)")
+                if (activeReady) {
+                    if (_isTransmitting.value && activeTransport != CallTransportType.NONE) {
+                        ensureStreaming()
+                    }
                 }
             }
         }
@@ -201,6 +203,9 @@ class RealTimeCallManager(
         lastAwareFailureReason = null
         lastAwareFailureAt = 0L
         pendingStart = true
+        if (_isTransmitting.value) {
+            ensureStreaming(allowWithoutReady = true)
+        }
         val possible = selectTransport()
         if (possible == CallTransportType.NONE) {
             ConnectionLog.add("Call", "no transport selected")
@@ -213,6 +218,9 @@ class RealTimeCallManager(
     fun setTransmissionEnabled(enabled: Boolean) {
         _isTransmitting.value = enabled
         _debugState.update { it.copy(isTransmitting = enabled) }
+        if (enabled && isCallActive) {
+            ensureStreaming(allowWithoutReady = true)
+        }
     }
 
     fun stopCallSession() {
@@ -299,11 +307,12 @@ class RealTimeCallManager(
         return selected
     }
 
-    private fun ensureStreaming() {
+    private fun ensureStreaming(allowWithoutReady: Boolean = false) {
         if (isStreaming) return
-        if (!isActiveTransportReady()) return
+        if (!allowWithoutReady && !isActiveTransportReady()) return
         audioEngine.startStreaming { pcmData ->
             if (_isTransmitting.value) {
+                if (!isActiveTransportReady()) return@startStreaming
                 when (activeTransport) {
                     CallTransportType.WIFI_AWARE -> wifiAwareRanger.sendAudio(pcmData)
                     CallTransportType.WIFI_DIRECT -> wifiDirectRanger.sendAudio(pcmData)
@@ -456,7 +465,7 @@ class RealTimeCallManager(
                 CallTransportType.NONE -> false
             }
             if (ready) return true
-            delay(200L)
+            delay(100L)
         }
         return false
     }

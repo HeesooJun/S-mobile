@@ -1,10 +1,5 @@
 ﻿package com.example.lifesaiver.ui.screen.rescuer.ptt
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,20 +10,31 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,7 +44,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
 import com.example.lifesaiver.core.log.ConnectionLog
@@ -48,9 +54,7 @@ import com.example.lifesaiver.ui.components.DistanceTrack
 import com.example.lifesaiver.core.location.DistanceMeasurementSource
 import com.example.lifesaiver.core.location.DistanceTrend
 import com.example.lifesaiver.ui.components.MeshEdge
-import com.example.lifesaiver.ui.components.MeshMap
 import com.example.lifesaiver.ui.components.MeshNode
-import com.example.lifesaiver.ui.components.MicButton
 import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SignalBars
@@ -62,6 +66,19 @@ import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
+
+enum class RssiFeedbackMode(val label: String) {
+    OFF("알림 끔"),
+    VIBRATION("진동"),
+    SOUND("소리"),
+    BOTH("진동+소리")
+}
+
+enum class RssiFeedbackLevel(val label: String) {
+    LOW("약"),
+    MEDIUM("중"),
+    HIGH("강")
+}
 
 @Composable
 fun RescuerPTTLinkScreen(
@@ -77,52 +94,72 @@ fun RescuerPTTLinkScreen(
     callStatusLabel: String,
     callDecisionLabel: String? = null,
     isInCall: Boolean,
+    isCalling: Boolean = false,
     isConnected: Boolean,
-    isMicOn: Boolean,
     isSpeakerphoneOn: Boolean = true,
     distanceMeters: Float?,
     distanceTrend: DistanceTrend,
     distanceSource: DistanceMeasurementSource,
-    onMicPress: () -> Unit,
-    onMicRelease: () -> Unit,
+    onRequestCall: () -> Unit,
+    onEndCall: () -> Unit,
     onBack: () -> Unit,
-    onDisconnect: () -> Unit,
-    onChat: () -> Unit,
-    onOpenSurvivorDb: () -> Unit,
     onPanicClear: () -> Unit,
-    onToggleSpeakerphone: () -> Unit = {}
+    onToggleSpeakerphone: () -> Unit = {},
+    rssiFeedbackMode: RssiFeedbackMode = RssiFeedbackMode.BOTH,
+    rssiFeedbackLevel: RssiFeedbackLevel = RssiFeedbackLevel.MEDIUM,
+    onCycleRssiFeedbackMode: () -> Unit = {},
+    onCycleRssiFeedbackLevel: () -> Unit = {},
+    remoteControlEnabled: Boolean = false,
+    onSendRemoteWake: () -> Unit = {},
+    onSendRemoteBeep: () -> Unit = {},
+    onSendRemoteVibrate: () -> Unit = {},
+    onSendRemoteHighTone: () -> Unit = {},
+    onSendRemoteStop: () -> Unit = {},
+    remoteRepeatIntervalMs: Long = 2_500L
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
-    val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
-    val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showDebugModal by remember { mutableStateOf(false) }
+    var stickyBeep by remember { mutableStateOf(false) }
+    var stickyVibrate by remember { mutableStateOf(false) }
+    var stickyHighTone by remember { mutableStateOf(false) }
+    var isBeepRepeating by remember { mutableStateOf(false) }
+    var isVibrateRepeating by remember { mutableStateOf(false) }
+    var isHighToneRepeating by remember { mutableStateOf(false) }
     val connectionLogs by ConnectionLog.logs.collectAsState()
-    val showActionLabelsAlways = true
     val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
-    val displayConnectedCount = meshDisplayCount
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
-    val meshGraphState = remember(meshGraphSnapshot, myPeerId, myNickname, peerNicknames) {
-        buildMeshGraphState(
-            snapshot = meshGraphSnapshot,
-            myPeerId = myPeerId,
-            myNickname = myNickname,
-            peerNicknames = peerNicknames
-        )
-    }
 
-    LaunchedEffect(expandedAction) {
-        if (
-            expandedAction == ActionType.Chat ||
-            expandedAction == ActionType.Disconnect ||
-            expandedAction == ActionType.Power
-        ) {
-            setShowDoubleTapHint(true)
-            delay(3500)
-            setShowDoubleTapHint(false)
-        } else {
-            setShowDoubleTapHint(false)
+    LaunchedEffect(remoteControlEnabled) {
+        if (!remoteControlEnabled) {
+            stickyBeep = false
+            stickyVibrate = false
+            stickyHighTone = false
+            isBeepRepeating = false
+            isVibrateRepeating = false
+            isHighToneRepeating = false
+        }
+    }
+    LaunchedEffect(stickyBeep, remoteControlEnabled) {
+        if (!remoteControlEnabled || !stickyBeep) return@LaunchedEffect
+        while (remoteControlEnabled && stickyBeep) {
+            onSendRemoteBeep()
+            delay(remoteRepeatIntervalMs)
+        }
+    }
+    LaunchedEffect(stickyVibrate, remoteControlEnabled) {
+        if (!remoteControlEnabled || !stickyVibrate) return@LaunchedEffect
+        while (remoteControlEnabled && stickyVibrate) {
+            onSendRemoteVibrate()
+            delay(remoteRepeatIntervalMs)
+        }
+    }
+    LaunchedEffect(stickyHighTone, remoteControlEnabled) {
+        if (!remoteControlEnabled || !stickyHighTone) return@LaunchedEffect
+        while (remoteControlEnabled && stickyHighTone) {
+            onSendRemoteHighTone()
+            delay(remoteRepeatIntervalMs)
         }
     }
 
@@ -137,6 +174,14 @@ fun RescuerPTTLinkScreen(
                 isForceExit = !isPowerSaving,
                 onRequestExitPowerSaving = { setPowerSaving(false) }
             )
+            TopIconButton(
+                iconRes = R.drawable.ic_back,
+                contentDescription = "이전",
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = scaledDp(12, scale), top = scaledDp(12, scale))
+            )
             Text(
                 text = "LIFESAIVER",
                 color = AppColors.Gray500,
@@ -144,7 +189,7 @@ fun RescuerPTTLinkScreen(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
+                    .padding(start = scaledDp(60, scale), top = scaledDp(18, scale))
                     .tripleClickable(onTripleClick = onPanicClear)
             )
             Text(
@@ -172,14 +217,7 @@ fun RescuerPTTLinkScreen(
                     modifier = Modifier.padding(top = scaledDp(12, scale))
                 )
 
-                Spacer(modifier = Modifier.height(scaledDp(140, scale)))
-                MicButton(
-                    isActive = isMicOn,
-                    size = scaledDp(80, scale),
-                    onPress = onMicPress,
-                    onRelease = onMicRelease
-                )
-                Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
                 Text(
                     text = when {
                         hasMeshPeers -> "메쉬 연결됨"
@@ -190,132 +228,180 @@ fun RescuerPTTLinkScreen(
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(scaledDp(36, scale)))
-                Spacer(modifier = Modifier.weight(0.6f))
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = scaledDp(8, scale)),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.height(scaledDp(74, scale)))
+                Box(contentAlignment = Alignment.Center) {
+                    FilledIconButton(
+                        onClick = {
+                            if (isInCall) onEndCall() else onRequestCall()
+                        },
+                        enabled = isInCall || !isCalling,
+                        modifier = Modifier.size(scaledDp(86, scale)),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (isInCall) AppColors.Red else AppColors.Green,
+                            disabledContainerColor = AppColors.Green.copy(alpha = 0.4f),
+                            contentColor = AppColors.White,
+                            disabledContentColor = AppColors.White.copy(alpha = 0.8f)
+                        )
                     ) {
-                        ExpandableAction(
-                            iconRes = R.drawable.ic_sound,
-                            label = if (isSpeakerphoneOn) "스피커 ON" else "스피커 OFF",
-                            isExpanded = expandedAction == ActionType.Speaker,
-                            iconSizeOverride = scaledDp(34, scale),
-                            showLabelAlways = showActionLabelsAlways,
-                            onClick = {
-                                setExpandedAction(ActionType.Speaker)
-                                onToggleSpeakerphone()
-                            }
-                        )
-                        ExpandableAction(
-                            iconRes = R.drawable.connection_lost,
-                            label = "연결 끊기",
-                            isExpanded = expandedAction == ActionType.Disconnect,
-                            iconSizeOverride = scaledDp(44, scale),
-                            showLabelAlways = showActionLabelsAlways,
-                            onClick = {
-                                if (expandedAction == ActionType.Disconnect) {
-                                    setExpandedAction(null)
-                                    onDisconnect()
-                                } else {
-                                    setExpandedAction(ActionType.Disconnect)
-                                }
-                            }
-                        )
-                        ExpandableAction(
-                            iconRes = R.drawable.ic_chat,
-                            label = "채팅",
-                            isExpanded = expandedAction == ActionType.Chat,
-                            iconSizeOverride = scaledDp(38, scale),
-                            showLabelAlways = showActionLabelsAlways,
-                            onClick = {
-                                if (expandedAction == ActionType.Chat) {
-                                    setExpandedAction(null)
-                                    onChat()
-                                } else {
-                                    setExpandedAction(ActionType.Chat)
-                                }
-                            }
-                        )
-                        ExpandableAction(
-                            iconRes = R.drawable.connection_filled,
-                            label = "사용자 DB $displayConnectedCount",
-                            isExpanded = expandedAction == ActionType.Count,
-                            iconSizeOverride = scaledDp(32, scale),
-                            showLabelAlways = showActionLabelsAlways,
-                            onClick = {
-                                onOpenSurvivorDb()
-                            }
+                        Icon(
+                            imageVector = Icons.Filled.Call,
+                            contentDescription = if (isInCall) "통화 종료" else "통화 요청",
+                            modifier = Modifier.size(scaledDp(40, scale))
                         )
                     }
-                    Column(
-                        modifier = Modifier
-                            .height(scaledDp(32, scale))
-                            .fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Bottom
-                    ) {
-                        AnimatedVisibility(
-                            visible = showDoubleTapHint,
-                            enter = fadeIn() + slideInVertically { it / 3 },
-                            exit = fadeOut() + slideOutVertically { it / 3 }
-                        ) {
-                            Text(
-                                text = "한번 더 눌러주세요",
-                                color = AppColors.Gray500,
-                                fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.offset(y = scaledDp(6, scale))
-                            )
-                        }
+                    if (isCalling && !isInCall) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(scaledDp(104, scale)),
+                            color = AppColors.Green,
+                            strokeWidth = scaledDp(2, scale)
+                        )
                     }
                 }
-
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(scaledDp(14, scale)))
                 Text(
-                    text = "PDA 지도",
-                    color = AppColors.White,
+                    text = when {
+                        isCalling && !isInCall -> "통화 요청 전송 중..."
+                        isInCall -> "통화 중 · 버튼을 눌러 종료"
+                        else -> "통화 요청"
+                    },
+                    color = when {
+                        isCalling && !isInCall -> AppColors.Green
+                        isInCall -> AppColors.Red
+                        else -> AppColors.Green
+                    },
                     fontSize = scaledSp(13, scale),
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .align(Alignment.Start)
-                        .padding(start = scaledDp(6, scale), bottom = scaledDp(8, scale))
+                    fontWeight = FontWeight.Bold
                 )
-                Surface(
+                if (isInCall) {
+                    Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+                    OutlinedButton(onClick = onToggleSpeakerphone) {
+                        Text(
+                            text = if (isSpeakerphoneOn) "스피커 끄기" else "스피커 켜기",
+                            fontSize = scaledSp(12, scale),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(scaledDp(14, scale)))
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(scaledDp(170, scale)),
-                    shape = RoundedCornerShape(scaledDp(18, scale)),
-                    color = AppColors.Gray800
+                        .widthIn(max = scaledDp(520, scale))
+                        .padding(horizontal = scaledDp(8, scale)),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (isInCall) {
-                        MeshMap(
-                            nodes = meshGraphState.nodes,
-                            edges = meshGraphState.edges,
-                            visualEvents = meshVisualEvents,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                    Text(
+                        text = "RSSI 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
+                        color = AppColors.Gray400,
+                        fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+                    ) {
+                        OutlinedButton(
+                            onClick = onCycleRssiFeedbackMode,
+                            modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = "통화 연결 후 지도가 표시됩니다",
-                                color = AppColors.Gray400,
-                                fontSize = scaledSp(12, scale)
+                                text = "알림 모드 변경",
+                                fontSize = scaledSp(11, scale)
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = onCycleRssiFeedbackLevel,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "강도 변경",
+                                fontSize = scaledSp(11, scale)
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
+                    ) {
+                        RepeatActionButton(
+                            label = "절전 해제",
+                            enabled = remoteControlEnabled,
+                            onTap = onSendRemoteWake,
+                            isRepeating = false,
+                            modifier = Modifier.weight(1f)
+                        )
+                        RepeatActionButton(
+                            label = "비프음",
+                            enabled = remoteControlEnabled,
+                            onTap = onSendRemoteBeep,
+                            isStickyActive = stickyBeep,
+                            onStickyStateChanged = { stickyBeep = it },
+                            isRepeating = isBeepRepeating,
+                            onActiveStateChanged = { isBeepRepeating = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            enabled = remoteControlEnabled,
+                            onClick = {
+                                stickyBeep = false
+                                stickyVibrate = false
+                                stickyHighTone = false
+                                onSendRemoteStop()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("송출 중지", fontSize = scaledSp(11, scale))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(scaledDp(4, scale)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
+                    ) {
+                        RepeatActionButton(
+                            label = "저주파",
+                            enabled = remoteControlEnabled,
+                            onTap = onSendRemoteVibrate,
+                            isStickyActive = stickyVibrate,
+                            onStickyStateChanged = { stickyVibrate = it },
+                            isRepeating = isVibrateRepeating,
+                            onActiveStateChanged = { isVibrateRepeating = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        RepeatActionButton(
+                            label = "고주파",
+                            enabled = remoteControlEnabled,
+                            onTap = onSendRemoteHighTone,
+                            isStickyActive = stickyHighTone,
+                            onStickyStateChanged = { stickyHighTone = it },
+                            isRepeating = isHighToneRepeating,
+                            onActiveStateChanged = { isHighToneRepeating = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                    val repeatingItems = buildList {
+                        if (isBeepRepeating) add("비프음")
+                        if (isVibrateRepeating) add("저주파")
+                        if (isHighToneRepeating) add("고주파")
+                    }
+                    Text(
+                        text = if (repeatingItems.isNotEmpty()) {
+                            "반복 송출 중: ${repeatingItems.joinToString(", ")} · [송출 중지]로 해제"
+                        } else {
+                            "안내: 비프음/저주파/고주파를 3초 길게 누르면 반복 고정"
+                        },
+                        color = if (repeatingItems.isNotEmpty()) AppColors.Green else AppColors.Gray500,
+                        fontSize = scaledSp(10, scale),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(36, scale)))
+                Spacer(modifier = Modifier.weight(1f))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -458,65 +544,72 @@ private fun TopIconButton(
 }
 
 @Composable
-private fun ExpandableAction(
-    iconRes: Int,
+private fun RepeatActionButton(
     label: String,
-    isExpanded: Boolean,
-    iconSizeOverride: Dp? = null,
-    showLabelAlways: Boolean = false,
-    onClick: () -> Unit
+    enabled: Boolean,
+    onTap: () -> Unit,
+    isStickyActive: Boolean = false,
+    onStickyStateChanged: (Boolean) -> Unit = {},
+    isRepeating: Boolean,
+    onActiveStateChanged: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
-    val scale = LocalAppScale.current
-    val baseSize = scaledDp(48, scale)
-    val labelHeight = scaledDp(16, scale)
-    val totalHeight = baseSize + labelHeight
-    val iconSize = iconSizeOverride ?: scaledDp(36, scale)
-    Column(
-        modifier = Modifier
-            .width(baseSize)
-            .height(totalHeight)
-            .clickable { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .height(baseSize)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(id = iconRes),
-                contentDescription = label,
-                modifier = Modifier.size(iconSize),
-                contentScale = ContentScale.Fit,
-                colorFilter = ColorFilter.tint(AppColors.White)
-            )
-        }
-        Box(
-            modifier = Modifier
-                .height(labelHeight)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            if (showLabelAlways || isExpanded) {
-                Text(
-                    text = label,
-                    color = AppColors.White,
-                    fontSize = scaledSp(11, scale),
-                    fontWeight = FontWeight.Medium
-                )
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val currentTap by rememberUpdatedState(onTap)
+    val currentStickyStateChanged by rememberUpdatedState(onStickyStateChanged)
+    val currentActiveStateChanged by rememberUpdatedState(onActiveStateChanged)
+    var suppressTap by remember { mutableStateOf(false) }
+    LaunchedEffect(isPressed, enabled, isStickyActive) {
+        if (!enabled) {
+            if (isStickyActive) {
+                currentStickyStateChanged(false)
             }
+            currentActiveStateChanged(false)
+            return@LaunchedEffect
         }
+        if (isStickyActive) {
+            currentActiveStateChanged(true)
+            return@LaunchedEffect
+        }
+        if (!isPressed) {
+            currentActiveStateChanged(false)
+            return@LaunchedEffect
+        }
+        delay(3_000L)
+        if (!isPressed || isStickyActive) return@LaunchedEffect
+        // Consume release click once so sticky mode does not immediately toggle off.
+        suppressTap = true
+        currentStickyStateChanged(true)
+        currentActiveStateChanged(true)
     }
-}
-
-private enum class ActionType {
-    Power,
-    Speaker,
-    Disconnect,
-    Chat,
-    Count
+    TextButton(
+        enabled = enabled,
+        onClick = {
+            if (suppressTap) {
+                suppressTap = false
+                return@TextButton
+            }
+            if (isStickyActive) {
+                currentStickyStateChanged(false)
+                currentActiveStateChanged(false)
+                return@TextButton
+            }
+            currentTap()
+        },
+        interactionSource = interactionSource,
+        colors = ButtonDefaults.textButtonColors(
+            containerColor = if (isRepeating) AppColors.GreenSoft else Color.Transparent,
+            contentColor = if (isRepeating) AppColors.Green else AppColors.White
+        ),
+        modifier = modifier
+    ) {
+        Text(
+            text = if (isRepeating) "$label · 반복중" else label,
+            fontSize = scaledSp(11, LocalAppScale.current),
+            fontWeight = if (isRepeating) FontWeight.Bold else FontWeight.Medium
+        )
+    }
 }
 
 private data class MeshGraphUiState(

@@ -74,6 +74,7 @@ fun PTTLinkScreen(
     isInCall: Boolean = false,
     callPeerName: String? = null,
     pendingCall: SurvivorCallRequest? = null,
+    forceExitPowerSavingToken: Long = 0L,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onProfile: () -> Unit,
@@ -108,6 +109,11 @@ fun PTTLinkScreen(
             showDoubleTapHint = false
         } else {
             showDoubleTapHint = false
+        }
+    }
+    LaunchedEffect(forceExitPowerSavingToken) {
+        if (forceExitPowerSavingToken > 0L) {
+            setPowerSaving(false)
         }
     }
 
