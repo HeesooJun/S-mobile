@@ -120,6 +120,7 @@ fun AppNavHost(
     var awareReadyAckPeerId by remember { mutableStateOf<String?>(null) }
     var callingTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
     var callAttemptStartedAtMs by rememberSaveable { mutableStateOf(0L) }
+    var pendingNavigateRoute by remember { mutableStateOf<String?>(null) }
     val callAttemptTimeoutMs = 15_000L
     val minSosDurationMs = 1_000L
     val audioEngine = remember(appContext) { RealtimeAudioStreamEngine(appContext) }
@@ -166,6 +167,16 @@ fun AppNavHost(
         viewModelStoreOwner = context as ViewModelStoreOwner,
         factory = distanceViewModelFactory
     )
+    val navigateSingleRoute: (String) -> Unit = nav@{ targetRoute ->
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        if (pendingNavigateRoute != null || currentRoute == targetRoute) return@nav
+        pendingNavigateRoute = targetRoute
+        if (!navController.popBackStack(targetRoute, inclusive = false)) {
+            navController.navigate(targetRoute) {
+                launchSingleTop = true
+            }
+        }
+    }
 
     fun startCallAudioService() {
         val intent = Intent(appContext, CallAudioService::class.java).apply {
@@ -214,6 +225,9 @@ fun AppNavHost(
 
     LaunchedEffect(backStackEntry) {
         val route = backStackEntry?.destination?.route ?: AppRoute.RescuerStandby.route
+        if (route == pendingNavigateRoute) {
+            pendingNavigateRoute = null
+        }
         onRouteChanged(route)
         if (route == AppRoute.SurvivorStandby.route) {
             // 센서 트리거로 들어온 경우에만 STT를 켜기 위해 reset token만 갱신
@@ -394,7 +408,7 @@ fun AppNavHost(
         }
         autoAcceptedPeerId = peerId
         if (currentRoute != AppRoute.SurvivorPTT.route) {
-            navController.navigate(AppRoute.SurvivorPTT.route) { launchSingleTop = true }
+            navigateSingleRoute(AppRoute.SurvivorPTT.route)
         }
     }
 
@@ -478,7 +492,7 @@ fun AppNavHost(
         callAttemptStartedAtMs = 0L
         val currentRoute = backStackEntry?.destination?.route
         if (currentRoute != AppRoute.RescuerPTT.route) {
-            navController.navigate(AppRoute.RescuerPTT.route) { launchSingleTop = true }
+            navigateSingleRoute(AppRoute.RescuerPTT.route)
         }
     }
 
@@ -582,11 +596,11 @@ fun AppNavHost(
                 meshPeerCount = meshPeerCount,
                 bleDebugStats = bleDebugStats,
                 onPrev = { navController.popBackStack() },
-                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
+                onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
                 onSos = {
                     pendingSosNavigation = true
                     sosStartedAt = System.currentTimeMillis()
-                    navController.navigate(AppRoute.SurvivorEmergency.route)
+                    navigateSingleRoute(AppRoute.SurvivorEmergency.route)
                 }
             )
         }
@@ -692,13 +706,13 @@ fun AppNavHost(
                         callViewModel.endCall()
                     }
                     onDisconnect()
-                    navController.navigate(AppRoute.RescuerStandby.route)
+                    navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
-                onChat = { navController.navigate(AppRoute.SurvivorChat.route) },
-                onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
+                onChat = { navigateSingleRoute(AppRoute.SurvivorChat.route) },
+                onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
                 onPanicClear = onClearDeviceMonitoring,
                 onToggleSpeakerphone = { callViewModel.toggleSpeakerphone() },
-                onOpenUserList = { navController.navigate(AppRoute.RescuerSurvivorDb.route) },
+                onOpenUserList = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
                 onAcceptCall = {
                     val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
                     if (!appViewModel.ensureWifiAwarePermissions()) return@PTTLinkScreen
@@ -807,8 +821,8 @@ fun AppNavHost(
                 meshPeerCount = meshPeerCount,
                 bleDebugStats = bleDebugStats,
                 onPrev = { activity?.finish() },
-                onGoPTT = { navController.navigate(AppRoute.RescuerPTT.route) },
-                onSos = { navController.navigate(AppRoute.RescuerEmergency.route) }
+                onGoPTT = { navigateSingleRoute(AppRoute.RescuerPTT.route) },
+                onSos = { navigateSingleRoute(AppRoute.RescuerEmergency.route) }
             )
         }
 
@@ -881,10 +895,10 @@ fun AppNavHost(
                         callViewModel.endCall()
                     }
                     onDisconnect()
-                    navController.navigate(AppRoute.RescuerStandby.route)
+                    navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
-                onChat = { navController.navigate(AppRoute.RescuerChat.route) },
-                onOpenSurvivorDb = { navController.navigate(AppRoute.RescuerSurvivorDb.route) },
+                onChat = { navigateSingleRoute(AppRoute.RescuerChat.route) },
+                onOpenSurvivorDb = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
                 onPanicClear = onClearDeviceMonitoring,
                 onToggleSpeakerphone = { callViewModel.toggleSpeakerphone() }
             )
@@ -985,7 +999,7 @@ fun AppNavHost(
                     callingTargetPeerId = null
                     callAttemptStartedAtMs = 0L
                 },
-                onOpenMeshMap = { navController.navigate(AppRoute.RescuerMeshMap.route) },
+                onOpenMeshMap = { navigateSingleRoute(AppRoute.RescuerMeshMap.route) },
                 selectedTargetPeerId = selectedTargetPeerId,
                 onSelectTarget = { survivor ->
                     selectedTargetPeerId = if (selectedTargetPeerId == survivor.peerId) {

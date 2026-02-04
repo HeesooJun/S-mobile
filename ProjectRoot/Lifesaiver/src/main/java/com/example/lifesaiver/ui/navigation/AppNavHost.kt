@@ -149,6 +149,7 @@ fun AppNavHost(
     var connectingTargetPeerId by remember { mutableStateOf<String?>(null) }
     val callAttemptTimeoutMs = 15_000L
     val currentRoute = backStackEntry?.destination?.route
+    var pendingBottomTabRoute by remember { mutableStateOf<String?>(null) }
     val footerEnabledRoutes = setOf(
         AppRoute.SurvivorPTT.route,
         AppRoute.SurvivorChat.route,
@@ -160,9 +161,11 @@ fun AppNavHost(
         AppRoute.Settings.route
     )
     val shouldShowFooter = currentRoute in footerEnabledRoutes
-    val navigateBottomTab: (String) -> Unit = { targetRoute ->
+    val navigateBottomTab: (String) -> Unit = tab@{ targetRoute ->
         val currentRoute = navController.currentBackStackEntry?.destination?.route
-        if (currentRoute != targetRoute) {
+        if (pendingBottomTabRoute != null || currentRoute == targetRoute) return@tab
+        pendingBottomTabRoute = targetRoute
+        if (!navController.popBackStack(targetRoute, inclusive = false)) {
             navController.navigate(targetRoute) {
                 launchSingleTop = true
             }
@@ -201,6 +204,9 @@ fun AppNavHost(
 
     LaunchedEffect(backStackEntry) {
         val route = backStackEntry?.destination?.route ?: AppRoute.SurvivorProfile.route
+        if (route == pendingBottomTabRoute) {
+            pendingBottomTabRoute = null
+        }
         onRouteChanged(route)
         if (route == AppRoute.SurvivorStandby.route) {
             sttResetToken = System.currentTimeMillis()
@@ -574,6 +580,10 @@ fun AppNavHost(
                 SettingsScreen(
                     isVoiceOn = isVoiceDetectionEnabled,
                     isShockOn = isShockDetectionEnabled,
+                    profileName = profileState.name,
+                    profileGender = profileState.gender,
+                    profileBirthDate = profileState.birthDate,
+                    profileNotes = profileState.notes,
                     onVoiceToggle = onSetVoiceDetection,
                     onShockToggle = onSetShockDetection,
                     onBack = { navController.popBackStack() },
