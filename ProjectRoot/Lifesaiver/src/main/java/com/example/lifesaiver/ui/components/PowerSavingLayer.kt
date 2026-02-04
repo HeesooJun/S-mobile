@@ -50,6 +50,15 @@ fun PowerSavingLayer(
         }
     }
 
+    val wakeModifier = if (!revealed) {
+        Modifier.clickable(
+            indication = null,
+            interactionSource = interactionSource
+        ) { revealed = true }
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -58,12 +67,8 @@ fun PowerSavingLayer(
                 if (!revealed) AppColors.Black.copy(alpha = 0.96f)
                 else AppColors.Black.copy(alpha = 0.0f) // 잠깐 보여줄 때는 투명
             )
-            // ✅ revealed=false(블랙)일 때만 탭으로 깨우기
-            .clickable(
-                enabled = !revealed,
-                indication = null,
-                interactionSource = interactionSource
-            ) { revealed = true }
+            // revealed 상태에서는 포인터를 가로채지 않아 하단 버튼(절전 모드 토글)이 동작하도록 함.
+            .then(wakeModifier)
     ) {
         AnimatedVisibility(
             visible = revealed,
