@@ -100,9 +100,11 @@ class WifiAwareRanger(private val context: Context) {
     private var attachRetryRunnable: Runnable? = null
     private var pendingRestartRunnable: Runnable? = null
     private var ndpUnavailableCount: Int = 0
+    private val ndpRequestTimeoutMs = 8_000
 
-    // 오디오 수신 스레드
-    private val receiveExecutor = Executors.newSingleThreadExecutor()
+    // RTT와 오디오 수신 루프를 분리해 상호 간섭을 줄입니다.
+    private val rttExecutor = Executors.newSingleThreadExecutor()
+    private val udpReceiveExecutor = Executors.newSingleThreadExecutor()
     private var receiveJob: Future<*>? = null
 
     // 연결 시도 중복 방지
@@ -233,10 +235,7 @@ class WifiAwareRanger(private val context: Context) {
     fun setNdpInitiator(isInitiator: Boolean) {
         if (isNdpInitiator == isInitiator) return
         isNdpInitiator = isInitiator
-        if (!isNdpInitiator) {
-            isRanging = false
-            _rttDistance.value = null
-        }
+        isRanging = false
         peerRequestedNdp = false
         ndpAckReceived = false
         ConnectionLog.add("Aware", "ndp initiator=$isNdpInitiator")
@@ -334,6 +333,11 @@ class WifiAwareRanger(private val context: Context) {
                 currentTargetPeer = peerHandle
                 ndpAckReceived = true
                 ConnectionLog.add("Aware", "received ndp ack from target")
+                if (wifiRttManager != null && !isRanging && currentTargetPeer != null) {
+                    isRanging = true
+                    ConnectionLog.add("Aware", "start RTT ranging (ack)")
+                    startRangingLoop()
+                }
                 if (!_isConnectionReady.value && !isConnecting && dataPathEnabled) {
                     connectToCurrentPeer()
                 }
@@ -373,6 +377,11 @@ class WifiAwareRanger(private val context: Context) {
                 peerRequestedNdp = true
                 sendNdpAckToPeer(peerHandle, signal.senderPeerId)
                 ConnectionLog.add("Aware", "received ndp request from initiator")
+                if (wifiRttManager != null && !isRanging && currentTargetPeer != null) {
+                    isRanging = true
+                    ConnectionLog.add("Aware", "start RTT ranging (request)")
+                    startRangingLoop()
+                }
                 if (!_isConnectionReady.value && !isConnecting && dataPathEnabled) {
                     connectToCurrentPeer()
                 }
@@ -392,7 +401,7 @@ class WifiAwareRanger(private val context: Context) {
             .build()
 
         ConnectionLog.add("Aware", "ranging request")
-        wifiRttManager?.startRanging(request, receiveExecutor, rttCallback)
+        wifiRttManager?.startRanging(request, rttExecutor, rttCallback)
     }
 
     private val rttCallback = object : RangingResultCallback() {
@@ -594,7 +603,7 @@ class WifiAwareRanger(private val context: Context) {
 
         try {
             ConnectionLog.add("Aware", "NDP request issued")
-            connectivityManager?.requestNetwork(networkRequest, networkCallback!!, 15_000)
+            connectivityManager?.requestNetwork(networkRequest, networkCallback!!, ndpRequestTimeoutMs)
         } catch (e: SecurityException) {
             Log.e("WifiAware", "requestNetwork permission error", e)
             ConnectionLog.add("Aware", "requestNetwork permission error")
@@ -612,7 +621,7 @@ class WifiAwareRanger(private val context: Context) {
     // 5. 오디오 송수신
     // =========================================================================
     private fun startReceiveLoop() {
-        receiveJob = receiveExecutor.submit {
+        receiveJob = udpReceiveExecutor.submit {
             val buffer = ByteArray(4096) // 버퍼 사이즈
             while (_isConnectionReady.value && socket != null && !socket!!.isClosed) {
                 try {

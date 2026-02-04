@@ -21,6 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,9 +54,7 @@ import com.example.lifesaiver.ui.components.DistanceTrack
 import com.example.lifesaiver.core.location.DistanceMeasurementSource
 import com.example.lifesaiver.core.location.DistanceTrend
 import com.example.lifesaiver.ui.components.MeshEdge
-import com.example.lifesaiver.ui.components.MeshMap
 import com.example.lifesaiver.ui.components.MeshNode
-import com.example.lifesaiver.ui.components.MicButton
 import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SignalBars
@@ -77,14 +81,14 @@ fun RescuerPTTLinkScreen(
     callStatusLabel: String,
     callDecisionLabel: String? = null,
     isInCall: Boolean,
+    isCalling: Boolean = false,
     isConnected: Boolean,
-    isMicOn: Boolean,
     isSpeakerphoneOn: Boolean = true,
     distanceMeters: Float?,
     distanceTrend: DistanceTrend,
     distanceSource: DistanceMeasurementSource,
-    onMicPress: () -> Unit,
-    onMicRelease: () -> Unit,
+    onRequestCall: () -> Unit,
+    onEndCall: () -> Unit,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onChat: () -> Unit,
@@ -103,14 +107,6 @@ fun RescuerPTTLinkScreen(
     val displayConnectedCount = meshDisplayCount
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
-    val meshGraphState = remember(meshGraphSnapshot, myPeerId, myNickname, peerNicknames) {
-        buildMeshGraphState(
-            snapshot = meshGraphSnapshot,
-            myPeerId = myPeerId,
-            myNickname = myNickname,
-            peerNicknames = peerNicknames
-        )
-    }
 
     LaunchedEffect(expandedAction) {
         if (
@@ -137,6 +133,14 @@ fun RescuerPTTLinkScreen(
                 isForceExit = !isPowerSaving,
                 onRequestExitPowerSaving = { setPowerSaving(false) }
             )
+            TopIconButton(
+                iconRes = R.drawable.ic_back,
+                contentDescription = "이전",
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = scaledDp(12, scale), top = scaledDp(12, scale))
+            )
             Text(
                 text = "LIFESAIVER",
                 color = AppColors.Gray500,
@@ -144,7 +148,7 @@ fun RescuerPTTLinkScreen(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = scaledDp(20, scale), top = scaledDp(18, scale))
+                    .padding(start = scaledDp(60, scale), top = scaledDp(18, scale))
                     .tripleClickable(onTripleClick = onPanicClear)
             )
             Text(
@@ -172,14 +176,51 @@ fun RescuerPTTLinkScreen(
                     modifier = Modifier.padding(top = scaledDp(12, scale))
                 )
 
-                Spacer(modifier = Modifier.height(scaledDp(140, scale)))
-                MicButton(
-                    isActive = isMicOn,
-                    size = scaledDp(80, scale),
-                    onPress = onMicPress,
-                    onRelease = onMicRelease
+                Spacer(modifier = Modifier.height(scaledDp(124, scale)))
+                Box(contentAlignment = Alignment.Center) {
+                    FilledIconButton(
+                        onClick = {
+                            if (isInCall) onEndCall() else onRequestCall()
+                        },
+                        enabled = isInCall || !isCalling,
+                        modifier = Modifier.size(scaledDp(86, scale)),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (isInCall) AppColors.Red else AppColors.Green,
+                            disabledContainerColor = AppColors.Green.copy(alpha = 0.4f),
+                            contentColor = AppColors.White,
+                            disabledContentColor = AppColors.White.copy(alpha = 0.8f)
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Call,
+                            contentDescription = if (isInCall) "통화 종료" else "통화 요청",
+                            modifier = Modifier.size(scaledDp(40, scale))
+                        )
+                    }
+                    if (isCalling && !isInCall) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(scaledDp(104, scale)),
+                            color = AppColors.Green,
+                            strokeWidth = scaledDp(2, scale)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(scaledDp(14, scale)))
+                Text(
+                    text = when {
+                        isCalling && !isInCall -> "통화 요청 전송 중..."
+                        isInCall -> "통화 중 · 버튼을 눌러 종료"
+                        else -> "통화 요청"
+                    },
+                    color = when {
+                        isCalling && !isInCall -> AppColors.Green
+                        isInCall -> AppColors.Red
+                        else -> AppColors.Green
+                    },
+                    fontSize = scaledSp(13, scale),
+                    fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(10, scale)))
                 Text(
                     text = when {
                         hasMeshPeers -> "메쉬 연결됨"
@@ -279,43 +320,6 @@ fun RescuerPTTLinkScreen(
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "PDA 지도",
-                    color = AppColors.White,
-                    fontSize = scaledSp(13, scale),
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .align(Alignment.Start)
-                        .padding(start = scaledDp(6, scale), bottom = scaledDp(8, scale))
-                )
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(scaledDp(170, scale)),
-                    shape = RoundedCornerShape(scaledDp(18, scale)),
-                    color = AppColors.Gray800
-                ) {
-                    if (isInCall) {
-                        MeshMap(
-                            nodes = meshGraphState.nodes,
-                            edges = meshGraphState.edges,
-                            visualEvents = meshVisualEvents,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "통화 연결 후 지도가 표시됩니다",
-                                color = AppColors.Gray400,
-                                fontSize = scaledSp(12, scale)
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
