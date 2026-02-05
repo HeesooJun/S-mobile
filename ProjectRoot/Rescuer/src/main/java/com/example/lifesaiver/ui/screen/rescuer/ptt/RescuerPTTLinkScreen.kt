@@ -1,9 +1,12 @@
 ﻿package com.example.lifesaiver.ui.screen.rescuer.ptt
 
+import android.media.MediaPlayer
+import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,60 +15,68 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
 import com.example.lifesaiver.core.log.ConnectionLog
+import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.BleDebugStats
-import com.example.lifesaiver.ui.components.DistanceTrack
 import com.example.lifesaiver.core.location.DistanceMeasurementSource
 import com.example.lifesaiver.core.location.DistanceTrend
 import com.example.lifesaiver.ui.components.MeshEdge
 import com.example.lifesaiver.ui.components.MeshNode
 import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
-import com.example.lifesaiver.ui.components.SignalBars
-import com.example.lifesaiver.ui.components.SignalVariant
-import com.example.lifesaiver.ui.components.tripleClickable
+import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
+import com.example.lifesaiver.ui.components.quintupleClickable
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
 import com.example.lifesaiver.ui.theme.scaledDp
 import com.example.lifesaiver.ui.theme.scaledSp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 enum class RssiFeedbackMode(val label: String) {
     OFF("알림 끔"),
@@ -95,15 +106,22 @@ fun RescuerPTTLinkScreen(
     callDecisionLabel: String? = null,
     isInCall: Boolean,
     isCalling: Boolean = false,
+    isMicOn: Boolean = false,
     isConnected: Boolean,
     isSpeakerphoneOn: Boolean = true,
     distanceMeters: Float?,
     distanceTrend: DistanceTrend,
     distanceSource: DistanceMeasurementSource,
+    targetDisplayName: String? = null,
+    chatRoomTitle: String = "전체 채팅",
+    chatMessages: List<ChatMessage> = emptyList(),
     onRequestCall: () -> Unit,
     onEndCall: () -> Unit,
     onBack: () -> Unit,
     onPanicClear: () -> Unit,
+    onSendChat: (String) -> Unit = {},
+    onMicPress: () -> Unit = {},
+    onMicRelease: () -> Unit = {},
     onToggleSpeakerphone: () -> Unit = {},
     rssiFeedbackMode: RssiFeedbackMode = RssiFeedbackMode.BOTH,
     rssiFeedbackLevel: RssiFeedbackLevel = RssiFeedbackLevel.MEDIUM,
@@ -120,6 +138,7 @@ fun RescuerPTTLinkScreen(
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     var showDebugModal by remember { mutableStateOf(false) }
+    var showControlModal by remember { mutableStateOf(false) }
     var stickyBeep by remember { mutableStateOf(false) }
     var stickyVibrate by remember { mutableStateOf(false) }
     var stickyHighTone by remember { mutableStateOf(false) }
@@ -127,9 +146,17 @@ fun RescuerPTTLinkScreen(
     var isVibrateRepeating by remember { mutableStateOf(false) }
     var isHighToneRepeating by remember { mutableStateOf(false) }
     val connectionLogs by ConnectionLog.logs.collectAsState()
-    val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
+    val meshDisplayCount = (meshPeerCount - 1).coerceAtLeast(0)
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
+    val targetStatusText = when {
+        isInCall && targetDisplayName.isNullOrBlank() -> "통화 연결됨"
+        targetDisplayName.isNullOrBlank() -> "대상 미선택"
+        isInCall -> "${targetDisplayName}님과 통화 중입니다."
+        isCalling -> "${targetDisplayName}님과 연결 시도 중입니다."
+        else -> "${targetDisplayName}님이 선택되었습니다."
+    }
+    val hasActiveRepeating = isBeepRepeating || isVibrateRepeating || isHighToneRepeating
 
     LaunchedEffect(remoteControlEnabled) {
         if (!remoteControlEnabled) {
@@ -183,14 +210,14 @@ fun RescuerPTTLinkScreen(
                     .padding(start = scaledDp(12, scale), top = scaledDp(12, scale))
             )
             Text(
-                text = "LIFESAIVER",
+                text = "LIFESAIVIOR",
                 color = AppColors.Gray500,
                 fontSize = scaledSp(12, scale),
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(start = scaledDp(60, scale), top = scaledDp(18, scale))
-                    .tripleClickable(onTripleClick = onPanicClear)
+                    .quintupleClickable(onQuintupleClick = onPanicClear)
             )
             Text(
                 text = "디버그",
@@ -202,33 +229,35 @@ fun RescuerPTTLinkScreen(
                     .padding(end = scaledDp(20, scale), top = scaledDp(16, scale))
                     .clickable { showDebugModal = true }
             )
-            Column(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = scaledDp(32, scale)),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(horizontal = scaledDp(32, scale))
             ) {
-                Spacer(modifier = Modifier.height(scaledDp(30, scale)))
-                DistanceTrack(
-                    distanceMeters = distanceMeters,
-                    trend = distanceTrend,
-                    maxMeters = 30f,
-                    measurementSource = distanceSource,
-                    modifier = Modifier.padding(top = scaledDp(12, scale))
-                )
-
-                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
+                val chatPanelHeight = maxHeight * 0.44f
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                Spacer(modifier = Modifier.height(scaledDp(52, scale)))
                 Text(
                     text = when {
                         hasMeshPeers -> "메쉬 연결됨"
-                        isConnected -> "생존자 연결됨"
+                        isConnected -> "직접 연결됨"
                         else -> "생존자 연결 대기 중"
                     },
                     color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(scaledDp(74, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(4, scale)))
+                Text(
+                    text = targetStatusText,
+                    color = if (targetDisplayName.isNullOrBlank()) AppColors.Gray500 else AppColors.White,
+                    fontSize = scaledSp(12, scale),
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(scaledDp(64, scale)))
                 Box(contentAlignment = Alignment.Center) {
                     FilledIconButton(
                         onClick = {
@@ -260,7 +289,7 @@ fun RescuerPTTLinkScreen(
                 Spacer(modifier = Modifier.height(scaledDp(14, scale)))
                 Text(
                     text = when {
-                        isCalling && !isInCall -> "통화 요청 전송 중..."
+                        isCalling && !isInCall -> "통화 연결 대기 중... (최대 15초)"
                         isInCall -> "통화 중 · 버튼을 눌러 종료"
                         else -> "통화 요청"
                     },
@@ -282,147 +311,22 @@ fun RescuerPTTLinkScreen(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(scaledDp(14, scale)))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = scaledDp(520, scale))
-                        .padding(horizontal = scaledDp(8, scale)),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "RSSI 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
-                        color = AppColors.Gray400,
-                        fontSize = scaledSp(11, scale),
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
-                    ) {
-                        OutlinedButton(
-                            onClick = onCycleRssiFeedbackMode,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "알림 모드 변경",
-                                fontSize = scaledSp(11, scale)
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = onCycleRssiFeedbackLevel,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "강도 변경",
-                                fontSize = scaledSp(11, scale)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
-                    ) {
-                        RepeatActionButton(
-                            label = "절전 해제",
-                            enabled = remoteControlEnabled,
-                            onTap = onSendRemoteWake,
-                            isRepeating = false,
-                            modifier = Modifier.weight(1f)
-                        )
-                        RepeatActionButton(
-                            label = "비프음",
-                            enabled = remoteControlEnabled,
-                            onTap = onSendRemoteBeep,
-                            isStickyActive = stickyBeep,
-                            onStickyStateChanged = { stickyBeep = it },
-                            isRepeating = isBeepRepeating,
-                            onActiveStateChanged = { isBeepRepeating = it },
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            enabled = remoteControlEnabled,
-                            onClick = {
-                                stickyBeep = false
-                                stickyVibrate = false
-                                stickyHighTone = false
-                                onSendRemoteStop()
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("송출 중지", fontSize = scaledSp(11, scale))
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(scaledDp(4, scale)))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
-                    ) {
-                        RepeatActionButton(
-                            label = "저주파",
-                            enabled = remoteControlEnabled,
-                            onTap = onSendRemoteVibrate,
-                            isStickyActive = stickyVibrate,
-                            onStickyStateChanged = { stickyVibrate = it },
-                            isRepeating = isVibrateRepeating,
-                            onActiveStateChanged = { isVibrateRepeating = it },
-                            modifier = Modifier.weight(1f)
-                        )
-                        RepeatActionButton(
-                            label = "고주파",
-                            enabled = remoteControlEnabled,
-                            onTap = onSendRemoteHighTone,
-                            isStickyActive = stickyHighTone,
-                            onStickyStateChanged = { stickyHighTone = it },
-                            isRepeating = isHighToneRepeating,
-                            onActiveStateChanged = { isHighToneRepeating = it },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-                    val repeatingItems = buildList {
-                        if (isBeepRepeating) add("비프음")
-                        if (isVibrateRepeating) add("저주파")
-                        if (isHighToneRepeating) add("고주파")
-                    }
-                    Text(
-                        text = if (repeatingItems.isNotEmpty()) {
-                            "반복 송출 중: ${repeatingItems.joinToString(", ")} · [송출 중지]로 해제"
-                        } else {
-                            "안내: 비프음/저주파/고주파를 3초 길게 누르면 반복 고정"
-                        },
-                        color = if (repeatingItems.isNotEmpty()) AppColors.Green else AppColors.Gray500,
-                        fontSize = scaledSp(10, scale),
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.height(scaledDp(36, scale)))
                 Spacer(modifier = Modifier.weight(1f))
-                Row(
+                PttChatPanel(
+                    roomTitle = chatRoomTitle,
+                    messages = chatMessages,
+                    onSend = onSendChat,
+                    isMicOn = isMicOn,
+                    onMicPress = onMicPress,
+                    onMicRelease = onMicRelease,
+                    showControlBadge = hasActiveRepeating,
+                    onOpenControls = { showControlModal = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = scaledDp(24, scale)),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .height(scaledDp(36, scale))
-                            .padding(start = scaledDp(14, scale)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        SignalBars(
-                            strength = if (isConnected) 4 else 1,
-                            variant = SignalVariant.Green,
-                            modifier = Modifier.graphicsLayer(rotationX = 180f)
-                        )
-                    }
-                    Spacer(modifier = Modifier.size(scaledDp(36, scale)))
-                }
+                        .height(chatPanelHeight)
+                )
+                Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+            }
             }
             if (showDebugModal) {
                 Dialog(onDismissRequest = { showDebugModal = false }) {
@@ -512,6 +416,548 @@ fun RescuerPTTLinkScreen(
                     }
                 }
             }
+            if (showControlModal) {
+                Dialog(onDismissRequest = { showControlModal = false }) {
+                    Surface(
+                        color = AppColors.Gray900,
+                        shape = RoundedCornerShape(scaledDp(18, scale)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(24, scale))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(scaledDp(18, scale))
+                        ) {
+                            Text(
+                                text = "원격 제어",
+                                color = AppColors.White,
+                                fontSize = scaledSp(16, scale),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                            Text(
+                                text = "RSSI 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
+                                color = AppColors.Gray400,
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+                            ) {
+                                Button(
+                                    onClick = onCycleRssiFeedbackMode,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AppColors.Gray800.copy(alpha = 0.7f),
+                                        contentColor = AppColors.White,
+                                        disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
+                                        disabledContentColor = AppColors.Gray500
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "알림 모드 변경",
+                                        fontSize = scaledSp(11, scale)
+                                    )
+                                }
+                                Button(
+                                    onClick = onCycleRssiFeedbackLevel,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AppColors.Gray800.copy(alpha = 0.7f),
+                                        contentColor = AppColors.White,
+                                        disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
+                                        disabledContentColor = AppColors.Gray500
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "강도 변경",
+                                        fontSize = scaledSp(11, scale)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
+                            ) {
+                                RepeatActionButton(
+                                    label = "절전 해제",
+                                    enabled = remoteControlEnabled,
+                                    onTap = onSendRemoteWake,
+                                    isRepeating = false,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RepeatActionButton(
+                                    label = "비프음",
+                                    enabled = remoteControlEnabled,
+                                    onTap = onSendRemoteBeep,
+                                    isStickyActive = stickyBeep,
+                                    onStickyStateChanged = { stickyBeep = it },
+                                    isRepeating = isBeepRepeating,
+                                    onActiveStateChanged = { isBeepRepeating = it },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    enabled = remoteControlEnabled,
+                                    onClick = {
+                                        stickyBeep = false
+                                        stickyVibrate = false
+                                        stickyHighTone = false
+                                        onSendRemoteStop()
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = AppColors.Gray800.copy(alpha = 0.7f),
+                                        contentColor = AppColors.White,
+                                        disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
+                                        disabledContentColor = AppColors.Gray500
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("송출 중지", fontSize = scaledSp(11, scale))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(4, scale)))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
+                            ) {
+                                RepeatActionButton(
+                                    label = "저주파",
+                                    enabled = remoteControlEnabled,
+                                    onTap = onSendRemoteVibrate,
+                                    isStickyActive = stickyVibrate,
+                                    onStickyStateChanged = { stickyVibrate = it },
+                                    isRepeating = isVibrateRepeating,
+                                    onActiveStateChanged = { isVibrateRepeating = it },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RepeatActionButton(
+                                    label = "고주파",
+                                    enabled = remoteControlEnabled,
+                                    onTap = onSendRemoteHighTone,
+                                    isStickyActive = stickyHighTone,
+                                    onStickyStateChanged = { stickyHighTone = it },
+                                    isRepeating = isHighToneRepeating,
+                                    onActiveStateChanged = { isHighToneRepeating = it },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            val repeatingItems = buildList {
+                                if (isBeepRepeating) add("비프음")
+                                if (isVibrateRepeating) add("저주파")
+                                if (isHighToneRepeating) add("고주파")
+                            }
+                            Text(
+                                text = if (repeatingItems.isNotEmpty()) {
+                                    "반복 송출 중: ${repeatingItems.joinToString(", ")} · [송출 중지]로 해제"
+                                } else {
+                                    "안내: 비프음/저주파/고주파를 3초 길게 누르면 반복 고정"
+                                },
+                                color = if (repeatingItems.isNotEmpty()) AppColors.Green else AppColors.Gray500,
+                                fontSize = scaledSp(10, scale),
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                            Text(
+                                text = "절전 해제: 대상 기기의 화면을 켜도록 신호를 보냅니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Text(
+                                text = "비프음: 대상 기기에서 경고음을 재생합니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Text(
+                                text = "저주파: 대상 기기에서 진동을 울립니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Text(
+                                text = "고주파: 대상 기기에서 높은 주파수대의 음을 재생합니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Text(
+                                text = "강도 변경: 알림 강도를 약/중/강으로 순환합니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Text(
+                                text = "송출 중지: 현재 실행 중인 반복 송출을 즉시 멈춥니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(14, scale)))
+                            Text(
+                                text = "닫기",
+                                color = AppColors.Green,
+                                fontSize = scaledSp(12, scale),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .align(Alignment.End)
+                                    .clickable { showControlModal = false }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PttChatPanel(
+    roomTitle: String,
+    messages: List<ChatMessage>,
+    onSend: (String) -> Unit,
+    isMicOn: Boolean,
+    onMicPress: () -> Unit,
+    onMicRelease: () -> Unit,
+    showControlBadge: Boolean = false,
+    onOpenControls: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val scale = LocalAppScale.current
+    var inputValue by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+    var currentRecordingJob by remember { mutableStateOf<Job?>(null) }
+
+    Column(
+        modifier = modifier
+            .background(
+                color = AppColors.Gray900.copy(alpha = 0.82f),
+                shape = RoundedCornerShape(scaledDp(14, scale))
+            )
+            .border(
+                width = scaledDp(1, scale),
+                color = AppColors.Gray500.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(scaledDp(14, scale))
+            )
+            .padding(scaledDp(12, scale))
+    ) {
+        Text(
+            text = roomTitle,
+            color = AppColors.White,
+            fontSize = scaledSp(12, scale),
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        AutoScrollChatList(
+            messages = messages,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            listModifier = Modifier.fillMaxWidth(),
+            verticalSpacing = scaledDp(6, scale)
+        ) { message ->
+            PttChatMessageBubble(message = message)
+        }
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(scaledDp(44, scale))
+                    .background(AppColors.Gray800, RoundedCornerShape(scaledDp(22, scale)))
+                    .padding(horizontal = scaledDp(14, scale)),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (inputValue.isEmpty()) {
+                    Text(
+                        text = "메시지 입력...",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale)
+                    )
+                }
+                BasicTextField(
+                    value = inputValue,
+                    onValueChange = { inputValue = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(
+                        color = AppColors.White,
+                        fontSize = scaledSp(11, scale)
+                    ),
+                    cursorBrush = SolidColor(AppColors.Green)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(scaledDp(40, scale))
+                    .background(
+                        if (inputValue.isNotBlank() || isMicOn) AppColors.Green else AppColors.Gray800,
+                        CircleShape
+                    )
+                    .clickable {
+                        if (inputValue.isNotBlank()) {
+                            val payload = inputValue.trim()
+                            if (payload.isNotBlank()) {
+                                onSend(payload)
+                                inputValue = ""
+                            }
+                            return@clickable
+                        }
+                        if (isMicOn) {
+                            currentRecordingJob?.cancel()
+                            onMicRelease()
+                            currentRecordingJob = null
+                        } else {
+                            currentRecordingJob = coroutineScope.launch {
+                                onMicPress()
+                                delay(9_000L)
+                                onMicRelease()
+                                currentRecordingJob = null
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                if (inputValue.isNotBlank()) {
+                    Text(
+                        text = "전송",
+                        color = AppColors.Black,
+                        fontSize = scaledSp(10, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Text(
+                        text = if (isMicOn) "REC" else "MIC",
+                        color = if (isMicOn) AppColors.Black else AppColors.White,
+                        fontSize = scaledSp(10, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            TextButton(
+                onClick = {
+                    onOpenControls()
+                }
+            ) {
+                Box(contentAlignment = Alignment.TopEnd) {
+                    Icon(
+                        imageVector = Icons.Filled.Menu,
+                        contentDescription = "원격 제어 열기",
+                        tint = AppColors.White
+                    )
+                    if (showControlBadge) {
+                        Box(
+                            modifier = Modifier
+                                .size(scaledDp(8, scale))
+                                .background(AppColors.Red, shape = CircleShape)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PttChatMessageBubble(message: ChatMessage) {
+    val scale = LocalAppScale.current
+    val background = if (message.isMine) Color(0xFF2B2F33) else Color(0xFFF27B7B)
+    val textColor = AppColors.White
+    val voicePath = message.text.takeIf { it.startsWith(VOICE_PREFIX) }
+        ?.removePrefix(VOICE_PREFIX)
+        ?.trim()
+    val labelText = if (message.isMine) {
+        "나"
+    } else {
+        val rawSender = message.senderName?.trim().orEmpty()
+        if (rawSender.isNotBlank()) {
+            rawSender.replace(Regex("\\[[^\\]]{4}\\]$"), "").trim().ifBlank { rawSender }
+        } else {
+            "상대"
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
+    ) {
+        Column(horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start) {
+            Text(
+                text = labelText,
+                color = AppColors.Gray500,
+                fontSize = scaledSp(9, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(scaledDp(2, scale)))
+            if (!voicePath.isNullOrBlank()) {
+                PttAudioMessageBubble(
+                    path = voicePath,
+                    isMine = message.isMine
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .background(background, shape = RoundedCornerShape(scaledDp(12, scale)))
+                        .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+                ) {
+                    Text(
+                        text = message.text,
+                        color = textColor,
+                        fontSize = scaledSp(11, scale)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PttAudioMessageBubble(
+    path: String,
+    isMine: Boolean
+) {
+    val scale = LocalAppScale.current
+    val background = if (isMine) Color(0xFF2B2F33) else Color(0xFFF27B7B)
+    var isReady by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var durationMs by remember { mutableStateOf(0) }
+    var positionMs by remember { mutableStateOf(0) }
+
+    val mediaPlayer = remember(path) {
+        MediaPlayer().apply {
+            try {
+                setDataSource(path)
+                prepare()
+                durationMs = duration
+                isReady = true
+            } catch (_: Exception) {
+                isReady = false
+            }
+        }
+    }
+    val stopSelf = remember(mediaPlayer) {
+        {
+            try {
+                if (mediaPlayer.isPlaying) {
+                    mediaPlayer.pause()
+                }
+            } catch (_: Exception) {
+            }
+            isPlaying = false
+        }
+    }
+
+    DisposableEffect(mediaPlayer) {
+        mediaPlayer.setOnCompletionListener {
+            isPlaying = false
+            positionMs = durationMs
+            PttVoicePlaybackController.clear(stopSelf)
+        }
+        onDispose {
+            PttVoicePlaybackController.clear(stopSelf)
+            try {
+                mediaPlayer.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    LaunchedEffect(isPlaying, isReady) {
+        if (!isPlaying || !isReady) return@LaunchedEffect
+        while (isPlaying && mediaPlayer.isPlaying) {
+            positionMs = mediaPlayer.currentPosition
+            delay(200)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(0.74f)
+            .background(background, shape = RoundedCornerShape(scaledDp(12, scale)))
+            .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(8, scale))
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+        ) {
+            TextButton(
+                enabled = isReady,
+                onClick = {
+                    if (isPlaying) {
+                        stopSelf()
+                    } else {
+                        PttVoicePlaybackController.requestPlay(stopSelf)
+                        mediaPlayer.start()
+                        isPlaying = true
+                    }
+                }
+            ) {
+                Text(
+                    text = if (isPlaying) "Pause" else "Play",
+                    fontSize = scaledSp(10, scale),
+                    fontWeight = FontWeight.Bold,
+                    color = AppColors.White
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(scaledDp(3, scale))
+                        .background(AppColors.White.copy(alpha = 0.35f), shape = RoundedCornerShape(999.dp))
+                ) {
+                    val progress = if (durationMs > 0) {
+                        positionMs.toFloat() / durationMs.toFloat()
+                    } else {
+                        0f
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                            .height(scaledDp(3, scale))
+                            .background(AppColors.White, shape = RoundedCornerShape(999.dp))
+                    )
+                }
+                Spacer(modifier = Modifier.height(scaledDp(3, scale)))
+                Text(
+                    text = "${formatAudioTime(positionMs)}/${formatAudioTime(durationMs)}",
+                    color = AppColors.White.copy(alpha = 0.85f),
+                    fontSize = scaledSp(9, scale)
+                )
+            }
+        }
+    }
+}
+
+private fun formatAudioTime(ms: Int): String {
+    if (ms <= 0) return "0:00"
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
+}
+
+private const val VOICE_PREFIX = "[voice] "
+
+private object PttVoicePlaybackController {
+    private var stopCurrent: (() -> Unit)? = null
+
+    fun requestPlay(onStop: () -> Unit) {
+        if (stopCurrent !== onStop) {
+            stopCurrent?.invoke()
+            stopCurrent = onStop
+        }
+    }
+
+    fun clear(onStop: () -> Unit) {
+        if (stopCurrent === onStop) {
+            stopCurrent = null
         }
     }
 }
@@ -599,15 +1045,21 @@ private fun RepeatActionButton(
         },
         interactionSource = interactionSource,
         colors = ButtonDefaults.textButtonColors(
-            containerColor = if (isRepeating) AppColors.GreenSoft else Color.Transparent,
-            contentColor = if (isRepeating) AppColors.Green else AppColors.White
+            containerColor = if (isRepeating) {
+                AppColors.Gray700.copy(alpha = 0.9f)
+            } else {
+                AppColors.Gray800.copy(alpha = 0.7f)
+            },
+            contentColor = AppColors.White,
+            disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
+            disabledContentColor = AppColors.Gray500
         ),
         modifier = modifier
     ) {
         Text(
             text = if (isRepeating) "$label · 반복중" else label,
             fontSize = scaledSp(11, LocalAppScale.current),
-            fontWeight = if (isRepeating) FontWeight.Bold else FontWeight.Medium
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
