@@ -1,4 +1,4 @@
-﻿package com.example.lifesaiver.ui.navigation
+package com.example.lifesaiver.ui.navigation
 
 import android.app.Activity
 import android.content.BroadcastReceiver
@@ -556,10 +556,9 @@ fun AppNavHost(
         knownSurvivorPeerIds = peerIds
         if (!hasNewSurvivorSignal || isInCall) return@LaunchedEffect
         val currentRoute = backStackEntry?.destination?.route
-        val shouldAutoOpenDb = currentRoute == AppRoute.RescuerStandby.route ||
-            currentRoute == AppRoute.RescuerPTT.route ||
-            currentRoute == AppRoute.RescuerChat.route ||
-            currentRoute == AppRoute.RescuerMeshMap.route
+        val shouldAutoOpenDb =
+            currentRoute == AppRoute.RescuerStandby.route ||
+                currentRoute == AppRoute.RescuerEmergency.route
         if (shouldAutoOpenDb) {
             navigateSingleRoute(AppRoute.RescuerSurvivorDb.route)
         }
@@ -964,7 +963,11 @@ fun AppNavHost(
                 },
                 onChat = { navigateSingleRoute(AppRoute.SurvivorChat.route) },
                 onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
-                onPanicClear = onClearDeviceMonitoring,
+                onPanicClear = {
+                    resetRssiFeedbackDefaults()
+                    onDisconnect()
+                    Toast.makeText(context, "모든 연결을 해제했습니다.", Toast.LENGTH_SHORT).show()
+                },
                 onToggleSpeakerphone = { callViewModel.toggleSpeakerphone() },
                 onOpenUserList = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
                 onAcceptCall = {
@@ -1228,6 +1231,19 @@ fun AppNavHost(
                 RssiFeedbackLevel.MEDIUM -> 2
                 RssiFeedbackLevel.HIGH -> 3
             }
+            val pttTargetName = pttTargetPeerId
+                ?.let { targetId ->
+                    appState.survivors
+                        .firstOrNull { it.peerId == targetId }
+                        ?.name
+                        ?.trim()
+                        ?.ifBlank { null }
+                        ?: peerNicknames[targetId]
+                            ?.trim()
+                            ?.ifBlank { null }
+                }
+            val pttChatMessages = messages.filter { it.recipientPeerId == null }
+            val pttChatRoomTitle = "전체 채팅"
             LaunchedEffect(
                 pttTargetPeerId,
                 displayDistanceMeters,
@@ -1298,11 +1314,15 @@ fun AppNavHost(
                 callDecisionLabel = callDebugState.lastDecision,
                 isInCall = isInCall,
                 isCalling = isCallingOnPtt,
+                isMicOn = isMicOn,
                 isConnected = isConnected,
                 isSpeakerphoneOn = callDebugState.audio.speakerphoneEnabled,
                 distanceMeters = displayDistanceMeters,
                 distanceTrend = distanceState.trend,
                 distanceSource = displayDistanceSource,
+                targetDisplayName = pttTargetName,
+                chatRoomTitle = pttChatRoomTitle,
+                chatMessages = pttChatMessages,
                 onRequestCall = {
                     val survivor = resolveSelectedSurvivorForCall()
                     if (survivor == null) {
@@ -1317,7 +1337,14 @@ fun AppNavHost(
                 },
                 onEndCall = { endCurrentRescuerCall() },
                 onBack = { navigateSingleRoute(AppRoute.RescuerSurvivorDb.route) },
-                onPanicClear = onClearDeviceMonitoring,
+                onPanicClear = {
+                    endCurrentRescuerCall()
+                    resetRssiFeedbackDefaults()
+                    onDisconnect()
+                    Toast.makeText(context, "모든 연결을 해제했습니다.", Toast.LENGTH_SHORT).show()
+                },
+                onMicPress = onMicPress,
+                onMicRelease = onMicRelease,
                 onToggleSpeakerphone = {
                     val nextSpeakerEnabled = !callDebugState.audio.speakerphoneEnabled
                     callViewModel.setSpeakerphoneEnabled(nextSpeakerEnabled)
@@ -1381,6 +1408,9 @@ fun AppNavHost(
                 },
                 onSendRemoteStop = {
                     sendRemoteStopIfNeeded(pttTargetPeerId)
+                },
+                onSendChat = { text ->
+                    onSendMessage(text)
                 }
             )
         }
@@ -1419,35 +1449,7 @@ fun AppNavHost(
                     onDisconnect()
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
-                onCallClick = { survivor ->
-                    selectedTargetPeerId = survivor.peerId.ifBlank { selectedTargetPeerId }
-                    selectedTargetSurvivor = survivor
-                    val supportsUwb = resolvePeerSupportsUwb(survivor.peerId)
-                    distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
-                    distanceViewModel.setUwbCapability(
-                        localSupported = appViewModel.isUwbSupportedLocally(),
-                        peerSupported = supportsUwb
-                    )
-                    if (!supportsUwb) {
-                        appViewModel.stopUwbSession()
-                        lastUwbSyncRequestAtMs = 0L
-                    }
-                    navigateSingleRoute(AppRoute.RescuerPTT.route)
-                    requestRescuerCall(survivor)
-                },
-                onEndCall = { endCurrentRescuerCall() },
                 onOpenMeshMap = { navigateSingleRoute(AppRoute.RescuerMeshMap.route) },
-                onOpenGroupChat = {
-                    directChatPeerId = null
-                    navigateSingleRoute(AppRoute.RescuerChat.route)
-                },
-                onOpenDirectChat = { survivor ->
-                    val peerId = survivor.peerId
-                    if (peerId.isNotBlank()) {
-                        directChatPeerId = peerId
-                        navigateSingleRoute(AppRoute.RescuerChat.route)
-                    }
-                },
                 selectedTargetPeerId = selectedTargetPeerId,
                 onSelectTarget = { survivor ->
                     selectedTargetPeerId = survivor.peerId

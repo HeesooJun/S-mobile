@@ -28,7 +28,7 @@ internal fun PttTopBar(
     val scale = LocalAppScale.current
     Box(modifier = modifier.fillMaxSize()) {
         Text(
-            text = "LIFESAIVER",
+            text = "LIFESAIVIOR",
             color = AppColors.Gray500,
             fontSize = scaledSp(12, scale),
             fontWeight = FontWeight.Medium,
