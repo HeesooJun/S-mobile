@@ -638,7 +638,7 @@ private fun PttChatPanel(
             )
             .border(
                 width = scaledDp(1, scale),
-                color = AppColors.Green.copy(alpha = 0.28f),
+                color = AppColors.Gray500.copy(alpha = 0.35f),
                 shape = RoundedCornerShape(scaledDp(14, scale))
             )
             .padding(scaledDp(12, scale))
