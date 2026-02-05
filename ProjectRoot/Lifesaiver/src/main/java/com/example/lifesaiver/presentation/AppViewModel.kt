@@ -161,6 +161,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val meshVisualEvents: SharedFlow<MeshVisualEvent> = _meshVisualEvents.asSharedFlow()
     private val _remotePowerSaveExitEvents = MutableSharedFlow<Long>(extraBufferCapacity = 8)
     val remotePowerSaveExitEvents: SharedFlow<Long> = _remotePowerSaveExitEvents.asSharedFlow()
+    private val _remotePowerSaveSetEvents = MutableSharedFlow<Boolean>(extraBufferCapacity = 8)
+    val remotePowerSaveSetEvents: SharedFlow<Boolean> = _remotePowerSaveSetEvents.asSharedFlow()
 
     // 권한 목록
     val requiredPermissions: Array<String> = buildList {
@@ -212,6 +214,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
+    @Volatile private var localPowerSavingEnabled: Boolean = false
     private val meshGraphRegistry = MeshGraphRegistry()
     private val peerIdentityRegistry = PeerIdentityRegistry()
     private val meshRegistry = MeshPeerRegistry()
@@ -1324,7 +1327,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
             wifiDirectAddress = directAddress,
-            batteryLevel = localBattery
+            batteryLevel = localBattery,
+            powerSavingEnabled = localPowerSavingEnabled
         )
         val basePayload = announcement.encode() ?: return
         val directPeers = bleManager.getConnectedPeerIds()
@@ -1375,6 +1379,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun handleDeviceControl(peerIdHex: String, payload: DeviceControlPayload) {
         when (payload.command) {
             DeviceControlCommand.WAKE_SCREEN -> {
+                updateLocalPowerSavingState(false)
+                _remotePowerSaveSetEvents.tryEmit(false)
                 _remotePowerSaveExitEvents.tryEmit(System.currentTimeMillis())
                 _uiEvents.tryEmit(UiEvent.Toast("구조자 요청: 절전 모드 해제"))
                 ConnectionLog.add("DeviceControl", "wake requested by $peerIdHex")
@@ -1415,6 +1421,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             DeviceControlCommand.STOP_ALERTS -> {
                 stopAllRemoteAlerts()
                 ConnectionLog.add("DeviceControl", "stop alerts by $peerIdHex")
+            }
+            DeviceControlCommand.POWER_SAVE_ON -> {
+                updateLocalPowerSavingState(true)
+                _remotePowerSaveSetEvents.tryEmit(true)
+                _uiEvents.tryEmit(UiEvent.Toast("구조자 요청: 절전 모드 켜기"))
+                ConnectionLog.add("DeviceControl", "power-save on by $peerIdHex")
+            }
+            DeviceControlCommand.POWER_SAVE_OFF -> {
+                updateLocalPowerSavingState(false)
+                _remotePowerSaveSetEvents.tryEmit(false)
+                _remotePowerSaveExitEvents.tryEmit(System.currentTimeMillis())
+                _uiEvents.tryEmit(UiEvent.Toast("구조자 요청: 절전 모드 해제"))
+                ConnectionLog.add("DeviceControl", "power-save off by $peerIdHex")
             }
         }
     }
@@ -1709,6 +1728,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (::bleManager.isInitialized) {
             bleManager.clearAllConnectionsAndMappings()
             _uiEvents.tryEmit(UiEvent.Toast("연결/차단 목록 초기화됨"))
+        }
+    }
+
+    fun updateLocalPowerSavingState(enabled: Boolean) {
+        if (localPowerSavingEnabled == enabled) return
+        localPowerSavingEnabled = enabled
+        if (::protocolCore.isInitialized) {
+            sendAnnounce()
         }
     }
 

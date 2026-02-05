@@ -1364,6 +1364,7 @@ fun AppNavHost(
                 RssiFeedbackLevel.MEDIUM
             }
             val remoteControlEnabled = !pttTargetPeerId.isNullOrBlank()
+            val pttTargetPowerSavingState = pttTargetPeerId?.let { appState.peerPowerSavingModes[it] }
             val remoteDurationMs = when (resolvedRssiLevel) {
                 RssiFeedbackLevel.LOW -> 1_600
                 RssiFeedbackLevel.MEDIUM -> 2_900
@@ -1513,6 +1514,7 @@ fun AppNavHost(
                     }
                 },
                 remoteControlEnabled = remoteControlEnabled,
+                remotePowerSavingState = pttTargetPowerSavingState,
                 remoteRepeatIntervalMs = remoteRepeatIntervalMs,
                 onSendRemoteWake = {
                     val peerId = pttTargetPeerId ?: return@RescuerPTTLinkScreen
@@ -1549,6 +1551,19 @@ fun AppNavHost(
                         durationMs = remoteDurationMs,
                         intensity = remoteIntensity,
                         frequencyHz = 17_500
+                    )
+                },
+                onSetRemotePowerSaving = { enabled ->
+                    val peerId = pttTargetPeerId ?: return@RescuerPTTLinkScreen
+                    appViewModel.sendDeviceControl(
+                        targetPeerIdHex = peerId,
+                        command = if (enabled) {
+                            DeviceControlCommand.POWER_SAVE_ON
+                        } else {
+                            DeviceControlCommand.POWER_SAVE_OFF
+                        },
+                        durationMs = 800,
+                        intensity = remoteIntensity
                     )
                 },
                 onSendRemoteStop = {
