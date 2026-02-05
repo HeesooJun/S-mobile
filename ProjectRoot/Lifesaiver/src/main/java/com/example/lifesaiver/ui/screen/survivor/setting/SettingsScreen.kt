@@ -99,7 +99,7 @@ fun SettingsScreen(
                 .padding(horizontal = scaledDp(16, scale)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            HeaderSection(scale)
+            HeaderSection(scale = scale, onBack = onBack)
             UserInfoCard(scale, profileName, profileGender, profileBirthDate, profileNotes, onEditProfile)
             Spacer(modifier = Modifier.height(scaledDp(20, scale)))
 
@@ -258,9 +258,28 @@ fun ExplanationDialog(
 
 // --- (나머지 하위 컴포저블들은 기존 코드와 동일) ---
 @Composable
-private fun HeaderSection(scale: Float) {
-    Box(modifier = Modifier.fillMaxWidth().padding(top = scaledDp(40, scale), bottom = scaledDp(20, scale))) {
-        Text(text = "설정", color = ColorTextMain, fontSize = scaledSp(20, scale), fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
+private fun HeaderSection(scale: Float, onBack: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = scaledDp(40, scale), bottom = scaledDp(20, scale))
+    ) {
+        Icon(
+            painter = painterResource(id = R.drawable.ic_common_back),
+            contentDescription = "뒤로가기",
+            tint = ColorTextMain,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(scaledDp(24, scale))
+                .clickable { onBack() }
+        )
+        Text(
+            text = "설정",
+            color = ColorTextMain,
+            fontSize = scaledSp(20, scale),
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 }
 
