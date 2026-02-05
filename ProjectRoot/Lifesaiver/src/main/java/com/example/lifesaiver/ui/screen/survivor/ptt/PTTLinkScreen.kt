@@ -75,10 +75,13 @@ fun PTTLinkScreen(
     callPeerName: String? = null,
     pendingCall: SurvivorCallRequest? = null,
     forceExitPowerSavingToken: Long = 0L,
+    forceSetPowerSavingToken: Long = 0L,
+    forceSetPowerSavingEnabled: Boolean = false,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onProfile: () -> Unit,
     onPanicClear: () -> Unit,
+    onPowerSavingChanged: (Boolean) -> Unit = {},
     onSettings: () -> Unit,
     onAcceptCall: () -> Unit = {},
     onDeclineCall: () -> Unit = {},
@@ -115,6 +118,14 @@ fun PTTLinkScreen(
         if (forceExitPowerSavingToken > 0L) {
             setPowerSaving(false)
         }
+    }
+    LaunchedEffect(forceSetPowerSavingToken) {
+        if (forceSetPowerSavingToken > 0L) {
+            setPowerSaving(forceSetPowerSavingEnabled)
+        }
+    }
+    LaunchedEffect(isPowerSaving) {
+        onPowerSavingChanged(isPowerSaving)
     }
 
     ScreenScaffold(

@@ -110,6 +110,7 @@ data class AppUiState(
     val peerNicknames: Map<String, String> = emptyMap(),
     val peerDirectAddresses: Map<String, String> = emptyMap(),
     val peerBatteryLevels: Map<String, Int> = emptyMap(),
+    val peerPowerSavingModes: Map<String, Boolean> = emptyMap(),
     val meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot = MeshGraphRegistry.GraphSnapshot(emptyList(), emptyList()),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
@@ -197,6 +198,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val peerNicknames = mutableMapOf<String, String>()
     private val peerDirectAddresses = ConcurrentHashMap<String, String>()
     private val peerBatteryLevels = ConcurrentHashMap<String, Int>()
+    private val peerPowerSavingModes = ConcurrentHashMap<String, Boolean>()
     private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -783,6 +785,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     announcedPeerLastSeen[peer] = now
                     val directAddress = announcement.wifiDirectAddress?.trim()?.lowercase()?.ifBlank { null }
                     val remoteBattery = announcement.batteryLevel
+                    val remotePowerSaving = announcement.powerSavingEnabled
                     if (announcement.nickname.isNotBlank()) {
                         peerNicknames[peer] = announcement.nickname
                     }
@@ -791,6 +794,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (remoteBattery != null) {
                         peerBatteryLevels[peer] = remoteBattery
+                    }
+                    if (remotePowerSaving != null) {
+                        peerPowerSavingModes[peer] = remotePowerSaving
                     }
                     _uiState.update { state ->
                         val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peer) {
@@ -807,6 +813,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             peerNicknames = peerNicknames.toMap(),
                             peerDirectAddresses = peerDirectAddresses.toMap(),
                             peerBatteryLevels = peerBatteryLevels.toMap(),
+                            peerPowerSavingModes = peerPowerSavingModes.toMap(),
                             incomingCallDirectAddress = incomingDirect,
                             callPeerDirectAddress = callPeerDirect
                         )
@@ -821,10 +828,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     announcedPeerLastSeen.remove(peer)
                     peerDirectAddresses.remove(peer)
                     peerBatteryLevels.remove(peer)
+                    peerPowerSavingModes.remove(peer)
                     _uiState.update {
                         it.copy(
                             peerDirectAddresses = peerDirectAddresses.toMap(),
-                            peerBatteryLevels = peerBatteryLevels.toMap()
+                            peerBatteryLevels = peerBatteryLevels.toMap(),
+                            peerPowerSavingModes = peerPowerSavingModes.toMap()
                         )
                     }
                     refreshSurvivorCapabilities()
@@ -990,11 +999,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             announcedPeerLastSeen.remove(it)
             peerDirectAddresses.remove(it)
             peerBatteryLevels.remove(it)
+            peerPowerSavingModes.remove(it)
         }
         _uiState.update {
             it.copy(
                 peerDirectAddresses = peerDirectAddresses.toMap(),
-                peerBatteryLevels = peerBatteryLevels.toMap()
+                peerBatteryLevels = peerBatteryLevels.toMap(),
+                peerPowerSavingModes = peerPowerSavingModes.toMap()
             )
         }
         refreshSurvivorCapabilities()

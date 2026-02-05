@@ -129,10 +129,12 @@ fun RescuerPTTLinkScreen(
     onCycleRssiFeedbackMode: () -> Unit = {},
     onCycleRssiFeedbackLevel: () -> Unit = {},
     remoteControlEnabled: Boolean = false,
+    remotePowerSavingState: Boolean? = null,
     onSendRemoteWake: () -> Unit = {},
     onSendRemoteBeep: () -> Unit = {},
     onSendRemoteVibrate: () -> Unit = {},
     onSendRemoteHighTone: () -> Unit = {},
+    onSetRemotePowerSaving: (Boolean) -> Unit = {},
     onSendRemoteStop: () -> Unit = {},
     remoteRepeatIntervalMs: Long = 2_500L
 ) {
@@ -488,12 +490,59 @@ fun RescuerPTTLinkScreen(
                                 }
                             }
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+                            Text(
+                                text = "대상 절전 상태: " + when (remotePowerSavingState) {
+                                    true -> "켜짐"
+                                    false -> "꺼짐"
+                                    null -> "알 수 없음"
+                                },
+                                color = when (remotePowerSavingState) {
+                                    true -> AppColors.Yellow
+                                    false -> AppColors.Green
+                                    null -> AppColors.Gray500
+                                },
+                                fontSize = scaledSp(11, scale),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
+                            ) {
+                                Button(
+                                    enabled = remoteControlEnabled,
+                                    onClick = { onSetRemotePowerSaving(true) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AppColors.Gray800.copy(alpha = 0.7f),
+                                        contentColor = AppColors.White,
+                                        disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
+                                        disabledContentColor = AppColors.Gray500
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("절전 켜기", fontSize = scaledSp(11, scale))
+                                }
+                                Button(
+                                    enabled = remoteControlEnabled,
+                                    onClick = { onSetRemotePowerSaving(false) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AppColors.Gray800.copy(alpha = 0.7f),
+                                        contentColor = AppColors.White,
+                                        disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
+                                        disabledContentColor = AppColors.Gray500
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("절전 해제", fontSize = scaledSp(11, scale))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
                             ) {
                                 RepeatActionButton(
-                                    label = "절전 해제",
+                                    label = "화면 깨우기",
                                     enabled = remoteControlEnabled,
                                     onTap = onSendRemoteWake,
                                     isRepeating = false,
@@ -574,7 +623,12 @@ fun RescuerPTTLinkScreen(
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
-                                text = "절전 해제: 대상 기기의 화면을 켜도록 신호를 보냅니다.",
+                                text = "화면 깨우기: 대상 기기의 화면을 잠깐 깨웁니다.",
+                                color = AppColors.Gray500,
+                                fontSize = scaledSp(10, scale)
+                            )
+                            Text(
+                                text = "절전 켜기/해제: 대상 기기의 절전 상태를 직접 변경합니다.",
                                 color = AppColors.Gray500,
                                 fontSize = scaledSp(10, scale)
                             )

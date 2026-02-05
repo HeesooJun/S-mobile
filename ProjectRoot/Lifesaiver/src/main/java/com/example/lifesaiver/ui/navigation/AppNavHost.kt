@@ -173,6 +173,8 @@ fun AppNavHost(
     var lastAwareRttReportAtMs by remember { mutableStateOf(0L) }
     var lastAwareRttReportCm by remember { mutableStateOf<Int?>(null) }
     var forceExitPowerSavingToken by remember { mutableStateOf(0L) }
+    var forceSetPowerSavingToken by remember { mutableStateOf(0L) }
+    var forceSetPowerSavingEnabled by remember { mutableStateOf(false) }
     val callAttemptTimeoutMs = 15_000L
     val currentRoute = backStackEntry?.destination?.route
     var pendingBottomTabRoute by remember { mutableStateOf<String?>(null) }
@@ -500,6 +502,12 @@ fun AppNavHost(
             forceExitPowerSavingToken = token
         }
     }
+    LaunchedEffect(Unit) {
+        appViewModel.remotePowerSaveSetEvents.collect { enabled ->
+            forceSetPowerSavingEnabled = enabled
+            forceSetPowerSavingToken = System.currentTimeMillis()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -648,6 +656,8 @@ fun AppNavHost(
                     callPeerName = targetSurvivor?.name,
                     pendingCall = pendingRequest,
                     forceExitPowerSavingToken = forceExitPowerSavingToken,
+                    forceSetPowerSavingToken = forceSetPowerSavingToken,
+                    forceSetPowerSavingEnabled = forceSetPowerSavingEnabled,
                     onBack = { navController.popBackStack() },
                     onDisconnect = {
                         if (isInCall) {
@@ -675,6 +685,9 @@ fun AppNavHost(
                     },
                     onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                     onPanicClear = onClearDeviceMonitoring,
+                    onPowerSavingChanged = { enabled ->
+                        appViewModel.updateLocalPowerSavingState(enabled)
+                    },
                     onSettings = { navigateBottomTab(AppRoute.Settings.route) },
                     onAcceptCall = {
                         val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
