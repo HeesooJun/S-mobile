@@ -4,6 +4,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
@@ -37,6 +43,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.lifesaiver.core.call.CallTransportType
 import com.example.lifesaiver.core.audio.RealtimeAudioStreamEngine
 import com.example.lifesaiver.core.call.RealTimeCallManager
 import com.example.lifesaiver.core.model.ChatMessage
@@ -141,11 +148,17 @@ fun AppNavHost(
     )
     val isInCall by callViewModel.isInCall.collectAsState()
     val targetSurvivor by callViewModel.targetSurvivor.collectAsState()
+    val callDebugState by callViewModel.debugState.collectAsState()
+    val activeCallTransportReady = when (callDebugState.activeTransport) {
+        CallTransportType.WIFI_AWARE -> callDebugState.wifiAware.isReady
+        CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect.isReady
+        CallTransportType.NONE -> false
+    }
     val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
     val awareLinkReady by appViewModel.wifiAwareRanger.isConnectionReady.collectAsState()
-    LaunchedEffect(Unit) {
-        // Keep RTT enabled in both idle and in-call states.
-        appViewModel.wifiAwareRanger.setRttEnabled(true)
+    LaunchedEffect(isInCall) {
+        // Disable RTT during call to avoid NDP/RTT interference.
+        appViewModel.wifiAwareRanger.setRttEnabled(!isInCall)
     }
 
     val profileStore = remember(context) { ProfileStore(context) }
@@ -163,6 +176,28 @@ fun AppNavHost(
     val callAttemptTimeoutMs = 15_000L
     val currentRoute = backStackEntry?.destination?.route
     var pendingBottomTabRoute by remember { mutableStateOf<String?>(null) }
+    val autoSosToneGenerator = remember { ToneGenerator(AudioManager.STREAM_ALARM, 90) }
+    DisposableEffect(autoSosToneGenerator) {
+        onDispose {
+            runCatching { autoSosToneGenerator.release() }
+        }
+    }
+    LaunchedEffect(
+        isInCall,
+        currentRoute,
+        appState.directPeerIds,
+        appState.survivors
+    ) {
+        if (isInCall) return@LaunchedEffect
+        val routeAllowsAwareProbe =
+            currentRoute == AppRoute.SurvivorStandby.route ||
+                currentRoute == AppRoute.SurvivorStandbySettings.route ||
+                currentRoute == AppRoute.SurvivorPTT.route ||
+                currentRoute == AppRoute.SurvivorChat.route ||
+                currentRoute == AppRoute.Settings.route
+        // Keep survivor Aware probing active on core tabs so rescuer can discover reliably.
+        appViewModel.wifiAwareRanger.updatePeerCapability(routeAllowsAwareProbe)
+    }
     val footerEnabledRoutes = setOf(
         AppRoute.SurvivorPTT.route,
         AppRoute.SurvivorChat.route,
@@ -190,6 +225,27 @@ fun AppNavHost(
         if (currentIndex == -1) return@swipe
         val targetRoute = swipeRoutes.getOrNull(currentIndex + delta) ?: return@swipe
         navigateBottomTab(targetRoute)
+    }
+    fun triggerAutoSosFeedback() {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            vibrator?.let {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    it.vibrate(VibrationEffect.createOneShot(320L, 220))
+                } else {
+                    @Suppress("DEPRECATION")
+                    it.vibrate(320L)
+                }
+            }
+        }
+        runCatching {
+            autoSosToneGenerator.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 380)
+        }
     }
 
     DisposableEffect(context) {
@@ -288,14 +344,14 @@ fun AppNavHost(
     LaunchedEffect(
         connectingTargetPeerId,
         isInCall,
-        appState.isCallConnected,
+        activeCallTransportReady,
         targetSurvivor?.peerId,
         appState.callPeerId
     ) {
         val targetPeerId = connectingTargetPeerId ?: return@LaunchedEffect
         val connected =
             isInCall &&
-                appState.isCallConnected &&
+                activeCallTransportReady &&
                 (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
         if (connected) {
             connectingTargetPeerId = null
@@ -306,9 +362,14 @@ fun AppNavHost(
         val targetPeerId = connectingTargetPeerId ?: return@LaunchedEffect
         val completedInTime = withTimeoutOrNull(callAttemptTimeoutMs) {
             snapshotFlow {
+                val transportReady = when (callDebugState.activeTransport) {
+                    CallTransportType.WIFI_AWARE -> callDebugState.wifiAware.isReady
+                    CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect.isReady
+                    CallTransportType.NONE -> false
+                }
                 val connected =
                     isInCall &&
-                        appState.isCallConnected &&
+                        transportReady &&
                         (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
                 val canceled = connectingTargetPeerId != targetPeerId
                 connected || canceled
@@ -317,7 +378,7 @@ fun AppNavHost(
         if (connectingTargetPeerId != targetPeerId) return@LaunchedEffect
         val connectedNow =
             isInCall &&
-                appState.isCallConnected &&
+                activeCallTransportReady &&
                 (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
         if (completedInTime || connectedNow) return@LaunchedEffect
         val localAware = appViewModel.isWifiAwareSupportedLocally()
@@ -477,11 +538,39 @@ fun AppNavHost(
                 StandbyStatusScreen(
                     sttResetToken = sttResetToken,
                     sttEnabled = sttEnabled,
-                    onSos = {
+                    onSos = { autoTriggered ->
+                        if (autoTriggered) {
+                            triggerAutoSosFeedback()
+                            onPulseRescueSignal()
+                        }
                         pendingSosNavigation = true
                         sosStartedAt = System.currentTimeMillis()
                         navController.navigate(AppRoute.SurvivorEmergency.route)
                     },
+                    onSettings = {
+                        // Standby 설정은 독립 라우트로 열어 시스템 뒤로가기로 Standby로 복귀되게 한다.
+                        pendingSosNavigation = false
+                        navController.navigate(AppRoute.SurvivorStandbySettings.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
+
+            composable(AppRoute.SurvivorStandbySettings.route) {
+                SettingsScreen(
+                    isVoiceOn = isVoiceDetectionEnabled,
+                    isShockOn = isShockDetectionEnabled,
+                    profileName = profileState.name,
+                    profileGender = profileState.gender,
+                    profileBirthDate = profileState.birthDate,
+                    profileNotes = profileState.notes,
+                    onVoiceToggle = onSetVoiceDetection,
+                    onShockToggle = onSetShockDetection,
+                    onBack = { navController.popBackStack() },
+                    onEditProfile = {
+                        navController.navigate(AppRoute.SurvivorProfile.route)
+                    }
                 )
             }
 
@@ -554,7 +643,7 @@ fun AppNavHost(
                     bleDebugStats = bleDebugStats,
                     isConnected = isConnected,
                     isMicOn = isMicOn,
-                    isCallConnected = appState.isCallConnected,
+                    isCallConnected = activeCallTransportReady,
                     isInCall = isInCall,
                     callPeerName = targetSurvivor?.name,
                     pendingCall = pendingRequest,
