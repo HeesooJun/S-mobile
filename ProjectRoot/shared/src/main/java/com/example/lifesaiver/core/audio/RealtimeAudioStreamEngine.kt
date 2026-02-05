@@ -53,7 +53,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val opusMime = MediaFormat.MIMETYPE_AUDIO_OPUS
-    private val opusBitrate = 16_000
+    private val opusBitrate = 28_000
     private val opusReferenceSampleRate = 48_000
     private val opusPreSkipSamples = 312
     private val opusSeekPreRollSamples = 3_840
@@ -102,6 +102,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private val silenceGateRmsThreshold = 3.0
     private val silenceGateWarmupFrames = 50
     private val transmitGain = 0.7
+    private val aggressiveSpeakerEchoProfile = isTargetSamsungSpeakerEchoDevice()
     private val echoMitigationEnabled = true
     private val echoMitigationWindowMs = 240L
     private val echoMitigationPlaybackRmsThresholdSpeaker = 700.0
@@ -109,6 +110,8 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private val echoMitigationMaxRatioSpeaker = 1.25
     private val echoMitigationMaxRatioEarpiece = 1.60
     private var captureFrameCount = 0
+    private var smoothedTransmitGain = transmitGain
+    @Volatile private var micRouteSettleMuteUntilMs = 0L
 
     private val _debugStats = MutableStateFlow(AudioDebugStats())
     val debugStats = _debugStats.asStateFlow()
@@ -126,6 +129,15 @@ class RealtimeAudioStreamEngine(private val context: Context) {
 
             // 1. 오디오 매니저 설정 (통화 모드 + 라우팅)
             applyAudioModeAndRoute()
+            micRouteSettleMuteUntilMs = System.currentTimeMillis() + if (preferSpeakerphone) {
+                if (aggressiveSpeakerEchoProfile) 120L else 140L
+            } else {
+                90L
+            }
+            smoothedTransmitGain = transmitGain
+            if (aggressiveSpeakerEchoProfile) {
+                Log.i("AudioEngine", "Using aggressive anti-howling profile for Samsung S21/S23/S25 family")
+            }
 
             // 2. AudioTrack 초기화 (수신 음성 재생용)
             audioTrack = AudioTrack.Builder()
@@ -194,8 +206,8 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                     if (agc != null) {
                         automaticGainControl = agc
                         try {
-                            agc.enabled = true
-                            Log.d("AudioEngine", "AGC Enabled")
+                            agc.enabled = shouldEnableAgc()
+                            Log.d("AudioEngine", "AGC Enabled=${agc.enabled}")
                         } catch (e: Exception) {
                             Log.w("AudioEngine", "AGC enable failed: ${e.message}")
                         }
@@ -380,6 +392,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             captureFrameCount = 0
             lastPlaybackRms = 0.0
             lastPlaybackAt = 0L
+            smoothedTransmitGain = transmitGain
 
             // 오디오 모드 원상복구
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -396,7 +409,19 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     }
 
     fun setSpeakerphoneEnabled(enabled: Boolean) {
+        val changed = preferSpeakerphone != enabled
         preferSpeakerphone = enabled
+        if (changed) {
+            micRouteSettleMuteUntilMs = System.currentTimeMillis() + if (enabled) {
+                if (aggressiveSpeakerEchoProfile) 100L else 110L
+            } else {
+                80L
+            }
+            smoothedTransmitGain = transmitGain
+        }
+        runCatching {
+            automaticGainControl?.enabled = shouldEnableAgc()
+        }
         if (isStreaming) {
             applyAudioModeAndRoute()
         }
@@ -857,34 +882,76 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     }
 
     private fun resolveTransmitGain(captureRms: Double): Double {
-        var gain = if (preferSpeakerphone) transmitGain else (transmitGain * 0.8)
-        if (!echoMitigationEnabled) return gain
         val now = System.currentTimeMillis()
-        if (now - lastPlaybackAt > echoMitigationWindowMs) return gain
+        if (now < micRouteSettleMuteUntilMs) {
+            return if (preferSpeakerphone && aggressiveSpeakerEchoProfile) 0.35 else 0.0
+        }
+        var gain = if (preferSpeakerphone) {
+            if (aggressiveSpeakerEchoProfile) 0.70 else transmitGain
+        } else {
+            transmitGain * 0.8
+        }
+        if (!echoMitigationEnabled) return gain
+        val windowMs = if (preferSpeakerphone && aggressiveSpeakerEchoProfile) 190L else echoMitigationWindowMs
+        if (now - lastPlaybackAt > windowMs) return gain
         val playbackRms = lastPlaybackRms
         val threshold = if (preferSpeakerphone) {
-            echoMitigationPlaybackRmsThresholdSpeaker
+            if (aggressiveSpeakerEchoProfile) 820.0 else echoMitigationPlaybackRmsThresholdSpeaker
         } else {
             echoMitigationPlaybackRmsThresholdEarpiece
         }
         if (playbackRms < threshold) return gain
         val ratio = if (playbackRms <= 1.0) Double.MAX_VALUE else captureRms / playbackRms
         val maxRatio = if (preferSpeakerphone) {
-            echoMitigationMaxRatioSpeaker
+            if (aggressiveSpeakerEchoProfile) 1.22 else echoMitigationMaxRatioSpeaker
         } else {
             echoMitigationMaxRatioEarpiece
         }
         if (ratio <= maxRatio) {
-            gain *= when {
-                ratio < 0.70 -> 0.0
-                ratio < 0.95 -> if (preferSpeakerphone) 0.22 else 0.16
-                ratio < 1.10 -> if (preferSpeakerphone) 0.38 else 0.26
-                ratio < 1.30 -> if (preferSpeakerphone) 0.52 else 0.38
-                else -> if (preferSpeakerphone) 0.66 else 0.48
+            gain *= if (preferSpeakerphone && aggressiveSpeakerEchoProfile) {
+                when {
+                    ratio < 0.62 -> 0.20
+                    ratio < 0.82 -> 0.62
+                    ratio < 0.96 -> 0.80
+                    ratio < 1.10 -> 0.91
+                    else -> 0.97
+                }
+            } else {
+                when {
+                    ratio < 0.70 -> 0.0
+                    ratio < 0.95 -> if (preferSpeakerphone) 0.22 else 0.16
+                    ratio < 1.10 -> if (preferSpeakerphone) 0.38 else 0.26
+                    ratio < 1.30 -> if (preferSpeakerphone) 0.52 else 0.38
+                    else -> if (preferSpeakerphone) 0.66 else 0.48
+                }
+            }
+            if (preferSpeakerphone && aggressiveSpeakerEchoProfile && ratio >= 0.82 && gain < 0.44) {
+                gain = 0.44
             }
             maybeLogEchoSuppression(captureRms, playbackRms, gain)
         }
-        return gain
+        val smoothing = if (gain < smoothedTransmitGain) 0.30 else 0.14
+        smoothedTransmitGain += (gain - smoothedTransmitGain) * smoothing
+        return smoothedTransmitGain.coerceIn(0.0, 1.0)
+    }
+
+    private fun shouldEnableAgc(): Boolean {
+        return !(aggressiveSpeakerEchoProfile && preferSpeakerphone)
+    }
+
+    private fun isTargetSamsungSpeakerEchoDevice(): Boolean {
+        val manufacturer = Build.MANUFACTURER?.lowercase() ?: return false
+        if (manufacturer != "samsung") return false
+        val model = Build.MODEL?.uppercase().orEmpty()
+        if (model.isBlank()) return false
+        return model.startsWith("SM-G998") || // S21 Ultra
+            model.startsWith("SM-S911") || // S23
+            model.startsWith("SM-S916") || // S23+
+            model.startsWith("SM-S918") || // S23 Ultra
+            model.startsWith("SM-S938") || // S25 Ultra
+            model.contains("S21 ULTRA") ||
+            model.contains("S23") ||
+            model.contains("S25 ULTRA")
     }
 
     private fun applyGainPcm16(buffer: ByteArray, size: Int, gain: Double) {
