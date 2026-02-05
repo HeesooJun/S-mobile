@@ -512,9 +512,11 @@ fun AppNavHost(
 
     LaunchedEffect(distanceTargetPeerId, distanceTargetSupportsUwb) {
         val localUwb = appViewModel.isUwbSupportedLocally()
-        val peerUwb = distanceTargetPeerId != null && distanceTargetSupportsUwb
+        val hasTargetPeer = !distanceTargetPeerId.isNullOrBlank()
+        // Keep UWB tracking path open while capability handshake catches up.
+        val peerUwb = hasTargetPeer && (distanceTargetSupportsUwb || localUwb)
         distanceViewModel.setUwbCapability(localSupported = localUwb, peerSupported = peerUwb)
-        if (!peerUwb) {
+        if (!hasTargetPeer) {
             appViewModel.stopUwbSession()
             lastUwbSyncRequestAtMs = 0L
         }
@@ -1107,25 +1109,25 @@ fun AppNavHost(
                 ?: selectedTargetSurvivor?.peerId
                 ?: targetSurvivor?.peerId
                 ?: appState.callPeerId
-            val pttTargetSupportsUwb = resolvePeerSupportsUwb(pttTargetPeerId)
             val pttTargetSupportsAware = resolvePeerSupportsAware(pttTargetPeerId)
-            val preferUwbOnDetail = appViewModel.isUwbSupportedLocally() && pttTargetSupportsUwb
+            val canAttemptUwbOnDetail =
+                appViewModel.isUwbSupportedLocally() && !pttTargetPeerId.isNullOrBlank()
             val preferRttOnDetail =
                 !forceDirectOnly &&
                     appViewModel.isWifiAwareSupportedLocally() &&
                     pttTargetSupportsAware
-            LaunchedEffect(pttTargetPeerId, preferUwbOnDetail, isInCall) {
-                if (!isInCall && preferUwbOnDetail && !pttTargetPeerId.isNullOrBlank()) {
+            LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, isInCall) {
+                if (!isInCall && canAttemptUwbOnDetail && !pttTargetPeerId.isNullOrBlank()) {
                     appViewModel.requestUwbSession(pttTargetPeerId)
                 }
             }
             LaunchedEffect(
                 pttTargetPeerId,
-                preferUwbOnDetail,
+                canAttemptUwbOnDetail,
                 distanceState.measurementSource,
                 distanceState.distanceMeters
             ) {
-                if (!preferUwbOnDetail || pttTargetPeerId.isNullOrBlank()) return@LaunchedEffect
+                if (!canAttemptUwbOnDetail || pttTargetPeerId.isNullOrBlank()) return@LaunchedEffect
                 val hasUwbDistance =
                     distanceState.measurementSource == DistanceMeasurementSource.UWB &&
                         distanceState.distanceMeters != null
@@ -1423,12 +1425,16 @@ fun AppNavHost(
                     selectedTargetPeerId = survivor.peerId.ifBlank { selectedTargetPeerId }
                     selectedTargetSurvivor = survivor
                     val supportsUwb = resolvePeerSupportsUwb(survivor.peerId)
+                    val localSupportsUwb = appViewModel.isUwbSupportedLocally()
+                    val hasTargetPeer = survivor.peerId.isNotBlank()
                     distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
                     distanceViewModel.setUwbCapability(
-                        localSupported = appViewModel.isUwbSupportedLocally(),
-                        peerSupported = supportsUwb
+                        localSupported = localSupportsUwb,
+                        peerSupported = hasTargetPeer && (supportsUwb || localSupportsUwb)
                     )
-                    if (!supportsUwb) {
+                    if (localSupportsUwb && hasTargetPeer) {
+                        appViewModel.requestUwbSession(survivor.peerId)
+                    } else if (!supportsUwb) {
                         appViewModel.stopUwbSession()
                         lastUwbSyncRequestAtMs = 0L
                     }
@@ -1453,12 +1459,14 @@ fun AppNavHost(
                     selectedTargetPeerId = survivor.peerId
                     selectedTargetSurvivor = survivor
                     val supportsUwb = resolvePeerSupportsUwb(survivor.peerId)
+                    val localSupportsUwb = appViewModel.isUwbSupportedLocally()
+                    val hasTargetPeer = survivor.peerId.isNotBlank()
                     distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
                     distanceViewModel.setUwbCapability(
-                        localSupported = appViewModel.isUwbSupportedLocally(),
-                        peerSupported = supportsUwb
+                        localSupported = localSupportsUwb,
+                        peerSupported = hasTargetPeer && (supportsUwb || localSupportsUwb)
                     )
-                    if (supportsUwb && survivor.peerId.isNotBlank()) {
+                    if (localSupportsUwb && hasTargetPeer) {
                         appViewModel.requestUwbSession(survivor.peerId)
                     } else {
                         appViewModel.stopUwbSession()
