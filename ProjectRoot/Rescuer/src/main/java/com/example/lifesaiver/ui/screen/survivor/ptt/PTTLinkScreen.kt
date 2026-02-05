@@ -148,7 +148,7 @@ fun PTTLinkScreen(
                 onRequestExitPowerSaving = { setPowerSaving(false) }
             )
             Text(
-                text = "LIFESAIVER",
+                text = "LIFESAIVIOR",
                 color = AppColors.Gray500,
                 fontSize = scaledSp(12, scale),
                 fontWeight = FontWeight.Medium,

@@ -28,3 +28,23 @@ fun Modifier.tripleClickable(
         })
     }
 }
+
+fun Modifier.quintupleClickable(
+    thresholdMs: Long = 500L,
+    onQuintupleClick: () -> Unit
+): Modifier = composed {
+    var tapCount by remember { mutableStateOf(0) }
+    var lastTapMs by remember { mutableStateOf(0L) }
+    pointerInput(onQuintupleClick) {
+        detectTapGestures(onTap = {
+            val now = System.currentTimeMillis()
+            tapCount = if (now - lastTapMs <= thresholdMs) tapCount + 1 else 1
+            lastTapMs = now
+            if (tapCount >= 5) {
+                tapCount = 0
+                lastTapMs = 0L
+                onQuintupleClick()
+            }
+        })
+    }
+}
