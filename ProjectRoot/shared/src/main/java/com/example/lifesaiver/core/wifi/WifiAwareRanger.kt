@@ -125,6 +125,9 @@ class WifiAwareRanger(private val context: Context) {
     private val peerRttBlockedUntilMs = mutableMapOf<String, Long>()
     private var rttStatusFailStreak = 0
     private var rttWarmupUntilMs = 0L
+    private var rttRequestInFlight = false
+    private var rttWatchdogRunnable: Runnable? = null
+    private val rttCallbackTimeoutMs = 3_000L
 
     // RTT와 오디오 수신 루프를 분리해 상호 간섭을 줄입니다.
     private val rttExecutor = Executors.newSingleThreadExecutor()
@@ -149,9 +152,7 @@ class WifiAwareRanger(private val context: Context) {
         if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)) {
             wifiAwareManager = context.getSystemService(Context.WIFI_AWARE_SERVICE) as WifiAwareManager
         }
-        if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_RTT)) {
-            wifiRttManager = context.getSystemService(Context.WIFI_RTT_RANGING_SERVICE) as WifiRttManager
-        }
+        wifiRttManager = context.getSystemService(Context.WIFI_RTT_RANGING_SERVICE) as? WifiRttManager
     }
 
     // =========================================================================
@@ -376,20 +377,52 @@ class WifiAwareRanger(private val context: Context) {
             runOnMain { setRttEnabled(enabled) }
             return
         }
-        if (rttEnabled == enabled) return
+        if (rttEnabled == enabled) {
+            if (enabled) {
+                maybeStartRtt("toggle(no-op)")
+            }
+            return
+        }
         rttEnabled = enabled
         if (!enabled) {
             isRanging = false
+            rttRequestInFlight = false
+            clearRttWatchdog()
             rttStatusFailStreak = 0
             _rttDistance.value = null
             ConnectionLog.add("Aware", "RTT disabled")
         } else {
             ConnectionLog.add("Aware", "RTT enabled")
-            if (currentTargetPeer != null && !isRanging && wifiRttManager != null && !isCurrentPeerRttBlocked()) {
-                isRanging = true
-                startRangingLoop()
-            } else if (isCurrentPeerRttBlocked()) {
+            maybeStartRtt("toggle")
+        }
+    }
+
+    private fun maybeStartRtt(reason: String) {
+        if (!isOnMainThread()) {
+            runOnMain { maybeStartRtt(reason) }
+            return
+        }
+        when {
+            !rttEnabled -> {
+                Log.d("WifiAware", "RTT start skipped ($reason): disabled")
+            }
+            wifiRttManager == null -> {
+                Log.w("WifiAware", "RTT start skipped ($reason): WifiRttManager unavailable")
+                ConnectionLog.add("Aware", "RTT skipped: manager unavailable")
+            }
+            currentTargetPeer == null -> {
+                Log.d("WifiAware", "RTT start skipped ($reason): no target")
+            }
+            isCurrentPeerRttBlocked() -> {
                 ConnectionLog.add("Aware", "RTT skipped: peer blocked by cache")
+            }
+            rttRequestInFlight -> {
+                Log.d("WifiAware", "RTT start skipped ($reason): request in-flight")
+            }
+            else -> {
+                if (!isRanging) isRanging = true
+                ConnectionLog.add("Aware", "start RTT ranging ($reason)")
+                startRangingLoop()
             }
         }
     }
@@ -456,13 +489,18 @@ class WifiAwareRanger(private val context: Context) {
             override fun onServiceDiscovered(peerHandle: PeerHandle, serviceSpecificInfo: ByteArray?, matchFilter: List<ByteArray>?) {
                 Log.i("WifiAware", "Peer Discovered: $peerHandle")
                 ConnectionLog.add("Aware", "service discovered=$peerHandle")
+                val shouldUseDataPath = shouldUseDataPathForCall()
 
                 // 기존 목록에 없으면 추가
                 if (!foundPeers.contains(peerHandle)) {
                     foundPeers.add(peerHandle)
                 }
+                if (currentTargetPeer == null || !shouldUseDataPath) {
+                    // 상세/대기 화면에서도 RTT 측정을 시작할 수 있도록 발견 즉시 타깃을 선점합니다.
+                    setCurrentTargetPeer(peerHandle)
+                }
 
-                if (isNdpInitiator && !_isConnectionReady.value && !isConnecting) {
+                if (isNdpInitiator && shouldUseDataPath && !_isConnectionReady.value && !isConnecting) {
                     if (currentTargetPeer != null && currentTargetPeer != peerHandle) {
                         ConnectionLog.add("Aware", "service discovered ignored: target locked")
                         return
@@ -472,12 +510,10 @@ class WifiAwareRanger(private val context: Context) {
                     sendNdpRequestToPeer(peerHandle)
                 } else if (!isNdpInitiator) {
                     ConnectionLog.add("Aware", "service discovered -> wait initiator request")
+                } else if (!shouldUseDataPath) {
+                    ConnectionLog.add("Aware", "service discovered -> RTT only mode (no ndp)")
                 }
-                if (rttEnabled && isNdpInitiator && wifiRttManager != null && !isRanging && currentTargetPeer != null) {
-                    isRanging = true
-                    ConnectionLog.add("Aware", "start RTT ranging")
-                    startRangingLoop()
-                }
+                maybeStartRtt("discover")
             }
 
             override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
@@ -495,11 +531,7 @@ class WifiAwareRanger(private val context: Context) {
                 setCurrentTargetPeer(peerHandle)
                 ndpAckReceived = true
                 ConnectionLog.add("Aware", "received ndp ack from target")
-                if (rttEnabled && wifiRttManager != null && !isRanging && currentTargetPeer != null) {
-                    isRanging = true
-                    ConnectionLog.add("Aware", "start RTT ranging (ack)")
-                    startRangingLoop()
-                }
+                maybeStartRtt("ack")
                 if (!_isConnectionReady.value && !isConnecting && dataPathEnabled) {
                     connectToCurrentPeer()
                 }
@@ -537,13 +569,14 @@ class WifiAwareRanger(private val context: Context) {
                 }
                 setCurrentTargetPeer(peerHandle)
                 peerRequestedNdp = true
+                val shouldUseDataPath = shouldUseDataPathForCall()
+                if (!shouldUseDataPath) {
+                    ConnectionLog.add("Aware", "ignore ndp request: call context not ready")
+                    return
+                }
                 sendNdpAckToPeer(peerHandle, signal.senderPeerId)
                 ConnectionLog.add("Aware", "received ndp request from initiator")
-                if (rttEnabled && wifiRttManager != null && !isRanging && currentTargetPeer != null) {
-                    isRanging = true
-                    ConnectionLog.add("Aware", "start RTT ranging (request)")
-                    startRangingLoop()
-                }
+                maybeStartRtt("request")
                 if (!_isConnectionReady.value && !isConnecting && dataPathEnabled) {
                     connectToCurrentPeer()
                 }
@@ -560,7 +593,14 @@ class WifiAwareRanger(private val context: Context) {
             runOnMain { startRangingLoop() }
             return
         }
-        if (!rttEnabled || !isRanging || currentTargetPeer == null || wifiRttManager == null) return
+        if (!rttEnabled || !isRanging || currentTargetPeer == null || wifiRttManager == null) {
+            Log.d(
+                "WifiAware",
+                "RTT loop skipped enabled=$rttEnabled ranging=$isRanging target=${currentTargetPeer != null} manager=${wifiRttManager != null}"
+            )
+            return
+        }
+        if (rttRequestInFlight) return
         if (isCurrentPeerRttBlocked()) {
             isRanging = false
             _rttDistance.value = null
@@ -573,13 +613,45 @@ class WifiAwareRanger(private val context: Context) {
             handler.postDelayed({ startRangingLoop() }, waitMs)
             return
         }
-
-        val request = RangingRequest.Builder()
-            .addWifiAwarePeer(currentTargetPeer!!)
-            .build()
+        val targetPeer = currentTargetPeer ?: run {
+            Log.d("WifiAware", "RTT loop skipped: target became null")
+            return
+        }
+        val request = runCatching {
+            RangingRequest.Builder()
+                .addWifiAwarePeer(targetPeer)
+                .build()
+        }.getOrElse { error ->
+            Log.e("WifiAware", "RTT request build failed", error)
+            ConnectionLog.add("Aware", "RTT request build failed")
+            scheduleNextRanging()
+            return
+        }
 
         ConnectionLog.add("Aware", "ranging request")
-        wifiRttManager?.startRanging(request, rttExecutor, rttCallback)
+        Log.d("WifiAware", "RTT ranging request target=$targetPeer")
+        rttRequestInFlight = true
+        clearRttWatchdog()
+        val watchdog = Runnable {
+            if (!isRanging || !rttRequestInFlight) return@Runnable
+            rttRequestInFlight = false
+            rttFailureStreak = (rttFailureStreak + 1).coerceAtMost(10)
+            Log.w("WifiAware", "RTT callback timeout -> retry")
+            ConnectionLog.add("Aware", "RTT callback timeout -> retry")
+            scheduleNextRanging()
+        }
+        rttWatchdogRunnable = watchdog
+        handler.postDelayed(watchdog, rttCallbackTimeoutMs)
+        try {
+            wifiRttManager?.startRanging(request, rttExecutor, rttCallback)
+        } catch (e: Exception) {
+            clearRttWatchdog()
+            rttRequestInFlight = false
+            rttFailureStreak = (rttFailureStreak + 1).coerceAtMost(10)
+            Log.e("WifiAware", "RTT startRanging failed", e)
+            ConnectionLog.add("Aware", "RTT start failed: ${e.javaClass.simpleName}")
+            scheduleNextRanging()
+        }
     }
 
     private val rttCallback = object : RangingResultCallback() {
@@ -593,6 +665,8 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     private fun handleRangingResultsOnMain(results: List<RangingResult>) {
+        clearRttWatchdog()
+        rttRequestInFlight = false
         val best = results.firstOrNull { it.status == RangingResult.STATUS_SUCCESS }
         if (best != null) {
             rttFailureStreak = 0
@@ -615,7 +689,12 @@ class WifiAwareRanger(private val context: Context) {
 
             // [연결 트리거 로직]
             // 30m 이내이고, 아직 연결 안됐고, 연결 시도 중이 아니면 -> 연결
-            if (isNdpInitiator && dist < connectDistanceMeters && !_isConnectionReady.value && !isConnecting) {
+            if (isNdpInitiator &&
+                shouldUseDataPathForCall() &&
+                dist < connectDistanceMeters &&
+                !_isConnectionReady.value &&
+                !isConnecting
+            ) {
                 Log.i("WifiAware", "Peer close ($dist m). Requesting NDP connection...")
                 ConnectionLog.add("Aware", "distance<$connectDistanceMeters -> connect")
                 currentTargetPeer?.let { sendNdpRequestToPeer(it) }
@@ -628,6 +707,10 @@ class WifiAwareRanger(private val context: Context) {
         } else {
             rttFailureStreak = (rttFailureStreak + 1).coerceAtMost(10)
             val statusLabels = results.joinToString(",") { rangingStatusLabel(it.status) }
+            Log.w(
+                "WifiAware",
+                "RTT no success results=${results.size} statuses=${statusLabels.ifBlank { "none" }}"
+            )
             if (statusLabels.isNotBlank()) {
                 ConnectionLog.add("Aware", "RTT no success statuses=$statusLabels")
             }
@@ -635,14 +718,24 @@ class WifiAwareRanger(private val context: Context) {
             val onlyGenericFail = results.isNotEmpty() && results.all { it.status == RangingResult.STATUS_FAIL }
             if (hasUnsupportedStatus) {
                 markCurrentPeerRttUnsupported("result=${statusLabels.ifBlank { "unsupported" }}")
-            } else if (_isConnectionReady.value && onlyGenericFail) {
+            } else if (onlyGenericFail) {
                 rttStatusFailStreak += 1
+                val failThreshold = if (_isConnectionReady.value) {
+                    rttStatusFailDisableThreshold
+                } else {
+                    4
+                }
                 ConnectionLog.add(
                     "Aware",
-                    "RTT generic fail streak=$rttStatusFailStreak/${rttStatusFailDisableThreshold}"
+                    "RTT generic fail streak=$rttStatusFailStreak/$failThreshold"
                 )
-                if (rttStatusFailStreak >= rttStatusFailDisableThreshold) {
-                    markCurrentPeerRttUnsupported("repeated STATUS_FAIL")
+                if (rttStatusFailStreak >= failThreshold) {
+                    val reason = if (_isConnectionReady.value) {
+                        "repeated STATUS_FAIL"
+                    } else {
+                        "repeated STATUS_FAIL(no-call)"
+                    }
+                    markCurrentPeerRttUnsupported(reason)
                 }
             } else if (results.isNotEmpty()) {
                 rttStatusFailStreak = 0
@@ -652,6 +745,8 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     private fun handleRangingFailureOnMain(code: Int) {
+        clearRttWatchdog()
+        rttRequestInFlight = false
         val codeLabel = rangingFailureCodeLabel(code)
         Log.w("WifiAware", "RTT failure code=$codeLabel")
         ConnectionLog.add("Aware", "RTT failure code=$codeLabel")
@@ -1005,6 +1100,8 @@ class WifiAwareRanger(private val context: Context) {
         lastStopAtMs = System.currentTimeMillis()
         attachRequestToken += 1
         isRanging = false
+        rttRequestInFlight = false
+        clearRttWatchdog()
         rttFailureStreak = 0
         rttStatusFailStreak = 0
         rttWarmupUntilMs = 0L
@@ -1085,6 +1182,11 @@ class WifiAwareRanger(private val context: Context) {
         attachRetryRunnable = null
     }
 
+    private fun clearRttWatchdog() {
+        rttWatchdogRunnable?.let { handler.removeCallbacks(it) }
+        rttWatchdogRunnable = null
+    }
+
     private fun scheduleFallbackConnect(reason: String) {
         if (!isOnMainThread()) {
             runOnMain { scheduleFallbackConnect(reason) }
@@ -1138,6 +1240,9 @@ class WifiAwareRanger(private val context: Context) {
             _debugStats.update { it.copy(isReady = false) }
             isConnecting = false
             isStarting = false
+            isRanging = false
+            rttRequestInFlight = false
+            clearRttWatchdog()
             ndpUnavailableCount = 0
             startIfReady()
         }
@@ -1195,6 +1300,8 @@ class WifiAwareRanger(private val context: Context) {
         val alreadyBlocked = peerRttBlockedUntilMs[peerKey]?.let { it > now } == true
         peerRttBlockedUntilMs[peerKey] = now + rttUnsupportedCacheMs
         isRanging = false
+        rttRequestInFlight = false
+        clearRttWatchdog()
         _rttDistance.value = null
         rttStatusFailStreak = 0
         if (!alreadyBlocked) {
@@ -1261,6 +1368,10 @@ class WifiAwareRanger(private val context: Context) {
 
     private fun requiresAckBeforeConnect(): Boolean {
         return !localPeerIdForCall.isNullOrBlank() && !expectedPeerIdForCall.isNullOrBlank()
+    }
+
+    private fun shouldUseDataPathForCall(): Boolean {
+        return dataPathEnabled && requiresAckBeforeConnect()
     }
 
     private fun buildNdpRequestPayload(): ByteArray {

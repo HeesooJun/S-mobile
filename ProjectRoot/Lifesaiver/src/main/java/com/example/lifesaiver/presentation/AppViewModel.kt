@@ -146,6 +146,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = getApplication<Application>()
     private val forcePcmCall = false
     private val wifiAwareEnabled = true
+    private val wifiDirectEnabled = false
 
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -1586,7 +1587,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 wifiAwareRanger.isConnectionReady,
                 wifiDirectRanger.isConnectionReady
             ) { awareReady, directReady ->
-                awareReady || directReady
+                awareReady || (wifiDirectEnabled && directReady)
             }.collect { connected ->
                 _uiState.update { it.copy(isCallConnected = connected) }
             }
@@ -1599,7 +1600,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         false
     }
 
-    fun isWifiDirectSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x04) != 0
+    fun isWifiDirectSupportedLocally(): Boolean = if (wifiDirectEnabled) {
+        (getCurrentCapabilityFlags() and 0x04) != 0
+    } else {
+        false
+    }
 
     fun isUwbSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x02) != 0
 
@@ -1623,7 +1628,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ) {
             flags = flags or 0x02
         }
-        if (packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) {
+        if (wifiDirectEnabled && packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) {
             flags = flags or 0x04
         }
         return flags

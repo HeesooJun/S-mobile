@@ -160,6 +160,11 @@ fun AppNavHost(
     val isInCall by callViewModel.isInCall.collectAsState()
     val targetSurvivor by callViewModel.targetSurvivor.collectAsState()
     val callDebugState by callViewModel.debugState.collectAsState()
+    val activeCallTransportReady = when (callDebugState.activeTransport) {
+        CallTransportType.WIFI_AWARE -> callDebugState.wifiAware.isReady
+        CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect.isReady
+        CallTransportType.NONE -> false
+    }
     val pendingTarget by callViewModel.pendingTarget.collectAsState()
     var selectedTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
     var directChatPeerId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -197,7 +202,7 @@ fun AppNavHost(
     val shouldPreferUwbOnDetail = isPttRoute &&
         !isInCall &&
         !distanceTargetPeerId.isNullOrBlank() &&
-        appViewModel.isUwbSupportedLocally() &&
+        appViewModel.isUwbRuntimeAvailableLocally() &&
         distanceTargetSupportsUwb
     val uwbToRttFallbackDelayMs = 8_000L
     val shouldRunDistanceTracking = isInCall ||
@@ -239,6 +244,12 @@ fun AppNavHost(
             "RTT gate route=$currentRoute inCall=$isInCall enableRtt=$enableRtt preferUwb=$shouldPreferUwbOnDetail rttFallback=$allowRttFallbackForUwbTarget"
         )
         appViewModel.wifiAwareRanger.setRttEnabled(enableRtt)
+    }
+    LaunchedEffect(isInCall) {
+        // 통화 중에는 NDP/RTT 간섭 방지를 위해 RTT를 강제로 끕니다.
+        if (isInCall) {
+            appViewModel.wifiAwareRanger.setRttEnabled(false)
+        }
     }
     LaunchedEffect(shouldRunDistanceTracking) {
         appViewModel.setBleRssiActiveMode(shouldRunDistanceTracking)
@@ -798,7 +809,7 @@ fun AppNavHost(
     LaunchedEffect(
         callingTargetPeerId,
         isInCall,
-        appState.isCallConnected,
+        activeCallTransportReady,
         targetSurvivor?.peerId,
         appState.callPeerId,
         backStackEntry?.destination?.route
@@ -806,7 +817,7 @@ fun AppNavHost(
         val targetPeerId = callingTargetPeerId ?: return@LaunchedEffect
         val connected =
             isInCall &&
-                appState.isCallConnected &&
+                activeCallTransportReady &&
                 (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
         if (!connected) return@LaunchedEffect
         callingTargetPeerId = null
@@ -821,9 +832,14 @@ fun AppNavHost(
         val targetPeerId = callingTargetPeerId ?: return@LaunchedEffect
         val completedInTime = withTimeoutOrNull(callAttemptTimeoutMs) {
             snapshotFlow {
+                val transportReady = when (callDebugState.activeTransport) {
+                    CallTransportType.WIFI_AWARE -> callDebugState.wifiAware.isReady
+                    CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect.isReady
+                    CallTransportType.NONE -> false
+                }
                 val connected =
                     isInCall &&
-                        appState.isCallConnected &&
+                        transportReady &&
                         (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
                 val canceled = callingTargetPeerId != targetPeerId
                 connected || canceled
@@ -831,7 +847,7 @@ fun AppNavHost(
         } != null
         val connectedNow =
             isInCall &&
-                appState.isCallConnected &&
+                activeCallTransportReady &&
                 (targetSurvivor?.peerId == targetPeerId || appState.callPeerId == targetPeerId)
         if (callingTargetPeerId != targetPeerId || connectedNow || completedInTime) {
             return@LaunchedEffect
@@ -1002,7 +1018,7 @@ fun AppNavHost(
                 bleDebugStats = bleDebugStats,
                 isConnected = isConnected,
                 isMicOn = isMicOn,
-                isCallConnected = appState.isCallConnected,
+                isCallConnected = activeCallTransportReady,
                 isInCall = isInCall,
                 isSpeakerphoneOn = callDebugState.audio.speakerphoneEnabled,
                 callPeerName = targetSurvivor?.name,
@@ -1169,11 +1185,6 @@ fun AppNavHost(
             }
             val distanceState by distanceViewModel.uiState.collectAsState()
             val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
-            val callTransportReady = when (callDebugState.activeTransport) {
-                CallTransportType.WIFI_AWARE -> callDebugState.wifiAware.isReady
-                CallTransportType.WIFI_DIRECT -> callDebugState.wifiDirect.isReady
-                CallTransportType.NONE -> false
-            }
             val callTransportLabel = when (callDebugState.activeTransport) {
                 CallTransportType.WIFI_AWARE -> "Wi-Fi Aware"
                 CallTransportType.WIFI_DIRECT -> "Wi-Fi Direct"
@@ -1181,7 +1192,7 @@ fun AppNavHost(
             }
             val callStatusLabel = if (!isInCall) {
                 "대기"
-            } else if (callTransportReady) {
+            } else if (activeCallTransportReady) {
                 "연결됨 ($callTransportLabel)"
             } else {
                 "연결 중 ($callTransportLabel)"
@@ -1192,7 +1203,7 @@ fun AppNavHost(
                 ?: appState.callPeerId
             val pttTargetSupportsUwb = resolvePeerSupportsUwb(pttTargetPeerId)
             val canAttemptUwbOnDetail =
-                appViewModel.isUwbSupportedLocally() &&
+                appViewModel.isUwbRuntimeAvailableLocally() &&
                     pttTargetSupportsUwb &&
                     !pttTargetPeerId.isNullOrBlank()
             LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, isInCall) {
@@ -1316,22 +1327,30 @@ fun AppNavHost(
                 } else {
                     null
                 }
-            val resolvedRttDistanceMeters = if (isInCall) {
+            val localRttSupported = appViewModel.isWifiAwareSupportedLocally()
+            val resolvedRttDistanceMeters = if (isInCall || !localRttSupported) {
                 null
             } else {
                 awareRttDistanceMeters ?: hybridRttDistanceMeters
             }
             val resolvedRssiDistanceMeters = hybridRssiDistanceMeters ?: rssiFallbackDistanceMeters
+            val preferUwbDistance = canAttemptUwbOnDetail
             val displayDistanceMeters = when {
-                uwbDistanceMeters != null -> uwbDistanceMeters
+                preferUwbDistance && uwbDistanceMeters != null -> uwbDistanceMeters
+                preferUwbDistance && allowRttFallbackForUwbTarget && resolvedRttDistanceMeters != null -> resolvedRttDistanceMeters
+                preferUwbDistance && resolvedRssiDistanceMeters != null -> resolvedRssiDistanceMeters
                 resolvedRttDistanceMeters != null -> resolvedRttDistanceMeters
                 resolvedRssiDistanceMeters != null -> resolvedRssiDistanceMeters
+                uwbDistanceMeters != null -> uwbDistanceMeters
                 else -> null
             }
             val displayDistanceSource = when {
-                uwbDistanceMeters != null -> DistanceMeasurementSource.UWB
+                preferUwbDistance && uwbDistanceMeters != null -> DistanceMeasurementSource.UWB
+                preferUwbDistance && allowRttFallbackForUwbTarget && resolvedRttDistanceMeters != null -> DistanceMeasurementSource.RTT
+                preferUwbDistance && resolvedRssiDistanceMeters != null -> DistanceMeasurementSource.RSSI
                 resolvedRttDistanceMeters != null -> DistanceMeasurementSource.RTT
                 resolvedRssiDistanceMeters != null -> DistanceMeasurementSource.RSSI
+                uwbDistanceMeters != null -> DistanceMeasurementSource.UWB
                 else -> distanceState.measurementSource
             }
             val resolvedRssiMode = runCatching {
