@@ -4,10 +4,12 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.uwb.RangingParameters
 import androidx.core.uwb.RangingResult
+import androidx.core.uwb.UwbAvailabilityCallback
 import androidx.core.uwb.UwbAddress
 import androidx.core.uwb.UwbComplexChannel
 import androidx.core.uwb.UwbControleeSessionScope
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.nio.ByteBuffer
 
 class UwbRanger(private val context: Context) {
     data class ControllerOffer(
@@ -43,7 +46,13 @@ class UwbRanger(private val context: Context) {
     val distanceMeters = _distanceMeters.asStateFlow()
 
     private val rangerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val uwbManager by lazy { UwbManager.createInstance(context) }
     private val lock = Any()
+    private val scopeCreationLock = Any()
+    @Volatile private var runtimeAvailableCache: Boolean? = null
+    @Volatile private var lastAvailabilityCheckAtMs: Long = 0L
+    @Volatile private var lastUnavailableLogAtMs: Long = 0L
+    private var availabilityCallbackRegistered = false
     private var trackingEnabled = false
     private var sessionRole = SessionRole.CONTROLLER
     private var peerAddressHex: String? = null
@@ -57,6 +66,23 @@ class UwbRanger(private val context: Context) {
     private var controleeAddressHex: String? = null
     private var sessionJob: Job? = null
     private var sessionToken: Long = 0L
+    private val availabilityCallback = object : UwbAvailabilityCallback {
+        override fun onUwbStateChanged(isAvailable: Boolean, reason: Int) {
+            runtimeAvailableCache = isAvailable
+            lastAvailabilityCheckAtMs = SystemClock.elapsedRealtime()
+            if (isAvailable) {
+                logUwb("availability=true")
+                restartSessionIfTracking()
+            } else {
+                if (SystemClock.elapsedRealtime() - lastUnavailableLogAtMs >= UNAVAILABLE_LOG_THROTTLE_MS) {
+                    lastUnavailableLogAtMs = SystemClock.elapsedRealtime()
+                    logUwb("availability=false reason=${availabilityReasonToText(reason)}")
+                }
+                synchronized(lock) { cancelSessionLocked() }
+                _distanceMeters.value = null
+            }
+        }
+    }
 
     fun isSupported(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
@@ -73,50 +99,85 @@ class UwbRanger(private val context: Context) {
 
     fun prepareControllerOfferBlocking(): ControllerOffer? {
         if (!isSupported() || !hasPermission()) return null
-        val scope = runBlocking(Dispatchers.IO) {
-            runCatching {
-                UwbManager.createInstance(context).controllerSessionScope()
-            }.onFailure { throwable ->
-                logUwb("controller scope create failed", throwable)
-            }.getOrNull()
-        } ?: return null
-        val offer = ControllerOffer(
-            controllerAddress = normalizeAddress(scope.localAddress.toString()) ?: return null,
-            channel = scope.uwbComplexChannel.channel,
-            preambleIndex = scope.uwbComplexChannel.preambleIndex,
-            sessionId = buildSessionId()
-        )
+        if (!isRuntimeAvailableBlocking()) return null
         synchronized(lock) {
-            controllerScope = scope
-            controllerOffer = offer
-            sessionRole = SessionRole.CONTROLLER
-            peerAddressHex = null
-            remoteControllerAddressHex = null
-            remoteControllerChannel = null
-            remoteControllerPreambleIndex = null
-            remoteSessionId = null
+            val cachedOffer = controllerOffer
+            if (cachedOffer != null && controllerScope != null) {
+                return cachedOffer
+            }
         }
+        val offer = synchronized(scopeCreationLock) {
+            synchronized(lock) {
+                val cachedOffer = controllerOffer
+                if (cachedOffer != null && controllerScope != null) {
+                    return@synchronized cachedOffer
+                }
+            }
+            val scope = runBlocking(Dispatchers.IO) {
+                runCatching {
+                    uwbManager.controllerSessionScope()
+                }.onFailure { throwable ->
+                    logUwb("controller scope create failed", throwable)
+                }.getOrNull()
+            } ?: return@synchronized null
+            val preparedOffer = ControllerOffer(
+                controllerAddress = normalizeAddress(scope.localAddress.toString()) ?: return@synchronized null,
+                channel = scope.uwbComplexChannel.channel,
+                preambleIndex = scope.uwbComplexChannel.preambleIndex,
+                sessionId = buildSessionId()
+            )
+            synchronized(lock) {
+                val cachedOffer = controllerOffer
+                if (cachedOffer != null && controllerScope != null) {
+                    return@synchronized cachedOffer
+                }
+                controllerScope = scope
+                controllerOffer = preparedOffer
+                sessionRole = SessionRole.CONTROLLER
+                peerAddressHex = null
+                remoteControllerAddressHex = null
+                remoteControllerChannel = null
+                remoteControllerPreambleIndex = null
+                remoteSessionId = null
+            }
+            preparedOffer
+        } ?: return null
         restartSessionIfTracking()
         return offer
     }
 
     fun prepareControleeAddressBlocking(): String? {
         if (!isSupported() || !hasPermission()) return null
-        val existing = synchronized(lock) { controleeScope }
-        val scope = existing ?: runBlocking(Dispatchers.IO) {
-            runCatching {
-                UwbManager.createInstance(context).controleeSessionScope()
-            }.onFailure { throwable ->
-                logUwb("controlee scope create failed", throwable)
-            }.getOrNull()
-        } ?: return null
+        if (!isRuntimeAvailableBlocking()) return null
         synchronized(lock) {
-            if (controleeScope == null) {
-                controleeScope = scope
+            val cachedAddress = controleeAddressHex
+            if (cachedAddress != null && controleeScope != null) {
+                return cachedAddress
             }
-            controleeAddressHex = normalizeAddress(scope.localAddress.toString())
         }
-        return synchronized(lock) { controleeAddressHex }
+        return synchronized(scopeCreationLock) {
+            synchronized(lock) {
+                val cachedAddress = controleeAddressHex
+                if (cachedAddress != null && controleeScope != null) {
+                    return@synchronized cachedAddress
+                }
+            }
+            val scope = synchronized(lock) { controleeScope } ?: runBlocking(Dispatchers.IO) {
+                runCatching {
+                    uwbManager.controleeSessionScope()
+                }.onFailure { throwable ->
+                    logUwb("controlee scope create failed", throwable)
+                }.getOrNull()
+            } ?: return@synchronized null
+            val address = normalizeAddress(scope.localAddress.toString()) ?: return@synchronized null
+            synchronized(lock) {
+                if (controleeScope == null) {
+                    controleeScope = scope
+                }
+                controleeAddressHex = address
+            }
+            address
+        }
     }
 
     fun getControllerOfferOrNull(): ControllerOffer? {
@@ -188,6 +249,7 @@ class UwbRanger(private val context: Context) {
 
     fun release() {
         endSession()
+        clearAvailabilityCallback()
         rangerScope.cancel()
     }
 
@@ -230,10 +292,13 @@ class UwbRanger(private val context: Context) {
     }
 
     private suspend fun collectController(snapshot: SessionSnapshot.Controller) {
+        val sessionKeyInfo = buildStaticStsSessionKey(snapshot.sessionId)
         val parameters = RangingParameters(
             uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
             sessionId = snapshot.sessionId,
-            sessionKeyInfo = null,
+            subSessionId = 0,
+            sessionKeyInfo = sessionKeyInfo,
+            subSessionKeyInfo = null,
             complexChannel = null,
             peerDevices = listOf(UwbDevice(UwbAddress(snapshot.peerAddress))),
             updateRateType = RangingParameters.RANGING_UPDATE_RATE_FREQUENT
@@ -244,10 +309,13 @@ class UwbRanger(private val context: Context) {
     }
 
     private suspend fun collectControlee(snapshot: SessionSnapshot.Controlee) {
+        val sessionKeyInfo = buildStaticStsSessionKey(snapshot.sessionId)
         val parameters = RangingParameters(
             uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
             sessionId = snapshot.sessionId,
-            sessionKeyInfo = null,
+            subSessionId = 0,
+            sessionKeyInfo = sessionKeyInfo,
+            subSessionKeyInfo = null,
             complexChannel = UwbComplexChannel(
                 snapshot.controllerChannel,
                 snapshot.controllerPreambleIndex
@@ -267,6 +335,12 @@ class UwbRanger(private val context: Context) {
             }
 
             is RangingResult.RangingResultPeerDisconnected -> {
+                emitDistanceIfTracking(null)
+            }
+
+            is RangingResult.RangingResultInitialized -> Unit
+
+            is RangingResult.RangingResultFailure -> {
                 emitDistanceIfTracking(null)
             }
         }
@@ -349,6 +423,74 @@ class UwbRanger(private val context: Context) {
         return if (value == 0) 1 else value
     }
 
+    private fun ensureAvailabilityCallbackRegistered() {
+        if (!isSupported()) return
+        synchronized(lock) {
+            if (availabilityCallbackRegistered) return
+            runCatching {
+                uwbManager.setUwbAvailabilityCallback(
+                    ContextCompat.getMainExecutor(context),
+                    availabilityCallback
+                )
+                availabilityCallbackRegistered = true
+            }.onFailure { throwable ->
+                logUwb("availability callback register failed", throwable)
+            }
+        }
+    }
+
+    private fun clearAvailabilityCallback() {
+        synchronized(lock) {
+            if (!availabilityCallbackRegistered) return
+            runCatching {
+                uwbManager.clearUwbAvailabilityCallback()
+            }.onFailure { throwable ->
+                logUwb("availability callback clear failed", throwable)
+            }
+            availabilityCallbackRegistered = false
+        }
+    }
+
+    private fun isRuntimeAvailableBlocking(forceRefresh: Boolean = false): Boolean {
+        if (!isSupported() || !hasPermission()) return false
+        ensureAvailabilityCallbackRegistered()
+        val now = SystemClock.elapsedRealtime()
+        val cached = runtimeAvailableCache
+        if (!forceRefresh && cached != null && now - lastAvailabilityCheckAtMs < AVAILABILITY_CACHE_TTL_MS) {
+            return cached
+        }
+        val available = runBlocking(Dispatchers.IO) {
+            runCatching { uwbManager.isAvailable() }
+                .onFailure { throwable ->
+                    logUwb("availability query failed", throwable)
+                }
+                .getOrDefault(false)
+        }
+        runtimeAvailableCache = available
+        lastAvailabilityCheckAtMs = now
+        if (!available && now - lastUnavailableLogAtMs >= UNAVAILABLE_LOG_THROTTLE_MS) {
+            lastUnavailableLogAtMs = now
+            logUwb("runtime unavailable")
+        }
+        return available
+    }
+
+    private fun availabilityReasonToText(reason: Int): String {
+        return when (reason) {
+            UwbAvailabilityCallback.STATE_CHANGE_REASON_SYSTEM_POLICY -> "system_policy"
+            UwbAvailabilityCallback.STATE_CHANGE_REASON_COUNTRY_CODE_ERROR -> "country_code_error"
+            UwbAvailabilityCallback.STATE_CHANGE_REASON_UNKNOWN -> "unknown"
+            else -> "code_$reason"
+        }
+    }
+
+    private fun buildStaticStsSessionKey(sessionId: Int): ByteArray {
+        return ByteBuffer.allocate(STATIC_STS_SESSION_KEY_LENGTH)
+            .putInt(sessionId)
+            .putInt(sessionId xor STATIC_STS_KEY_SALT)
+            .array()
+    }
+
     private fun logUwb(message: String, throwable: Throwable? = null) {
         val formatted = if (throwable != null) {
             "$message: ${throwable.message ?: throwable::class.java.simpleName}"
@@ -377,5 +519,12 @@ class UwbRanger(private val context: Context) {
             val controllerPreambleIndex: Int,
             val sessionId: Int
         ) : SessionSnapshot(SessionRole.CONTROLEE)
+    }
+
+    companion object {
+        private const val AVAILABILITY_CACHE_TTL_MS = 750L
+        private const val UNAVAILABLE_LOG_THROTTLE_MS = 3_000L
+        private const val STATIC_STS_SESSION_KEY_LENGTH = 8
+        private const val STATIC_STS_KEY_SALT = 0x5A5A5A5A
     }
 }
