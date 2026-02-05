@@ -72,7 +72,6 @@ fun RescuerSurvivorDbScreen(
     isInCall: Boolean = false,
     callingPeerId: String? = null,
     callPeerId: String? = null,
-    callPeerRttCm: Int? = null,
     activeDistancePeerId: String? = null,
     activeDistanceMeters: Float? = null,
     activeDistanceSource: DistanceMeasurementSource = DistanceMeasurementSource.NONE
@@ -313,14 +312,6 @@ fun RescuerSurvivorDbScreen(
                                 } else {
                                     DistanceMeasurementSource.NONE
                                 },
-                                rttDistanceMeters = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == callPeerId
-                                ) {
-                                    callPeerRttCm?.toFloat()?.div(100f)
-                                } else {
-                                    null
-                                },
                                 onEndCall = onEndCall
                             )
                         }
@@ -422,7 +413,6 @@ private fun SurvivorCard(
     onOpenDirectChat: (SurvivorProfile) -> Unit,
     liveDistanceMeters: Float?,
     liveDistanceSource: DistanceMeasurementSource,
-    rttDistanceMeters: Float?,
     onEndCall: () -> Unit
 ) {
     val rssi = peerRssiMap[survivor.peerId]
@@ -430,15 +420,6 @@ private fun SurvivorCard(
     val rssiText = rssi?.let { "$it dBm" } ?: "-"
     val estimatedDistanceMeters = rssi?.let { estimateDistanceMeters(it) }
     val resolvedDistance = when {
-        liveDistanceMeters != null && liveDistanceSource == DistanceMeasurementSource.UWB ->
-            liveDistanceMeters to DistanceMeasurementSource.UWB
-
-        liveDistanceMeters != null && liveDistanceSource == DistanceMeasurementSource.RTT ->
-            liveDistanceMeters to DistanceMeasurementSource.RTT
-
-        rttDistanceMeters != null ->
-            rttDistanceMeters to DistanceMeasurementSource.RTT
-
         liveDistanceMeters != null && liveDistanceSource == DistanceMeasurementSource.RSSI ->
             liveDistanceMeters to DistanceMeasurementSource.RSSI
 
@@ -448,28 +429,10 @@ private fun SurvivorCard(
         else -> null
     }
     val distanceText = resolvedDistance?.first?.let { String.format("%.1f", it) }
-    val distancePrefix = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> "UWB 약 "
-        DistanceMeasurementSource.RTT -> "RTT 약 "
-        DistanceMeasurementSource.RSSI -> "약 "
-        else -> "약 "
-    }
-    val signalChipText = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> "UWB"
-        DistanceMeasurementSource.RTT -> "RTT"
-        DistanceMeasurementSource.RSSI -> "RSSI $rssiText"
-        else -> "RSSI $rssiText"
-    }
-    val signalChipBg = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> neonGreen.copy(alpha = 0.16f)
-        DistanceMeasurementSource.RTT -> neonGreen.copy(alpha = 0.16f)
-        else -> AppColors.Gray700.copy(alpha = 0.5f)
-    }
-    val signalChipFg = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> neonGreen
-        DistanceMeasurementSource.RTT -> neonGreen
-        else -> AppColors.Gray400
-    }
+    val distancePrefix = "약 "
+    val signalChipText = "RSSI $rssiText"
+    val signalChipBg = AppColors.Gray700.copy(alpha = 0.5f)
+    val signalChipFg = AppColors.Gray400
     val batteryChipText = battery?.let { "배터리 $it%" } ?: "배터리 미수신"
     val batteryChipBg = when {
         battery == null -> AppColors.Gray700.copy(alpha = 0.35f)
@@ -648,10 +611,13 @@ private fun SurvivorCard(
     }
 }
 
-private fun estimateDistanceMeters(rssi: Int): Float {
+private fun estimateDistanceMeters(rssi: Int): Float? {
+    if (rssi !in -110..-20) return null
     val txPower = -59
     val pathLossExponent = 2.0
-    return 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
+    val distance = 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
+    if (!distance.isFinite() || distance <= 0f) return null
+    return distance
 }
 
 @Composable

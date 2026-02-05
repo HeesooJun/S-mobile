@@ -44,8 +44,14 @@ fun DistanceTrack(
     val scale = LocalAppScale.current
     val density = LocalDensity.current
 
-    val isSearching = distanceMeters == null || distanceMeters > maxMeters
-    val clamped = remember(distanceMeters, maxMeters) { distanceMeters?.coerceIn(0f, maxMeters) }
+    val hasUsableDistance = distanceMeters != null &&
+        distanceMeters.isFinite() &&
+        distanceMeters > 0f &&
+        distanceMeters <= maxMeters
+    val isSearching = !hasUsableDistance
+    val clamped = remember(distanceMeters, maxMeters, hasUsableDistance) {
+        if (!hasUsableDistance) null else distanceMeters?.coerceIn(0f, maxMeters)
+    }
     val progress = if (!isSearching && clamped != null) 1f - (clamped / maxMeters) else 0f
     val fillFraction = progress.coerceIn(0f, 1f)
 
@@ -159,7 +165,7 @@ fun DistanceTrack(
             val waitingText = when (measurementSource) {
                 DistanceMeasurementSource.UWB -> "UWB 연결/측정 중"
                 DistanceMeasurementSource.RTT -> "RTT 측정 중"
-                DistanceMeasurementSource.RSSI -> "30m 이내로 접근하면 거리 표시"
+                DistanceMeasurementSource.RSSI -> "RSSI 측정 불가"
                 DistanceMeasurementSource.NONE -> "신호 탐색 중"
             }
             Text(

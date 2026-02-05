@@ -18,6 +18,7 @@ import androidx.core.uwb.UwbDevice
 import androidx.core.uwb.UwbManager
 import com.example.lifesaiver.core.log.ConnectionLog
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -189,11 +190,29 @@ class UwbRanger(private val context: Context) {
     }
 
     fun configureControllerSession(peerAddress: String?) {
+        val normalizedPeerAddress = normalizeAddress(peerAddress)
+        var shouldRestart = false
         synchronized(lock) {
+            val roleChanged = sessionRole != SessionRole.CONTROLLER
+            val currentPeer = peerAddressHex
+            val peerChanged = currentPeer != normalizedPeerAddress
+
+            // UWB sync 재전송 과정에서 null peer 업데이트가 반복되면 세션이 재시작되며 scope가 소진될 수 있다.
+            // 명시적 종료는 endSession()/stop()에서 처리하고, 여기서는 유효한 peer가 있을 때만 갱신한다.
+            if (!roleChanged && normalizedPeerAddress == null && currentPeer != null) {
+                return
+            }
+            if (!roleChanged && !peerChanged) {
+                return
+            }
+
             sessionRole = SessionRole.CONTROLLER
-            peerAddressHex = normalizeAddress(peerAddress)
+            peerAddressHex = normalizedPeerAddress
+            shouldRestart = trackingEnabled && normalizedPeerAddress != null
         }
-        restartSessionIfTracking()
+        if (shouldRestart) {
+            restartSessionIfTracking()
+        }
     }
 
     fun configureControleeSession(
@@ -202,14 +221,31 @@ class UwbRanger(private val context: Context) {
         preambleIndex: Int?,
         sessionId: Int?
     ) {
+        val normalizedControllerAddress = normalizeAddress(controllerAddress)
+        var shouldRestart = false
         synchronized(lock) {
+            val roleChanged = sessionRole != SessionRole.CONTROLEE
+            val addressChanged = remoteControllerAddressHex != normalizedControllerAddress
+            val channelChanged = remoteControllerChannel != channel
+            val preambleChanged = remoteControllerPreambleIndex != preambleIndex
+            val sessionChanged = remoteSessionId != sessionId
+            if (!roleChanged && !addressChanged && !channelChanged && !preambleChanged && !sessionChanged) {
+                return
+            }
             sessionRole = SessionRole.CONTROLEE
-            remoteControllerAddressHex = normalizeAddress(controllerAddress)
+            remoteControllerAddressHex = normalizedControllerAddress
             remoteControllerChannel = channel
             remoteControllerPreambleIndex = preambleIndex
             remoteSessionId = sessionId
+            shouldRestart = trackingEnabled &&
+                normalizedControllerAddress != null &&
+                channel != null &&
+                preambleIndex != null &&
+                sessionId != null
         }
-        restartSessionIfTracking()
+        if (shouldRestart) {
+            restartSessionIfTracking()
+        }
     }
 
     fun start() {
@@ -281,8 +317,31 @@ class UwbRanger(private val context: Context) {
                 is SessionSnapshot.Controlee -> collectControlee(snapshot)
             }
         }.onFailure { throwable ->
-            logUwb("session failed (${snapshot.role})", throwable)
-            emitDistanceIfTracking(null)
+            if (throwable is IllegalStateException &&
+                throwable.message?.contains("Ranging has already started", ignoreCase = true) == true
+            ) {
+                logUwb("session scope already used (${snapshot.role}) - recreate required")
+                synchronized(lock) {
+                    when (snapshot.role) {
+                        SessionRole.CONTROLLER -> {
+                            controllerScope = null
+                            controllerOffer = null
+                        }
+                        SessionRole.CONTROLEE -> {
+                            controleeScope = null
+                            controleeAddressHex = null
+                        }
+                    }
+                }
+                emitDistanceIfTracking(null)
+                return@onFailure
+            }
+            if (throwable is CancellationException) {
+                logUwb("session cancelled (${snapshot.role})")
+            } else {
+                logUwb("session failed (${snapshot.role})", throwable)
+                emitDistanceIfTracking(null)
+            }
         }
         synchronized(lock) {
             if (sessionToken == token) {
