@@ -7,6 +7,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiManager
 import android.net.wifi.aware.*
 import android.net.wifi.rtt.*
 import android.os.Handler
@@ -57,9 +58,9 @@ class WifiAwareRanger(private val context: Context) {
     // --- 내부 변수 ---
     private var subscribeSession: SubscribeDiscoverySession? = null
     private var publishSession: PublishDiscoverySession? = null
-    private var socket: DatagramSocket? = null
-    private var peerAddress: InetAddress? = null
-    private var peerPort: Int? = null
+    @Volatile private var socket: DatagramSocket? = null
+    @Volatile private var peerAddress: InetAddress? = null
+    @Volatile private var peerPort: Int? = null
     private val socketPort = 50000
     private val connectDistanceMeters = 30.0
     private val maxUdpPayload = 1200
@@ -81,8 +82,8 @@ class WifiAwareRanger(private val context: Context) {
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    private var session: WifiAwareSession? = null
-    private var isStarting = false
+    @Volatile private var session: WifiAwareSession? = null
+    @Volatile private var isStarting = false
     private var dataPathEnabled = true
     private var isNdpInitiator = true
     private var peerRequestedNdp = false
@@ -101,6 +102,17 @@ class WifiAwareRanger(private val context: Context) {
     private var pendingConnectRunnable: Runnable? = null
     private var attachRetryRunnable: Runnable? = null
     private var pendingRestartRunnable: Runnable? = null
+    private var attachFailureStreak = 0
+    private var attachBlockedUntilMs = 0L
+    private var lastAttachAttemptAtMs = 0L
+    private var attachRequestToken = 0L
+    private val minAttachAttemptIntervalMs = 1_200L
+    private val attachRetryBaseMs = 2_000L
+    private val attachRetryMaxMs = 20_000L
+    private val attachFailureBlockThreshold = 5
+    private val attachFailureBlockMs = 30_000L
+    private var lastStopAtMs = 0L
+    private val minRestartAfterStopMs = 1_500L
     private var ndpUnavailableCount: Int = 0
     private val ndpRequestTimeoutMs = 8_000
     private var rttFailureStreak = 0
@@ -120,7 +132,17 @@ class WifiAwareRanger(private val context: Context) {
     private var receiveJob: Future<*>? = null
 
     // 연결 시도 중복 방지
-    private var isConnecting = false
+    @Volatile private var isConnecting = false
+
+    private fun isOnMainThread(): Boolean = Looper.myLooper() == handler.looper
+
+    private fun runOnMain(block: () -> Unit) {
+        if (isOnMainThread()) {
+            block()
+        } else {
+            handler.post(block)
+        }
+    }
 
     init {
         // 매니저 초기화
@@ -141,8 +163,13 @@ class WifiAwareRanger(private val context: Context) {
      * 상대방이 Wi-Fi Aware를 지원하는지 여부를 업데이트합니다.
      */
     fun updatePeerCapability(supportsWifiAware: Boolean) {
+        if (!isOnMainThread()) {
+            runOnMain { updatePeerCapability(supportsWifiAware) }
+            return
+        }
         Log.d("WifiAware", "Peer Capability Updated: WifiSupported = $supportsWifiAware")
         ConnectionLog.add("Aware", "peer capability=$supportsWifiAware")
+        val capabilityChanged = isPeerWifiSupported != supportsWifiAware
         isPeerWifiSupported = supportsWifiAware
 
         if (!supportsWifiAware) {
@@ -150,12 +177,21 @@ class WifiAwareRanger(private val context: Context) {
             stop()
             return
         }
+        if (capabilityChanged) {
+            // false -> true 전환 시 이미 tracking 경로가 켜져 있어도 start()가 다시 호출되지 않을 수 있다.
+            // capability 업데이트에서 attach 재시도를 직접 트리거해 상세 페이지 진입 직후 RTT가 붙도록 보장한다.
+            startIfReady()
+        }
     }
 
     /**
      * 시작 시도 (조건: 하드웨어 지원 + 권한 + 상대방 지원)
      */
     fun start() {
+        if (!isOnMainThread()) {
+            runOnMain { start() }
+            return
+        }
         if (awareDisabledForDirectTest) {
             ConnectionLog.add("Aware", "disabled for direct test")
             return
@@ -164,6 +200,10 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     private fun startIfReady() {
+        if (!isOnMainThread()) {
+            runOnMain { startIfReady() }
+            return
+        }
         // 이미 연결 준비되었거나 세션이 있으면 패스
         if (_isConnectionReady.value || session != null || isStarting) {
             ConnectionLog.add(
@@ -181,6 +221,30 @@ class WifiAwareRanger(private val context: Context) {
                 lastSendError = null,
                 lastRecvError = null
             )
+        }
+        if (wifiAwareManager == null && context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)) {
+            wifiAwareManager = context.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager
+        }
+        val now = System.currentTimeMillis()
+        val sinceLastStop = now - lastStopAtMs
+        if (lastStopAtMs > 0L && sinceLastStop in 0 until minRestartAfterStopMs) {
+            val waitMs = (minRestartAfterStopMs - sinceLastStop).coerceAtLeast(500L)
+            ConnectionLog.add("Aware", "post-stop cooldown wait=${waitMs}ms")
+            scheduleAttachRetry("post-stop cooldown", waitMs)
+            return
+        }
+        if (now < attachBlockedUntilMs) {
+            val remainMs = attachBlockedUntilMs - now
+            ConnectionLog.add("Aware", "attach cooldown remain=${remainMs}ms")
+            scheduleAttachRetry("attach cooldown", remainMs)
+            return
+        }
+        val sinceLastAttempt = now - lastAttachAttemptAtMs
+        if (lastAttachAttemptAtMs > 0L && sinceLastAttempt in 0 until minAttachAttemptIntervalMs) {
+            val waitMs = (minAttachAttemptIntervalMs - sinceLastAttempt).coerceAtLeast(500L)
+            ConnectionLog.add("Aware", "attach throttled wait=${waitMs}ms")
+            scheduleAttachRetry("attach throttled", waitMs)
+            return
         }
 
         val hasFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
@@ -219,31 +283,59 @@ class WifiAwareRanger(private val context: Context) {
             scheduleAttachRetry("location service disabled")
             return
         }
+        if (!isWifiEnabled()) {
+            Log.e("WifiAware", "Wi-Fi disabled.")
+            ConnectionLog.add("Aware", "wifi disabled")
+            scheduleAttachRetry("wifi disabled")
+            return
+        }
 
         Log.d("WifiAware", "All conditions met. Starting Wi-Fi Aware...")
         ConnectionLog.add("Aware", "attach session")
         isStarting = true
+        lastAttachAttemptAtMs = now
+        val requestToken = ++attachRequestToken
 
         wifiAwareManager?.attach(object : AttachCallback() {
             override fun onAttached(wifiAwareSession: WifiAwareSession) {
+                if (requestToken != attachRequestToken) {
+                    runCatching { wifiAwareSession.close() }
+                    return
+                }
                 Log.d("WifiAware", "Session Attached!")
                 ConnectionLog.add("Aware", "session attached")
                 session = wifiAwareSession
                 isStarting = false
+                attachFailureStreak = 0
+                attachBlockedUntilMs = 0L
                 publishToService()
                 subscribeToService()
             }
 
             override fun onAttachFailed() {
+                if (requestToken != attachRequestToken) return
                 Log.e("WifiAware", "Session Attach Failed")
-                ConnectionLog.add("Aware", "attach failed")
+                attachFailureStreak = (attachFailureStreak + 1).coerceAtMost(10)
+                val available = wifiAwareManager?.isAvailable ?: false
+                if (attachFailureStreak >= attachFailureBlockThreshold) {
+                    attachBlockedUntilMs = System.currentTimeMillis() + attachFailureBlockMs
+                    ConnectionLog.add(
+                        "Aware",
+                        "attach blocked streak=$attachFailureStreak blockMs=$attachFailureBlockMs"
+                    )
+                }
+                ConnectionLog.add("Aware", "attach failed streak=$attachFailureStreak available=$available")
                 isStarting = false
                 scheduleAttachRetry("attach failed")
             }
-        }, null)
+        }, handler)
     }
 
     fun setDataPathEnabled(enabled: Boolean) {
+        if (!isOnMainThread()) {
+            runOnMain { setDataPathEnabled(enabled) }
+            return
+        }
         if (dataPathEnabled == enabled) return
         dataPathEnabled = enabled
         Log.d("WifiAware", "Data path enabled=$enabled")
@@ -251,6 +343,10 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     fun setNdpInitiator(isInitiator: Boolean) {
+        if (!isOnMainThread()) {
+            runOnMain { setNdpInitiator(isInitiator) }
+            return
+        }
         if (isNdpInitiator == isInitiator) return
         isNdpInitiator = isInitiator
         isRanging = false
@@ -260,6 +356,10 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     fun configureCallContext(localPeerIdHex: String?, expectedPeerIdHex: String?) {
+        if (!isOnMainThread()) {
+            runOnMain { configureCallContext(localPeerIdHex, expectedPeerIdHex) }
+            return
+        }
         localPeerIdForCall = normalizePeerId(localPeerIdHex)
         expectedPeerIdForCall = normalizePeerId(expectedPeerIdHex)
         setCurrentTargetPeer(null)
@@ -272,6 +372,10 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     fun setRttEnabled(enabled: Boolean) {
+        if (!isOnMainThread()) {
+            runOnMain { setRttEnabled(enabled) }
+            return
+        }
         if (rttEnabled == enabled) return
         rttEnabled = enabled
         if (!enabled) {
@@ -326,6 +430,11 @@ class WifiAwareRanger(private val context: Context) {
             }.getOrDefault(false)
             gps || network
         }
+    }
+
+    private fun isWifiEnabled(): Boolean {
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        return wifiManager?.isWifiEnabled == true
     }
 
     // =========================================================================
@@ -395,7 +504,7 @@ class WifiAwareRanger(private val context: Context) {
                     connectToCurrentPeer()
                 }
             }
-        }, null)
+        }, handler)
     }
 
     // =========================================================================
@@ -439,7 +548,7 @@ class WifiAwareRanger(private val context: Context) {
                     connectToCurrentPeer()
                 }
             }
-        }, null)
+        }, handler)
     }
 
     // =========================================================================
@@ -447,6 +556,10 @@ class WifiAwareRanger(private val context: Context) {
     // =========================================================================
     @SuppressLint("MissingPermission")
     private fun startRangingLoop() {
+        if (!isOnMainThread()) {
+            runOnMain { startRangingLoop() }
+            return
+        }
         if (!rttEnabled || !isRanging || currentTargetPeer == null || wifiRttManager == null) return
         if (isCurrentPeerRttBlocked()) {
             isRanging = false
@@ -471,87 +584,99 @@ class WifiAwareRanger(private val context: Context) {
 
     private val rttCallback = object : RangingResultCallback() {
         override fun onRangingResults(results: List<RangingResult>) {
-            val best = results.firstOrNull { it.status == RangingResult.STATUS_SUCCESS }
-            if (best != null) {
-                rttFailureStreak = 0
-                rttStatusFailStreak = 0
-                val dist = best.distanceMm / 1000f
-                Log.d("WifiAware", "RTT distance=${dist}m")
-                ConnectionLog.add("Aware", "RTT distance=${dist}m")
-                _rttDistance.value = dist
-                if (currentTargetPeer == null) {
-                    if (!requiresAckBeforeConnect()) {
-                        setCurrentTargetPeer(best.peerHandle)
-                    }
-                } else if (currentTargetPeer != best.peerHandle) {
-                    if (isNdpInitiator) {
-                        ConnectionLog.add("Aware", "ignore RTT from non-target peer")
-                    }
-                    if (isRanging) handler.postDelayed({ startRangingLoop() }, 1000)
-                    return
-                }
-
-                // [연결 트리거 로직]
-                // 30m 이내이고, 아직 연결 안됐고, 연결 시도 중이 아니면 -> 연결
-                if (isNdpInitiator && dist < connectDistanceMeters && !_isConnectionReady.value && !isConnecting) {
-                    Log.i("WifiAware", "Peer close ($dist m). Requesting NDP connection...")
-                    ConnectionLog.add("Aware", "distance<$connectDistanceMeters -> connect")
-                    currentTargetPeer?.let { sendNdpRequestToPeer(it) }
-                    if (dataPathEnabled) {
-                        connectToCurrentPeer()
-                    } else {
-                        ConnectionLog.add("Aware", "data path disabled -> skip connect")
-                    }
-                }
-            } else {
-                rttFailureStreak = (rttFailureStreak + 1).coerceAtMost(10)
-                val statusLabels = results.joinToString(",") { rangingStatusLabel(it.status) }
-                if (statusLabels.isNotBlank()) {
-                    ConnectionLog.add("Aware", "RTT no success statuses=$statusLabels")
-                }
-                val hasUnsupportedStatus = results.any { isRttPeerUnsupportedStatus(it.status) }
-                val onlyGenericFail = results.isNotEmpty() && results.all { it.status == RangingResult.STATUS_FAIL }
-                if (hasUnsupportedStatus) {
-                    markCurrentPeerRttUnsupported("result=${statusLabels.ifBlank { "unsupported" }}")
-                } else if (_isConnectionReady.value && onlyGenericFail) {
-                    rttStatusFailStreak += 1
-                    ConnectionLog.add(
-                        "Aware",
-                        "RTT generic fail streak=$rttStatusFailStreak/${rttStatusFailDisableThreshold}"
-                    )
-                    if (rttStatusFailStreak >= rttStatusFailDisableThreshold) {
-                        markCurrentPeerRttUnsupported("repeated STATUS_FAIL")
-                    }
-                } else if (results.isNotEmpty()) {
-                    rttStatusFailStreak = 0
-                }
-            }
-            scheduleNextRanging()
+            runOnMain { handleRangingResultsOnMain(results) }
         }
 
         override fun onRangingFailure(code: Int) {
-            val codeLabel = rangingFailureCodeLabel(code)
-            Log.w("WifiAware", "RTT failure code=$codeLabel")
-            ConnectionLog.add("Aware", "RTT failure code=$codeLabel")
-            val bump = if (code == RangingResultCallback.STATUS_CODE_FAIL) 2 else 1
-            rttFailureStreak = (rttFailureStreak + bump).coerceAtMost(10)
-            if (_isConnectionReady.value && code == RangingResultCallback.STATUS_CODE_FAIL) {
-                rttStatusFailStreak += 1
-                ConnectionLog.add(
-                    "Aware",
-                    "RTT callback fail streak=$rttStatusFailStreak/${rttStatusFailDisableThreshold}"
-                )
-                if (rttStatusFailStreak >= rttStatusFailDisableThreshold) {
-                    markCurrentPeerRttUnsupported("callback STATUS_CODE_FAIL")
-                }
-            } else if (code != RangingResultCallback.STATUS_CODE_FAIL) {
-                rttStatusFailStreak = 0
-            }
-            scheduleNextRanging()
+            runOnMain { handleRangingFailureOnMain(code) }
         }
     }
 
+    private fun handleRangingResultsOnMain(results: List<RangingResult>) {
+        val best = results.firstOrNull { it.status == RangingResult.STATUS_SUCCESS }
+        if (best != null) {
+            rttFailureStreak = 0
+            rttStatusFailStreak = 0
+            val dist = best.distanceMm / 1000f
+            Log.d("WifiAware", "RTT distance=${dist}m")
+            ConnectionLog.add("Aware", "RTT distance=${dist}m")
+            _rttDistance.value = dist
+            if (currentTargetPeer == null) {
+                if (!requiresAckBeforeConnect()) {
+                    setCurrentTargetPeer(best.peerHandle)
+                }
+            } else if (currentTargetPeer != best.peerHandle) {
+                if (isNdpInitiator) {
+                    ConnectionLog.add("Aware", "ignore RTT from non-target peer")
+                }
+                if (isRanging) handler.postDelayed({ startRangingLoop() }, 1000)
+                return
+            }
+
+            // [연결 트리거 로직]
+            // 30m 이내이고, 아직 연결 안됐고, 연결 시도 중이 아니면 -> 연결
+            if (isNdpInitiator && dist < connectDistanceMeters && !_isConnectionReady.value && !isConnecting) {
+                Log.i("WifiAware", "Peer close ($dist m). Requesting NDP connection...")
+                ConnectionLog.add("Aware", "distance<$connectDistanceMeters -> connect")
+                currentTargetPeer?.let { sendNdpRequestToPeer(it) }
+                if (dataPathEnabled) {
+                    connectToCurrentPeer()
+                } else {
+                    ConnectionLog.add("Aware", "data path disabled -> skip connect")
+                }
+            }
+        } else {
+            rttFailureStreak = (rttFailureStreak + 1).coerceAtMost(10)
+            val statusLabels = results.joinToString(",") { rangingStatusLabel(it.status) }
+            if (statusLabels.isNotBlank()) {
+                ConnectionLog.add("Aware", "RTT no success statuses=$statusLabels")
+            }
+            val hasUnsupportedStatus = results.any { isRttPeerUnsupportedStatus(it.status) }
+            val onlyGenericFail = results.isNotEmpty() && results.all { it.status == RangingResult.STATUS_FAIL }
+            if (hasUnsupportedStatus) {
+                markCurrentPeerRttUnsupported("result=${statusLabels.ifBlank { "unsupported" }}")
+            } else if (_isConnectionReady.value && onlyGenericFail) {
+                rttStatusFailStreak += 1
+                ConnectionLog.add(
+                    "Aware",
+                    "RTT generic fail streak=$rttStatusFailStreak/${rttStatusFailDisableThreshold}"
+                )
+                if (rttStatusFailStreak >= rttStatusFailDisableThreshold) {
+                    markCurrentPeerRttUnsupported("repeated STATUS_FAIL")
+                }
+            } else if (results.isNotEmpty()) {
+                rttStatusFailStreak = 0
+            }
+        }
+        scheduleNextRanging()
+    }
+
+    private fun handleRangingFailureOnMain(code: Int) {
+        val codeLabel = rangingFailureCodeLabel(code)
+        Log.w("WifiAware", "RTT failure code=$codeLabel")
+        ConnectionLog.add("Aware", "RTT failure code=$codeLabel")
+        val bump = if (code == RangingResultCallback.STATUS_CODE_FAIL) 2 else 1
+        rttFailureStreak = (rttFailureStreak + bump).coerceAtMost(10)
+        if (_isConnectionReady.value && code == RangingResultCallback.STATUS_CODE_FAIL) {
+            rttStatusFailStreak += 1
+            ConnectionLog.add(
+                "Aware",
+                "RTT callback fail streak=$rttStatusFailStreak/${rttStatusFailDisableThreshold}"
+            )
+            if (rttStatusFailStreak >= rttStatusFailDisableThreshold) {
+                markCurrentPeerRttUnsupported("callback STATUS_CODE_FAIL")
+            }
+        } else if (code != RangingResultCallback.STATUS_CODE_FAIL) {
+            rttStatusFailStreak = 0
+        }
+        scheduleNextRanging()
+    }
+
     private fun scheduleNextRanging() {
+        if (!isOnMainThread()) {
+            runOnMain { scheduleNextRanging() }
+            return
+        }
         if (!isRanging) return
         val base = if (_isConnectionReady.value) {
             rangingIntervalNdpActiveMs
@@ -572,6 +697,10 @@ class WifiAwareRanger(private val context: Context) {
     // 4. NDP 연결 및 소켓 설정 (실시간 통화용)
     // =========================================================================
     private fun connectToCurrentPeer() {
+        if (!isOnMainThread()) {
+            runOnMain { connectToCurrentPeer() }
+            return
+        }
         val canConnect = when {
             isNdpInitiator && requiresAckBeforeConnect() -> ndpAckReceived
             isNdpInitiator -> true
@@ -645,83 +774,89 @@ class WifiAwareRanger(private val context: Context) {
 
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                Log.d("WifiAware", "NDP Network Available!")
-                ConnectionLog.add("Aware", "NDP network available")
-                ndpUnavailableCount = 0
-                pendingConnectRunnable?.let { handler.removeCallbacks(it) }
-                pendingConnectRunnable = null
-                try {
-                    // 소켓 생성 및 네트워크 바인딩
-                    val udpSocket = DatagramSocket(null)
-                    udpSocket.reuseAddress = true
-                    udpSocket.bind(InetSocketAddress(socketPort))
-                    network.bindSocket(udpSocket)
-                    socket = udpSocket
+                runOnMain {
+                    Log.d("WifiAware", "NDP Network Available!")
+                    ConnectionLog.add("Aware", "NDP network available")
+                    ndpUnavailableCount = 0
+                    pendingConnectRunnable?.let { handler.removeCallbacks(it) }
+                    pendingConnectRunnable = null
+                    try {
+                        // 소켓 생성 및 네트워크 바인딩
+                        val udpSocket = DatagramSocket(null)
+                        udpSocket.reuseAddress = true
+                        udpSocket.bind(InetSocketAddress(socketPort))
+                        network.bindSocket(udpSocket)
+                        socket = udpSocket
 
-                    // 상대방 IP 확인 (선택 사항)
-                    val cap = connectivityManager?.getNetworkCapabilities(network)
-                    val info = cap?.transportInfo as? WifiAwareNetworkInfo
-                    val peerIp = info?.peerIpv6Addr
-                    if (peerIp != null) {
-                        peerAddress = peerIp
-                        peerPort = socketPort
-                    }
-                    Log.d("WifiAware", "Peer IPv6: $peerIp")
+                        // 상대방 IP 확인 (선택 사항)
+                        val cap = connectivityManager?.getNetworkCapabilities(network)
+                        val info = cap?.transportInfo as? WifiAwareNetworkInfo
+                        val peerIp = info?.peerIpv6Addr
+                        if (peerIp != null) {
+                            peerAddress = peerIp
+                            peerPort = socketPort
+                        }
+                        Log.d("WifiAware", "Peer IPv6: $peerIp")
 
-                    // 연결 완료 -> 오디오 수신 루프 시작
-                    rttWarmupUntilMs = System.currentTimeMillis() + ndpRttWarmupMs
-                    ConnectionLog.add("Aware", "RTT warmup ${ndpRttWarmupMs}ms after NDP up")
-                    _isConnectionReady.value = true
-                    _debugStats.update {
-                        it.copy(
-                            isReady = true,
-                            lastPeerAddress = peerIp?.hostAddress
-                        )
-                    }
-                    startReceiveLoop()
-                    isConnecting = false
+                        // 연결 완료 -> 오디오 수신 루프 시작
+                        rttWarmupUntilMs = System.currentTimeMillis() + ndpRttWarmupMs
+                        ConnectionLog.add("Aware", "RTT warmup ${ndpRttWarmupMs}ms after NDP up")
+                        _isConnectionReady.value = true
+                        _debugStats.update {
+                            it.copy(
+                                isReady = true,
+                                lastPeerAddress = peerIp?.hostAddress
+                            )
+                        }
+                        startReceiveLoop()
+                        isConnecting = false
 
-                } catch (e: Exception) {
-                    Log.e("WifiAware", "Socket setup failed", e)
-                    _debugStats.update { stats ->
-                        stats.copy(
-                            sendFailCount = stats.sendFailCount + 1,
-                            lastSendAt = System.currentTimeMillis(),
-                            lastSendError = e.message ?: "socket setup failed"
-                        )
+                    } catch (e: Exception) {
+                        Log.e("WifiAware", "Socket setup failed", e)
+                        _debugStats.update { stats ->
+                            stats.copy(
+                                sendFailCount = stats.sendFailCount + 1,
+                                lastSendAt = System.currentTimeMillis(),
+                                lastSendError = e.message ?: "socket setup failed"
+                            )
+                        }
+                        isConnecting = false
                     }
-                    isConnecting = false
                 }
             }
 
             override fun onLost(network: Network) {
-                Log.d("WifiAware", "NDP Network Lost")
-                ConnectionLog.add("Aware", "NDP network lost")
-                _isConnectionReady.value = false
-                _debugStats.update { it.copy(isReady = false) }
-                isConnecting = false
-                rttWarmupUntilMs = 0L
-                closeSocket()
-                scheduleFallbackConnect("network lost")
+                runOnMain {
+                    Log.d("WifiAware", "NDP Network Lost")
+                    ConnectionLog.add("Aware", "NDP network lost")
+                    _isConnectionReady.value = false
+                    _debugStats.update { it.copy(isReady = false) }
+                    isConnecting = false
+                    rttWarmupUntilMs = 0L
+                    closeSocket()
+                    scheduleFallbackConnect("network lost")
+                }
             }
 
             override fun onUnavailable() {
-                Log.e("WifiAware", "NDP Network Unavailable")
-                ConnectionLog.add("Aware", "NDP unavailable")
-                ndpUnavailableCount += 1
-                _debugStats.update { stats ->
-                    stats.copy(
-                        isReady = false,
-                        lastSendAt = System.currentTimeMillis(),
-                        lastSendError = "ndp_unavailable"
-                    )
-                }
-                isConnecting = false
-                rttWarmupUntilMs = 0L
-                if (ndpUnavailableCount >= 3) {
-                    scheduleAwareSessionRestart("ndp unavailable x$ndpUnavailableCount")
-                } else {
-                    scheduleFallbackConnect("ndp unavailable")
+                runOnMain {
+                    Log.e("WifiAware", "NDP Network Unavailable")
+                    ConnectionLog.add("Aware", "NDP unavailable")
+                    ndpUnavailableCount += 1
+                    _debugStats.update { stats ->
+                        stats.copy(
+                            isReady = false,
+                            lastSendAt = System.currentTimeMillis(),
+                            lastSendError = "ndp_unavailable"
+                        )
+                    }
+                    isConnecting = false
+                    rttWarmupUntilMs = 0L
+                    if (ndpUnavailableCount >= 3) {
+                        scheduleAwareSessionRestart("ndp unavailable x$ndpUnavailableCount")
+                    } else {
+                        scheduleFallbackConnect("ndp unavailable")
+                    }
                 }
             }
         }
@@ -863,10 +998,19 @@ class WifiAwareRanger(private val context: Context) {
     // 6. 종료 및 정리
     // =========================================================================
     fun stop() {
+        if (!isOnMainThread()) {
+            runOnMain { stop() }
+            return
+        }
+        lastStopAtMs = System.currentTimeMillis()
+        attachRequestToken += 1
         isRanging = false
         rttFailureStreak = 0
         rttStatusFailStreak = 0
         rttWarmupUntilMs = 0L
+        attachFailureStreak = 0
+        attachBlockedUntilMs = 0L
+        lastAttachAttemptAtMs = 0L
         isPeerWifiSupported = false // 상태 초기화
         cancelAttachRetry()
         pendingRestartRunnable?.let { handler.removeCallbacks(it) }
@@ -911,24 +1055,41 @@ class WifiAwareRanger(private val context: Context) {
         ConnectionLog.add("Aware", "stopped")
     }
 
-    private fun scheduleAttachRetry(reason: String) {
+    private fun scheduleAttachRetry(reason: String, delayMsOverride: Long? = null) {
+        if (!isOnMainThread()) {
+            runOnMain { scheduleAttachRetry(reason, delayMsOverride) }
+            return
+        }
         if (!isPeerWifiSupported || _isConnectionReady.value || session != null || isStarting) return
         attachRetryRunnable?.let { handler.removeCallbacks(it) }
+        val now = System.currentTimeMillis()
+        val blockedDelay = (attachBlockedUntilMs - now).takeIf { it > 0L }
+        val exponentialDelay = (attachRetryBaseMs * (1L shl attachFailureStreak.coerceIn(0, 4)))
+            .coerceAtMost(attachRetryMaxMs)
+        val delayMs = (delayMsOverride ?: blockedDelay ?: exponentialDelay).coerceAtLeast(500L)
         val runnable = Runnable {
             if (!isPeerWifiSupported || _isConnectionReady.value || session != null || isStarting) return@Runnable
-            ConnectionLog.add("Aware", "retry attach ($reason)")
+            ConnectionLog.add("Aware", "retry attach (${reason}) delay=${delayMs}ms")
             startIfReady()
         }
         attachRetryRunnable = runnable
-        handler.postDelayed(runnable, 2_000L)
+        handler.postDelayed(runnable, delayMs)
     }
 
     private fun cancelAttachRetry() {
+        if (!isOnMainThread()) {
+            runOnMain { cancelAttachRetry() }
+            return
+        }
         attachRetryRunnable?.let { handler.removeCallbacks(it) }
         attachRetryRunnable = null
     }
 
     private fun scheduleFallbackConnect(reason: String) {
+        if (!isOnMainThread()) {
+            runOnMain { scheduleFallbackConnect(reason) }
+            return
+        }
         if (_isConnectionReady.value || isConnecting || currentTargetPeer == null) return
         if (!isNdpInitiator && !peerRequestedNdp) {
             ConnectionLog.add("Aware", "fallback skipped: waiting initiator request")
@@ -948,6 +1109,10 @@ class WifiAwareRanger(private val context: Context) {
     }
 
     private fun scheduleAwareSessionRestart(reason: String) {
+        if (!isOnMainThread()) {
+            runOnMain { scheduleAwareSessionRestart(reason) }
+            return
+        }
         if (_isConnectionReady.value || isStarting) return
         pendingRestartRunnable?.let { handler.removeCallbacks(it) }
         val runnable = Runnable {
