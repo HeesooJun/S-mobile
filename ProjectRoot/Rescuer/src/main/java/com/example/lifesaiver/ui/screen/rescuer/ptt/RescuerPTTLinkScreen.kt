@@ -77,6 +77,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 enum class RssiFeedbackMode(val label: String) {
     OFF("알림 끔"),
@@ -257,7 +258,14 @@ fun RescuerPTTLinkScreen(
                     fontSize = scaledSp(12, scale),
                     fontWeight = FontWeight.Medium
                 )
-                Spacer(modifier = Modifier.height(scaledDp(64, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(14, scale)))
+                DistanceStatusCard(
+                    distanceMeters = distanceMeters,
+                    distanceSource = distanceSource,
+                    distanceTrend = distanceTrend,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(scaledDp(26, scale)))
                 Box(contentAlignment = Alignment.Center) {
                     FilledIconButton(
                         onClick = {
@@ -614,6 +622,82 @@ fun RescuerPTTLinkScreen(
 }
 
 @Composable
+private fun DistanceStatusCard(
+    distanceMeters: Float?,
+    distanceSource: DistanceMeasurementSource,
+    distanceTrend: DistanceTrend,
+    modifier: Modifier = Modifier
+) {
+    val scale = LocalAppScale.current
+    val hasDistance =
+        distanceMeters != null && distanceMeters.isFinite() && distanceMeters > 0f
+    val distanceText = if (hasDistance) {
+        String.format(Locale.getDefault(), "%.1f m", distanceMeters)
+    } else {
+        "탐색 중"
+    }
+    val sourceText = when (distanceSource) {
+        DistanceMeasurementSource.UWB -> "UWB"
+        DistanceMeasurementSource.RTT -> "RTT"
+        DistanceMeasurementSource.RSSI -> "RSSI"
+        DistanceMeasurementSource.NONE -> "신호 대기"
+    }
+    val trendText = when {
+        !hasDistance -> "거리 측정 준비 중"
+        distanceTrend == DistanceTrend.Approaching -> "가까워지는 중"
+        distanceTrend == DistanceTrend.Receding -> "멀어지는 중"
+        else -> "거리 유지"
+    }
+
+    Surface(
+        color = AppColors.Gray800.copy(alpha = 0.58f),
+        shape = RoundedCornerShape(scaledDp(14, scale)),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = scaledDp(14, scale),
+                    vertical = scaledDp(10, scale)
+                ),
+            verticalArrangement = Arrangement.spacedBy(scaledDp(4, scale))
+        ) {
+            Text(
+                text = "현재 거리",
+                color = AppColors.Gray500,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = distanceText,
+                    color = AppColors.White,
+                    fontSize = scaledSp(22, scale),
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = sourceText,
+                    color = AppColors.Gray400,
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                text = trendText,
+                color = AppColors.Gray400,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
 private fun PttChatPanel(
     roomTitle: String,
     messages: List<ChatMessage>,
@@ -732,11 +816,11 @@ private fun PttChatPanel(
                         fontWeight = FontWeight.Bold
                     )
                 } else {
-                    Text(
-                        text = if (isMicOn) "REC" else "MIC",
-                        color = if (isMicOn) AppColors.Black else AppColors.White,
-                        fontSize = scaledSp(10, scale),
-                        fontWeight = FontWeight.Bold
+                    Image(
+                        painter = painterResource(id = if (isMicOn) R.drawable.ic_mic_red else R.drawable.ic_mic),
+                        contentDescription = if (isMicOn) "MIC 녹음 중" else "MIC 대기",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(scaledDp(18, scale))
                     )
                 }
             }
