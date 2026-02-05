@@ -12,6 +12,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.BatteryManager
 import android.os.Build
+import android.os.SystemClock
 import android.net.wifi.WifiManager
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -210,6 +211,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var lastProfileBroadcastFingerprint: String = ""
     private var lastProfileBroadcastAtMs: Long = 0L
     private val profileBroadcastCooldownMs: Long = 2_000L
+    private val uwbSyncRequestLock = Any()
+    @Volatile private var uwbSyncRequestInFlight = false
+    private var lastUwbSyncTargetPeerId: String? = null
+    private var lastUwbSyncRequestAtMs: Long = 0L
+    private val uwbSyncMinIntervalMs: Long = 2_000L
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) { intent?.let { updateBatteryLevel(it) } }
@@ -448,43 +454,64 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun requestUwbSession(targetPeerIdHex: String) {
         if (targetPeerIdHex.isBlank()) return
         if (!isUwbSupportedLocally()) return
+        val normalizedTarget = targetPeerIdHex.trim().lowercase()
+        val now = SystemClock.elapsedRealtime()
+        synchronized(uwbSyncRequestLock) {
+            val sameTarget = lastUwbSyncTargetPeerId == normalizedTarget
+            if (uwbSyncRequestInFlight) return
+            if (sameTarget && now - lastUwbSyncRequestAtMs < uwbSyncMinIntervalMs) return
+            uwbSyncRequestInFlight = true
+            lastUwbSyncTargetPeerId = normalizedTarget
+            lastUwbSyncRequestAtMs = now
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val recipientId = runCatching { hexToBytes(targetPeerIdHex) }.getOrNull() ?: return@launch
-            val offer = uwbRanger.getControllerOfferOrNull() ?: uwbRanger.prepareControllerOfferBlocking() ?: return@launch
-            uwbRanger.configureControllerSession(peerAddress = null)
-            wifiDirectRanger.refreshLocalDeviceAddress()
-            val payload = CallHandshakePayload(
-                action = CallHandshakeAction.UWB_SYNC,
-                callerName = cachedNickname.ifBlank { "구조자" },
-                wifiAwareSupported = false,
-                wifiDirectSupported = false,
-                useOpus = false,
-                directDeviceAddress = wifiDirectRanger.getLocalDeviceAddress(),
-                uwbDeviceAddress = offer.controllerAddress,
-                uwbControllerAddress = offer.controllerAddress,
-                uwbControllerChannel = offer.channel,
-                uwbControllerPreambleIndex = offer.preambleIndex,
-                uwbSessionId = offer.sessionId
-            ).encode()
-            protocolCore.broadcast(
-                Packet(
-                    PacketHeader(
-                        2,
-                        PacketType.CALL_HANDSHAKE,
-                        ProtocolConstants.MESSAGE_TTL_HOPS,
-                        0,
-                        payload.size,
-                        System.currentTimeMillis(),
-                        senderId,
-                        recipientId
-                    ),
-                    payload
+            try {
+                val recipientId = runCatching { hexToBytes(normalizedTarget) }.getOrNull() ?: return@launch
+                val offer = uwbRanger.getControllerOfferOrNull() ?: uwbRanger.prepareControllerOfferBlocking() ?: return@launch
+                uwbRanger.configureControllerSession(peerAddress = null)
+                wifiDirectRanger.refreshLocalDeviceAddress()
+                val payload = CallHandshakePayload(
+                    action = CallHandshakeAction.UWB_SYNC,
+                    callerName = cachedNickname.ifBlank { "구조자" },
+                    wifiAwareSupported = false,
+                    wifiDirectSupported = false,
+                    useOpus = false,
+                    directDeviceAddress = wifiDirectRanger.getLocalDeviceAddress(),
+                    uwbDeviceAddress = offer.controllerAddress,
+                    uwbControllerAddress = offer.controllerAddress,
+                    uwbControllerChannel = offer.channel,
+                    uwbControllerPreambleIndex = offer.preambleIndex,
+                    uwbSessionId = offer.sessionId
+                ).encode()
+                protocolCore.broadcast(
+                    Packet(
+                        PacketHeader(
+                            2,
+                            PacketType.CALL_HANDSHAKE,
+                            ProtocolConstants.MESSAGE_TTL_HOPS,
+                            0,
+                            payload.size,
+                            System.currentTimeMillis(),
+                            senderId,
+                            recipientId
+                        ),
+                        payload
+                    )
                 )
-            )
+            } finally {
+                synchronized(uwbSyncRequestLock) {
+                    uwbSyncRequestInFlight = false
+                }
+            }
         }
     }
 
     fun stopUwbSession() {
+        synchronized(uwbSyncRequestLock) {
+            uwbSyncRequestInFlight = false
+            lastUwbSyncTargetPeerId = null
+            lastUwbSyncRequestAtMs = 0L
+        }
         uwbRanger.endSession()
     }
 
