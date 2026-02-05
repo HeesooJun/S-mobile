@@ -43,7 +43,7 @@ ProjectRoot/
         └── core/          # BLE/UWB/Wi-Fi/오디오/거리 추정 공통 계층
 ```
 
-아키텍처 흐름도와 상세 설명은 [`docs/architecture/system_architecture.md`](docs/architecture/system_architecture.md)에 정리했습니다.
+아키텍처 흐름도와 상세 설명은 [`docs/architecture/system_architecture.md`](ProjectRoot/docs/architecture/system_architecture.md)에 정리했습니다.
 
 ## 모듈 구성
 - `:lifesaiver`: 피구조자 앱(긴급 모드, 자동 호출, 구조 통신 UI)
@@ -100,7 +100,7 @@ ProjectRoot/
 - `REQUEST_SYNC`: 누락 데이터 동기화 요청
 - `FILE_TRANSFER`, `FILE_ACK`: 파일 전송 및 수신 확인
 
-패킷별 송신자/수신자/필드 상세는 [`docs/protocol/packet_types.md`](docs/protocol/packet_types.md)에 정리했습니다.
+패킷별 송신자/수신자/필드 상세는 [`docs/protocol/packet_types.md`](ProjectRoot/docs/protocol/packet_types.md)에 정리했습니다.
 
 ## 동기화 / 신뢰성 / 보안
 - RequestSync + GCS(골롬-라이스) 필터로 누락 데이터만 선택 재전송
@@ -109,14 +109,14 @@ ProjectRoot/
 - Store-and-Forward 캐시로 오프라인 구간 재전달 보완
 - Ed25519 기반 서명 검증으로 핵심 패킷 위변조 방지
 
-동기화/신뢰성/보안 정책 상세는 [`docs/network/README.md`](docs/network/README.md)에 정리했습니다.
+동기화/신뢰성/보안 정책 상세는 [`docs/network/README.md`](ProjectRoot/docs/network/README.md)에 정리했습니다.
 
 ## AI 기술
 - `SpeechRecognizer`로 음성을 텍스트로 변환
 - `bert_kor.tflite`로 비상/일상 의도 분류
 - 비상으로 분류된 발화를 자동 호출 흐름과 연동
 
-AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](docs/ai/ai_pipeline.md)에 정리했습니다.
+AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](ProjectRoot/docs/ai/ai_pipeline.md)에 정리했습니다.
 
 ## 의존성 (Dependencies)
 
@@ -143,17 +143,18 @@ AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](docs/ai/ai_pipeline.md)�
 
 ### Build
 ```powershell
-.\gradlew.bat :lifesaiver:assembleDebug
-.\gradlew.bat :rescuer:assembleDebug
+.\ProjectRoot\gradlew.bat :lifesaiver:assembleDebug
+.\ProjectRoot\gradlew.bat :rescuer:assembleDebug
 ```
 
 ### Test
 ```powershell
-.\gradlew.bat :lifesaiver:testDebugUnitTest
-.\gradlew.bat :rescuer:testDebugUnitTest
+.\ProjectRoot\gradlew.bat :lifesaiver:testDebugUnitTest
+.\ProjectRoot\gradlew.bat :rescuer:testDebugUnitTest
 ```
 
 ## 지원 범위 / 제약
 - UWB는 단말 하드웨어 지원 + 권한 허용 시에만 동작
 - 기본 전파 경로는 BLE 메쉬, 통화 경로는 Wi-Fi Aware 우선 후 Wi-Fi Direct fallback
 - 오프라인 환경에서 동기화는 RequestSync + GCS 기반 누락 복구 방식으로 수행
+

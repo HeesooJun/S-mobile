@@ -8,17 +8,11 @@
 - 브로드캐스트 `MESSAGE`
 
 ## 동작 방식
-```mermaid
-sequenceDiagram
-    participant A as 요청 노드
-    participant B as 응답 노드
-
-    A->>A: 보유 Packet ID 집합 생성
-    A->>A: GCS 필터 압축
-    A->>B: REQUEST_SYNC(p, m, data) 전송
-    B->>B: 필터 디코드 및 누락 후보 계산
-    B->>A: 누락된 패킷만 재전송
-```
+1. 요청 노드가 보유 Packet ID 집합을 생성합니다.
+2. ID 집합을 GCS 필터로 압축합니다.
+3. `REQUEST_SYNC(p, m, data)`를 응답 노드로 전송합니다.
+4. 응답 노드가 필터를 디코드해 누락 후보를 계산합니다.
+5. 응답 노드가 누락된 패킷만 선택 재전송합니다.
 
 ## 파라미터
 | 항목 | 설정값 | 설정 근거 | 코드 위치 |

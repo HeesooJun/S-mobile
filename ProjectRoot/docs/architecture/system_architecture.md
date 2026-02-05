@@ -2,25 +2,11 @@
 
 ## 1) 런타임 처리 흐름
 
-```mermaid
-sequenceDiagram
-    participant Survivor as 피구조자 앱
-    participant Mesh as BLE 메쉬
-    participant Rescuer as 구조자 앱
-
-    Survivor->>Survivor: SOS/음성/센서/타이머 트리거
-    Survivor->>Mesh: ANNOUNCE/MESSAGE 전파
-    Mesh-->>Rescuer: 멀티홉 릴레이 수신
-    Rescuer->>Rescuer: 거리 추정(UWB/RSSI) + 대상 판단
-    Rescuer->>Survivor: DEVICE_CONTROL / CALL_HANDSHAKE / MESSAGE
-```
-
-### 단계별 설명
-1. 피구조자 앱에서 긴급 트리거가 발생하면 패킷 생성 요청이 시작됩니다.
-2. `ProtocolCore`가 패킷을 파이프라인으로 넘겨 TTL, 중복 처리, 조각화 여부를 적용합니다.
-3. 전송 계층(BLE 메쉬)이 주변 노드에 전파하고, 필요 시 멀티홉으로 확장됩니다.
-4. 구조자 앱이 수신 패킷을 바탕으로 생존자 상태와 거리 정보를 갱신합니다.
-5. 구조자는 제어/통신 패킷을 다시 송신해 대응(원격 제어, 호출 응답, 메시지)을 진행합니다.
+1. 피구조자 앱에서 SOS/음성/센서/타이머 트리거가 발생하면 패킷 생성 요청이 시작됩니다.
+2. `ProtocolCore`가 `ANNOUNCE`, `MESSAGE`를 생성하고 파이프라인에서 TTL, 중복 처리, 조각화 여부를 적용합니다.
+3. BLE 메쉬가 패킷을 주변 노드로 전달하고, 필요 시 멀티홉으로 릴레이합니다.
+4. 구조자 앱은 수신 패킷을 기반으로 피구조자 상태를 갱신하고 대응 대상을 선택합니다.
+5. 구조자 앱은 `DEVICE_CONTROL`, `CALL_HANDSHAKE`, `MESSAGE`를 송신해 원격 대응과 통신을 이어갑니다.
 
 ## 2) 통신 경로 정책
 
