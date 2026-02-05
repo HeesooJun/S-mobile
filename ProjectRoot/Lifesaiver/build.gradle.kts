@@ -15,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.lifesaiver"
-        minSdk = 29
+        minSdk = 31
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
