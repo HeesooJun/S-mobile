@@ -123,6 +123,8 @@ class BleManager(
     private val scanRssiFilters = mutableMapOf<String, RssiKalmanFilter>()
     private val connectionRssiFilters = mutableMapOf<String, RssiKalmanFilter>()
     private val pendingRssiReadAddresses = mutableSetOf<String>()
+    private val pendingRssiReadRequestedAtMs = mutableMapOf<String, Long>()
+    private val rssiReadPendingTimeoutMs: Long = 8_000L
     private var rssiMonitorJob: Job? = null
 
     private data class ConnectionAttempt(
@@ -294,6 +296,7 @@ class BleManager(
         if (rssiMonitorJob?.isActive == true) return
         rssiMonitorJob = ioScope.launch {
             while (isActive) {
+                clearStalePendingRssiReads()
                 val snapshot = synchronized(clientConnections) { clientConnections.toMap() }
                 snapshot.forEach { (address, gatt) ->
                     if (!markRssiReadPending(address)) return@forEach
@@ -320,6 +323,7 @@ class BleManager(
         synchronized(pendingRssiReadAddresses) {
             if (pendingRssiReadAddresses.contains(address)) return false
             pendingRssiReadAddresses.add(address)
+            pendingRssiReadRequestedAtMs[address] = SystemClock.elapsedRealtime()
             return true
         }
     }
@@ -327,6 +331,21 @@ class BleManager(
     private fun clearRssiReadPending(address: String) {
         synchronized(pendingRssiReadAddresses) {
             pendingRssiReadAddresses.remove(address)
+            pendingRssiReadRequestedAtMs.remove(address)
+        }
+    }
+
+    private fun clearStalePendingRssiReads() {
+        val now = SystemClock.elapsedRealtime()
+        synchronized(pendingRssiReadAddresses) {
+            val staleAddresses = pendingRssiReadRequestedAtMs
+                .filterValues { requestedAt -> now - requestedAt >= rssiReadPendingTimeoutMs }
+                .keys
+                .toList()
+            staleAddresses.forEach { address ->
+                pendingRssiReadAddresses.remove(address)
+                pendingRssiReadRequestedAtMs.remove(address)
+            }
         }
     }
 
@@ -373,6 +392,7 @@ class BleManager(
         }
         synchronized(pendingRssiReadAddresses) {
             pendingRssiReadAddresses.clear()
+            pendingRssiReadRequestedAtMs.clear()
         }
     }
 
@@ -1126,7 +1146,24 @@ class BleManager(
         }
     }
 
+    private fun pickLastKnownRssi(
+        connectionValue: Int?,
+        connectionUpdatedAtMs: Long?,
+        scanValue: Int?,
+        scanUpdatedAtMs: Long?
+    ): Int? {
+        if (connectionValue == null && scanValue == null) return null
+        return when {
+            connectionValue != null && scanValue != null ->
+                if ((connectionUpdatedAtMs ?: 0L) >= (scanUpdatedAtMs ?: 0L)) connectionValue else scanValue
+
+            connectionValue != null -> connectionValue
+            else -> scanValue
+        }
+    }
+
     fun getPeerRssiSnapshot(): Map<String, Int> {
+        val connectedAddresses = getAllConnectedAddresses()
         val addressToPeer = synchronized(addressPeerMap) { addressPeerMap.toMap() }
         val connection = synchronized(connectionRssi) { connectionRssi.toMap() }
         val connectionUpdatedAt = synchronized(connectionRssiUpdatedAtMs) { connectionRssiUpdatedAtMs.toMap() }
@@ -1141,7 +1178,16 @@ class BleManager(
                 scanValue = scan[address],
                 scanUpdatedAtMs = scanUpdatedAt[address],
                 nowMs = now
-            ) ?: return@forEach
+            ) ?: if (connectedAddresses.contains(address)) {
+                pickLastKnownRssi(
+                    connectionValue = connection[address],
+                    connectionUpdatedAtMs = connectionUpdatedAt[address],
+                    scanValue = scan[address],
+                    scanUpdatedAtMs = scanUpdatedAt[address]
+                )
+            } else {
+                null
+            } ?: return@forEach
             val existing = result[peerId]
             if (existing == null || rssi > existing) {
                 result[peerId] = rssi
