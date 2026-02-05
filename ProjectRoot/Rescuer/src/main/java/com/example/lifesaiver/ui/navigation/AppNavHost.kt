@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -166,6 +167,9 @@ fun AppNavHost(
     var knownSurvivorPeerIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var survivorSignalTrackingReady by remember { mutableStateOf(false) }
     var lastUwbSyncRequestAtMs by rememberSaveable { mutableStateOf(0L) }
+    var lastUwbProbePeerId by rememberSaveable { mutableStateOf<String?>(null) }
+    var uwbProbeStartedAtMs by rememberSaveable { mutableStateOf(0L) }
+    var allowRttFallbackForUwbTarget by rememberSaveable { mutableStateOf(false) }
     var lastAwareRttReportAtMs by rememberSaveable { mutableStateOf(0L) }
     var lastAwareRttReportCm by rememberSaveable { mutableStateOf<Int?>(null) }
     var rssiFeedbackMode by rememberSaveable { mutableStateOf(RssiFeedbackMode.OFF.name) }
@@ -178,12 +182,24 @@ fun AppNavHost(
     }
     fun resolvePeerSupportsAware(peerId: String?): Boolean {
         if (peerId.isNullOrBlank()) return false
-        val fromSurvivor = appState.survivors.firstOrNull { it.peerId == peerId }?.isWifiAware == true
-        return fromSurvivor || (appState.callPeerId == peerId && appState.callPeerWifiAware == true)
+        val survivor = appState.survivors.firstOrNull { it.peerId == peerId }
+        val fromSurvivor = survivor?.isWifiAware == true
+        val fromCallHandshake = appState.callPeerId == peerId && appState.callPeerWifiAware == true
+        val fromBleLink = directPeerIds.contains(peerId)
+        val fromRssiSignal = appState.peerRssi.containsKey(peerId)
+        val fromUwbHint = survivor?.isUwb == true
+        return fromSurvivor || fromCallHandshake || fromBleLink || fromRssiSignal || fromUwbHint
     }
     val distanceTargetPeerId = targetSurvivor?.peerId ?: selectedTargetPeerId ?: selectedTargetSurvivor?.peerId
     val distanceTargetSupportsUwb = resolvePeerSupportsUwb(distanceTargetPeerId)
     val currentRoute = backStackEntry?.destination?.route
+    val isPttRoute = currentRoute == AppRoute.RescuerPTT.route
+    val shouldPreferUwbOnDetail = isPttRoute &&
+        !isInCall &&
+        !distanceTargetPeerId.isNullOrBlank() &&
+        appViewModel.isUwbSupportedLocally() &&
+        distanceTargetSupportsUwb
+    val uwbToRttFallbackDelayMs = 8_000L
     val shouldRunDistanceTracking = isInCall ||
         currentRoute == AppRoute.RescuerPTT.route ||
         currentRoute == AppRoute.RescuerSurvivorDb.route
@@ -206,9 +222,23 @@ fun AppNavHost(
         viewModelStoreOwner = context as ViewModelStoreOwner,
         factory = distanceViewModelFactory
     )
-    LaunchedEffect(Unit) {
-        // Keep RTT enabled in both idle and in-call states.
-        appViewModel.wifiAwareRanger.setRttEnabled(true)
+    LaunchedEffect(
+        isInCall,
+        currentRoute,
+        distanceTargetPeerId,
+        shouldPreferUwbOnDetail,
+        allowRttFallbackForUwbTarget
+    ) {
+        // RTT는 구조자 상세(PTT) + 통화 아님 상태에서만 활성화합니다.
+        val enableRtt = !isInCall &&
+            isPttRoute &&
+            !distanceTargetPeerId.isNullOrBlank() &&
+            (!shouldPreferUwbOnDetail || allowRttFallbackForUwbTarget)
+        Log.i(
+            "NavHostPTT",
+            "RTT gate route=$currentRoute inCall=$isInCall enableRtt=$enableRtt preferUwb=$shouldPreferUwbOnDetail rttFallback=$allowRttFallbackForUwbTarget"
+        )
+        appViewModel.wifiAwareRanger.setRttEnabled(enableRtt)
     }
     LaunchedEffect(shouldRunDistanceTracking) {
         appViewModel.setBleRssiActiveMode(shouldRunDistanceTracking)
@@ -307,11 +337,6 @@ fun AppNavHost(
         val localWifiAware = if (forceDirectOnly) false else appViewModel.isWifiAwareSupportedLocally()
         val localWifiDirect = appViewModel.isWifiDirectSupportedLocally()
         val targetPeerId = survivor.peerId.ifBlank { directPeerIds.firstOrNull().orEmpty() }
-        val peerSupportsUwb = resolvePeerSupportsUwb(targetPeerId)
-        if (!peerSupportsUwb) {
-            appViewModel.stopUwbSession()
-            lastUwbSyncRequestAtMs = 0L
-        }
         if (targetPeerId.isBlank()) {
             Toast.makeText(context, "연결된 BLE 피어가 없습니다.", Toast.LENGTH_SHORT).show()
             return
@@ -510,16 +535,61 @@ fun AppNavHost(
         distanceViewModel.setActiveTransport(callDebugState.activeTransport)
     }
 
-    LaunchedEffect(distanceTargetPeerId, distanceTargetSupportsUwb) {
+    LaunchedEffect(distanceTargetPeerId, distanceTargetSupportsUwb, currentRoute) {
         val localUwb = appViewModel.isUwbSupportedLocally()
         val hasTargetPeer = !distanceTargetPeerId.isNullOrBlank()
-        // Keep UWB tracking path open while capability handshake catches up.
-        val peerUwb = hasTargetPeer && (distanceTargetSupportsUwb || localUwb)
-        distanceViewModel.setUwbCapability(localSupported = localUwb, peerSupported = peerUwb)
-        if (!hasTargetPeer) {
+        val allowUwbOnRoute = isPttRoute
+        val peerUwb = allowUwbOnRoute && hasTargetPeer && distanceTargetSupportsUwb
+        distanceViewModel.setUwbCapability(
+            localSupported = localUwb && allowUwbOnRoute,
+            peerSupported = peerUwb
+        )
+        if (!hasTargetPeer || !allowUwbOnRoute) {
             appViewModel.stopUwbSession()
             lastUwbSyncRequestAtMs = 0L
         }
+    }
+    LaunchedEffect(
+        distanceTargetPeerId,
+        currentRoute,
+        isInCall,
+        forceDirectOnly,
+        shouldPreferUwbOnDetail,
+        allowRttFallbackForUwbTarget
+    ) {
+        if (isInCall) {
+            Log.i(
+                "NavHostPTT",
+                "Aware capability skip target=$distanceTargetPeerId route=$currentRoute inCall=$isInCall forceDirectOnly=$forceDirectOnly"
+            )
+            return@LaunchedEffect
+        }
+        if (forceDirectOnly || !isPttRoute) {
+            Log.i(
+                "NavHostPTT",
+                "Aware capability off target=$distanceTargetPeerId route=$currentRoute inCall=$isInCall forceDirectOnly=$forceDirectOnly"
+            )
+            appViewModel.wifiAwareRanger.updatePeerCapability(false)
+            return@LaunchedEffect
+        }
+        if (shouldPreferUwbOnDetail && !allowRttFallbackForUwbTarget) {
+            Log.i(
+                "NavHostPTT",
+                "Aware capability hold target=$distanceTargetPeerId preferUwb=true rttFallback=false"
+            )
+            appViewModel.wifiAwareRanger.updatePeerCapability(false)
+            return@LaunchedEffect
+        }
+        val targetPeerId = distanceTargetPeerId
+        val hasTarget = !targetPeerId.isNullOrBlank()
+        val peerAwareKnown = resolvePeerSupportsAware(targetPeerId)
+        // 상세 페이지에서는 capability announce 누락/갱신 지연 시에도 RTT probe를 유지합니다.
+        val enableAwareProbe = hasTarget
+        Log.i(
+            "NavHostPTT",
+            "Aware capability update target=$targetPeerId peerAwareKnown=$peerAwareKnown probe=$enableAwareProbe directLink=${directPeerIds.contains(targetPeerId)} rssiSeen=${if (targetPeerId.isNullOrBlank()) false else appState.peerRssi.containsKey(targetPeerId)}"
+        )
+        appViewModel.wifiAwareRanger.updatePeerCapability(enableAwareProbe)
     }
 
     LaunchedEffect(
@@ -1084,6 +1154,14 @@ fun AppNavHost(
 
         composable(AppRoute.RescuerPTT.route) {
             LaunchedEffect(Unit) {
+                Log.i(
+                    "NavHostPTT",
+                    "PTT enter selected=$selectedTargetPeerId callPeer=${appState.callPeerId} inCall=$isInCall"
+                )
+                // 상세 재진입 시 이전 UWB probe 타이머를 초기화해 즉시 RTT fallback으로 넘어가지 않게 합니다.
+                lastUwbProbePeerId = null
+                uwbProbeStartedAtMs = 0L
+                allowRttFallbackForUwbTarget = false
                 onStartAutoConnect()
             }
             val distanceState by distanceViewModel.uiState.collectAsState()
@@ -1109,17 +1187,38 @@ fun AppNavHost(
                 ?: selectedTargetSurvivor?.peerId
                 ?: targetSurvivor?.peerId
                 ?: appState.callPeerId
-            val pttTargetSupportsAware = resolvePeerSupportsAware(pttTargetPeerId)
+            val pttTargetSupportsUwb = resolvePeerSupportsUwb(pttTargetPeerId)
             val canAttemptUwbOnDetail =
-                appViewModel.isUwbSupportedLocally() && !pttTargetPeerId.isNullOrBlank()
-            val preferRttOnDetail =
-                !forceDirectOnly &&
-                    appViewModel.isWifiAwareSupportedLocally() &&
-                    pttTargetSupportsAware
+                appViewModel.isUwbSupportedLocally() &&
+                    pttTargetSupportsUwb &&
+                    !pttTargetPeerId.isNullOrBlank()
             LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, isInCall) {
-                if (!isInCall && canAttemptUwbOnDetail && !pttTargetPeerId.isNullOrBlank()) {
-                    appViewModel.requestUwbSession(pttTargetPeerId)
+                Log.i(
+                    "NavHostPTT",
+                    "UWB gate target=$pttTargetPeerId canAttempt=$canAttemptUwbOnDetail inCall=$isInCall"
+                )
+                if (!canAttemptUwbOnDetail || pttTargetPeerId.isNullOrBlank()) {
+                    appViewModel.stopUwbSession()
+                    lastUwbSyncRequestAtMs = 0L
+                    if (lastUwbProbePeerId == pttTargetPeerId) {
+                        lastUwbProbePeerId = null
+                        uwbProbeStartedAtMs = 0L
+                    }
+                    allowRttFallbackForUwbTarget = true
+                    return@LaunchedEffect
                 }
+                if (lastUwbProbePeerId != pttTargetPeerId) {
+                    lastUwbProbePeerId = pttTargetPeerId
+                    uwbProbeStartedAtMs = System.currentTimeMillis()
+                    allowRttFallbackForUwbTarget = false
+                }
+                appViewModel.requestUwbSession(pttTargetPeerId)
+            }
+            LaunchedEffect(pttTargetPeerId, isInCall, callDebugState.activeTransport, callDebugState.wifiAware.isReady) {
+                Log.i(
+                    "NavHostPTT",
+                    "PTT state target=$pttTargetPeerId inCall=$isInCall transport=${callDebugState.activeTransport} awareReady=${callDebugState.wifiAware.isReady} rtt=${liveAwareRttMeters}"
+                )
             }
             LaunchedEffect(
                 pttTargetPeerId,
@@ -1131,8 +1230,22 @@ fun AppNavHost(
                 val hasUwbDistance =
                     distanceState.measurementSource == DistanceMeasurementSource.UWB &&
                         distanceState.distanceMeters != null
-                if (hasUwbDistance) return@LaunchedEffect
                 val now = System.currentTimeMillis()
+                if (hasUwbDistance) {
+                    allowRttFallbackForUwbTarget = false
+                    uwbProbeStartedAtMs = now
+                    return@LaunchedEffect
+                }
+                if (uwbProbeStartedAtMs == 0L) {
+                    uwbProbeStartedAtMs = now
+                }
+                if (!allowRttFallbackForUwbTarget && now - uwbProbeStartedAtMs >= uwbToRttFallbackDelayMs) {
+                    allowRttFallbackForUwbTarget = true
+                    Log.i(
+                        "NavHostPTT",
+                        "UWB timeout target=$pttTargetPeerId elapsed=${now - uwbProbeStartedAtMs}ms -> enable RTT fallback"
+                    )
+                }
                 if (now - lastUwbSyncRequestAtMs < 3_000L) return@LaunchedEffect
                 lastUwbSyncRequestAtMs = now
                 appViewModel.requestUwbSession(pttTargetPeerId)
@@ -1142,7 +1255,6 @@ fun AppNavHost(
             val peerRttDistanceMeters = appState.callPeerRttCm?.toFloat()?.div(100f)
             val pttPeerRssi = pttTargetPeerId?.let { appState.peerRssi[it] }
             val rssiFallbackDistanceMeters = pttPeerRssi?.let { estimateDistanceMetersFromRssi(it) }
-            val isAwareCallActive = isInCall && callDebugState.activeTransport == CallTransportType.WIFI_AWARE
             val awareRttDistanceMeters = liveAwareRttMeters ?: peerRttDistanceMeters
             LaunchedEffect(
                 isInCall,
@@ -1183,28 +1295,40 @@ fun AppNavHost(
                 lastAwareRttReportCm = rttCm
                 lastAwareRttReportAtMs = now
             }
-            val hasUwbDistance =
-                distanceState.measurementSource == DistanceMeasurementSource.UWB &&
-                    distanceState.distanceMeters != null
+            val uwbDistanceMeters =
+                if (distanceState.measurementSource == DistanceMeasurementSource.UWB) {
+                    distanceState.distanceMeters
+                } else {
+                    null
+                }
+            val hybridRttDistanceMeters =
+                if (distanceState.measurementSource == DistanceMeasurementSource.RTT) {
+                    distanceState.distanceMeters
+                } else {
+                    null
+                }
+            val hybridRssiDistanceMeters =
+                if (distanceState.measurementSource == DistanceMeasurementSource.RSSI) {
+                    distanceState.distanceMeters
+                } else {
+                    null
+                }
+            val resolvedRttDistanceMeters = if (isInCall) {
+                null
+            } else {
+                awareRttDistanceMeters ?: hybridRttDistanceMeters
+            }
+            val resolvedRssiDistanceMeters = hybridRssiDistanceMeters ?: rssiFallbackDistanceMeters
             val displayDistanceMeters = when {
-                hasUwbDistance -> distanceState.distanceMeters
-                // Prefer RTT only when it is actually measured; otherwise keep RSSI fallback.
-                preferRttOnDetail && awareRttDistanceMeters != null -> awareRttDistanceMeters
-                // Capability is only a hint. Final selection must prefer measured values.
-                isAwareCallActive && awareRttDistanceMeters != null -> awareRttDistanceMeters
-                distanceState.distanceMeters != null -> distanceState.distanceMeters
-                isInCall && peerRttDistanceMeters != null -> peerRttDistanceMeters
-                rssiFallbackDistanceMeters != null -> rssiFallbackDistanceMeters
+                uwbDistanceMeters != null -> uwbDistanceMeters
+                resolvedRttDistanceMeters != null -> resolvedRttDistanceMeters
+                resolvedRssiDistanceMeters != null -> resolvedRssiDistanceMeters
                 else -> null
             }
             val displayDistanceSource = when {
-                hasUwbDistance -> DistanceMeasurementSource.UWB
-                preferRttOnDetail && awareRttDistanceMeters != null -> DistanceMeasurementSource.RTT
-                isAwareCallActive && awareRttDistanceMeters != null -> DistanceMeasurementSource.RTT
-                isAwareCallActive && displayDistanceMeters == null -> DistanceMeasurementSource.RTT
-                distanceState.distanceMeters != null -> distanceState.measurementSource
-                isInCall && peerRttDistanceMeters != null -> DistanceMeasurementSource.RTT
-                rssiFallbackDistanceMeters != null -> DistanceMeasurementSource.RSSI
+                uwbDistanceMeters != null -> DistanceMeasurementSource.UWB
+                resolvedRttDistanceMeters != null -> DistanceMeasurementSource.RTT
+                resolvedRssiDistanceMeters != null -> DistanceMeasurementSource.RSSI
                 else -> distanceState.measurementSource
             }
             val resolvedRssiMode = runCatching {
@@ -1430,11 +1554,11 @@ fun AppNavHost(
                     distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
                     distanceViewModel.setUwbCapability(
                         localSupported = localSupportsUwb,
-                        peerSupported = hasTargetPeer && (supportsUwb || localSupportsUwb)
+                        peerSupported = hasTargetPeer && supportsUwb
                     )
-                    if (localSupportsUwb && hasTargetPeer) {
+                    if (localSupportsUwb && hasTargetPeer && supportsUwb) {
                         appViewModel.requestUwbSession(survivor.peerId)
-                    } else if (!supportsUwb) {
+                    } else {
                         appViewModel.stopUwbSession()
                         lastUwbSyncRequestAtMs = 0L
                     }
@@ -1464,9 +1588,9 @@ fun AppNavHost(
                     distanceViewModel.setTargetPeerId(survivor.peerId.ifBlank { null })
                     distanceViewModel.setUwbCapability(
                         localSupported = localSupportsUwb,
-                        peerSupported = hasTargetPeer && (supportsUwb || localSupportsUwb)
+                        peerSupported = hasTargetPeer && supportsUwb
                     )
-                    if (localSupportsUwb && hasTargetPeer) {
+                    if (localSupportsUwb && hasTargetPeer && supportsUwb) {
                         appViewModel.requestUwbSession(survivor.peerId)
                     } else {
                         appViewModel.stopUwbSession()
@@ -1478,10 +1602,17 @@ fun AppNavHost(
                 isInCall = isInCall,
                 callingPeerId = callingTargetPeerId,
                 callPeerId = appState.callPeerId,
-                callPeerRttCm = appState.callPeerRttCm,
                 activeDistancePeerId = dbDistanceTargetPeerId,
-                activeDistanceMeters = dbDistanceState.distanceMeters,
-                activeDistanceSource = dbDistanceState.measurementSource
+                activeDistanceMeters = if (dbDistanceState.measurementSource == DistanceMeasurementSource.RSSI) {
+                    dbDistanceState.distanceMeters
+                } else {
+                    null
+                },
+                activeDistanceSource = if (dbDistanceState.measurementSource == DistanceMeasurementSource.RSSI) {
+                    DistanceMeasurementSource.RSSI
+                } else {
+                    DistanceMeasurementSource.NONE
+                }
             )
         }
 
@@ -1561,10 +1692,14 @@ fun AppNavHost(
     }
 }
 
-private fun estimateDistanceMetersFromRssi(rssi: Int): Float {
+private fun estimateDistanceMetersFromRssi(rssi: Int): Float? {
+    // BLE RSSI 유효 범위를 벗어나면 거리값을 표시하지 않습니다.
+    if (rssi !in -110..-20) return null
     val txPower = -59
     val pathLossExponent = 2.0
-    return 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
+    val distance = 10.0.pow((txPower - rssi) / (10 * pathLossExponent)).toFloat()
+    if (!distance.isFinite() || distance <= 0f) return null
+    return distance
 }
 
 private fun triggerRescuerRssiVibration(
