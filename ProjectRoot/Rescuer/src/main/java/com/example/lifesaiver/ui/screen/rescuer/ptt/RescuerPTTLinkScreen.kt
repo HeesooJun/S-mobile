@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material3.CircularProgressIndicator
@@ -25,9 +26,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,14 +46,15 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import com.example.lifesaiver.R
 import com.example.lifesaiver.core.log.ConnectionLog
+import com.example.lifesaiver.core.model.ChatMessage
 import com.example.lifesaiver.presentation.MeshVisualEvent
 import com.example.lifesaiver.presentation.BleDebugStats
-import com.example.lifesaiver.ui.components.DistanceTrack
 import com.example.lifesaiver.core.location.DistanceMeasurementSource
 import com.example.lifesaiver.core.location.DistanceTrend
 import com.example.lifesaiver.ui.components.MeshEdge
@@ -59,6 +63,7 @@ import com.example.lifesaiver.ui.components.PowerSavingLayer
 import com.example.lifesaiver.ui.components.ScreenScaffold
 import com.example.lifesaiver.ui.components.SignalBars
 import com.example.lifesaiver.ui.components.SignalVariant
+import com.example.lifesaiver.ui.components.chat.AutoScrollChatList
 import com.example.lifesaiver.ui.components.tripleClickable
 import com.example.lifesaiver.ui.theme.AppColors
 import com.example.lifesaiver.ui.theme.LocalAppScale
@@ -100,10 +105,14 @@ fun RescuerPTTLinkScreen(
     distanceMeters: Float?,
     distanceTrend: DistanceTrend,
     distanceSource: DistanceMeasurementSource,
+    targetDisplayName: String? = null,
+    chatRoomTitle: String = "전체 채팅",
+    chatMessages: List<ChatMessage> = emptyList(),
     onRequestCall: () -> Unit,
     onEndCall: () -> Unit,
     onBack: () -> Unit,
     onPanicClear: () -> Unit,
+    onSendChat: (String) -> Unit = {},
     onToggleSpeakerphone: () -> Unit = {},
     rssiFeedbackMode: RssiFeedbackMode = RssiFeedbackMode.BOTH,
     rssiFeedbackLevel: RssiFeedbackLevel = RssiFeedbackLevel.MEDIUM,
@@ -127,9 +136,16 @@ fun RescuerPTTLinkScreen(
     var isVibrateRepeating by remember { mutableStateOf(false) }
     var isHighToneRepeating by remember { mutableStateOf(false) }
     val connectionLogs by ConnectionLog.logs.collectAsState()
-    val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
+    val meshDisplayCount = (meshPeerCount - 1).coerceAtLeast(0)
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
+    val targetStatusText = when {
+        isInCall && targetDisplayName.isNullOrBlank() -> "통화 연결됨"
+        targetDisplayName.isNullOrBlank() -> "대상 미선택"
+        isInCall -> "${targetDisplayName}님과 통화 연결됨"
+        isCalling -> "${targetDisplayName}님 통화 연결 시도 중"
+        else -> "${targetDisplayName}님 선택됨"
+    }
 
     LaunchedEffect(remoteControlEnabled) {
         if (!remoteControlEnabled) {
@@ -209,26 +225,25 @@ fun RescuerPTTLinkScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(modifier = Modifier.height(scaledDp(30, scale)))
-                DistanceTrack(
-                    distanceMeters = distanceMeters,
-                    trend = distanceTrend,
-                    maxMeters = 30f,
-                    measurementSource = distanceSource,
-                    modifier = Modifier.padding(top = scaledDp(12, scale))
-                )
-
-                Spacer(modifier = Modifier.height(scaledDp(40, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
                 Text(
                     text = when {
-                        hasMeshPeers -> "메쉬 연결됨"
-                        isConnected -> "생존자 연결됨"
+                        hasMeshPeers -> "메쉬 연결됨 (ANNOUNCE 수신)"
+                        isConnected -> "직접 연결됨"
                         else -> "생존자 연결 대기 중"
                     },
                     color = if (isLinkActive) AppColors.Green else AppColors.Gray500,
                     fontSize = scaledSp(14, scale),
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(scaledDp(74, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(4, scale)))
+                Text(
+                    text = targetStatusText,
+                    color = if (targetDisplayName.isNullOrBlank()) AppColors.Gray500 else AppColors.White,
+                    fontSize = scaledSp(12, scale),
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(scaledDp(54, scale)))
                 Box(contentAlignment = Alignment.Center) {
                     FilledIconButton(
                         onClick = {
@@ -260,7 +275,7 @@ fun RescuerPTTLinkScreen(
                 Spacer(modifier = Modifier.height(scaledDp(14, scale)))
                 Text(
                     text = when {
-                        isCalling && !isInCall -> "통화 요청 전송 중..."
+                        isCalling && !isInCall -> "통화 연결 대기 중... (최대 15초)"
                         isInCall -> "통화 중 · 버튼을 눌러 종료"
                         else -> "통화 요청"
                     },
@@ -400,7 +415,16 @@ fun RescuerPTTLinkScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Spacer(modifier = Modifier.height(scaledDp(36, scale)))
+                Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                PttChatPanel(
+                    roomTitle = chatRoomTitle,
+                    messages = chatMessages,
+                    onSend = onSendChat,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(scaledDp(220, scale))
+                )
+                Spacer(modifier = Modifier.height(scaledDp(12, scale)))
                 Spacer(modifier = Modifier.weight(1f))
                 Row(
                     modifier = Modifier
@@ -511,6 +535,137 @@ fun RescuerPTTLinkScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PttChatPanel(
+    roomTitle: String,
+    messages: List<ChatMessage>,
+    onSend: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val scale = LocalAppScale.current
+    var inputValue by remember { mutableStateOf("") }
+
+    Column(
+        modifier = modifier
+            .background(
+                color = AppColors.Gray900.copy(alpha = 0.82f),
+                shape = RoundedCornerShape(scaledDp(14, scale))
+            )
+            .padding(scaledDp(12, scale))
+    ) {
+        Text(
+            text = roomTitle,
+            color = AppColors.White,
+            fontSize = scaledSp(12, scale),
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        AutoScrollChatList(
+            messages = messages,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            listModifier = Modifier.fillMaxWidth(),
+            verticalSpacing = scaledDp(6, scale)
+        ) { message ->
+            PttChatMessageBubble(message = message)
+        }
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(scaledDp(8, scale))
+        ) {
+            OutlinedTextField(
+                value = inputValue,
+                onValueChange = { inputValue = it },
+                placeholder = {
+                    Text(
+                        text = "메시지 입력...",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale)
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = AppColors.White,
+                    fontSize = scaledSp(11, scale)
+                ),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = AppColors.Gray800,
+                    unfocusedContainerColor = AppColors.Gray800,
+                    disabledContainerColor = AppColors.Gray800,
+                    focusedIndicatorColor = AppColors.Gray700,
+                    unfocusedIndicatorColor = AppColors.Gray700,
+                    cursorColor = AppColors.Green,
+                    focusedTextColor = AppColors.White,
+                    unfocusedTextColor = AppColors.White
+                )
+            )
+            TextButton(
+                enabled = inputValue.isNotBlank(),
+                onClick = {
+                    val payload = inputValue.trim()
+                    if (payload.isNotBlank()) {
+                        onSend(payload)
+                        inputValue = ""
+                    }
+                }
+            ) {
+                Text(
+                    text = "전송",
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PttChatMessageBubble(message: ChatMessage) {
+    val scale = LocalAppScale.current
+    val background = if (message.isMine) AppColors.GreenSoft else AppColors.Gray800
+    val textColor = if (message.isMine) AppColors.Green else AppColors.White
+    val labelText = if (message.isMine) {
+        "나"
+    } else {
+        val rawSender = message.senderName?.trim().orEmpty()
+        if (rawSender.isNotBlank()) {
+            rawSender.replace(Regex("\\[[^\\]]{4}\\]$"), "").trim().ifBlank { rawSender }
+        } else {
+            "상대"
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
+    ) {
+        Column(horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start) {
+            Text(
+                text = labelText,
+                color = AppColors.Gray500,
+                fontSize = scaledSp(9, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(scaledDp(2, scale)))
+            Box(
+                modifier = Modifier
+                    .background(background, shape = RoundedCornerShape(scaledDp(12, scale)))
+                    .padding(horizontal = scaledDp(10, scale), vertical = scaledDp(6, scale))
+            ) {
+                Text(
+                    text = message.text,
+                    color = textColor,
+                    fontSize = scaledSp(11, scale)
+                )
             }
         }
     }

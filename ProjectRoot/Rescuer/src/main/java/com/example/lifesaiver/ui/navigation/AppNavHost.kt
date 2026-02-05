@@ -1228,6 +1228,32 @@ fun AppNavHost(
                 RssiFeedbackLevel.MEDIUM -> 2
                 RssiFeedbackLevel.HIGH -> 3
             }
+            val pttTargetName = pttTargetPeerId
+                ?.let { targetId ->
+                    appState.survivors
+                        .firstOrNull { it.peerId == targetId }
+                        ?.name
+                        ?.trim()
+                        ?.ifBlank { null }
+                        ?: peerNicknames[targetId]
+                            ?.trim()
+                            ?.ifBlank { null }
+                }
+            val pttChatMessages = if (!pttTargetPeerId.isNullOrBlank()) {
+                messages.filter { message ->
+                    (message.isMine && message.recipientPeerId == pttTargetPeerId) ||
+                        (!message.isMine &&
+                            message.senderPeerId == pttTargetPeerId &&
+                            (message.recipientPeerId == null || message.recipientPeerId == myPeerId))
+                }
+            } else {
+                messages.filter { it.recipientPeerId == null }
+            }
+            val pttChatRoomTitle = if (!pttTargetName.isNullOrBlank()) {
+                "대상 채팅 · $pttTargetName"
+            } else {
+                "전체 채팅"
+            }
             LaunchedEffect(
                 pttTargetPeerId,
                 displayDistanceMeters,
@@ -1303,6 +1329,9 @@ fun AppNavHost(
                 distanceMeters = displayDistanceMeters,
                 distanceTrend = distanceState.trend,
                 distanceSource = displayDistanceSource,
+                targetDisplayName = pttTargetName,
+                chatRoomTitle = pttChatRoomTitle,
+                chatMessages = pttChatMessages,
                 onRequestCall = {
                     val survivor = resolveSelectedSurvivorForCall()
                     if (survivor == null) {
@@ -1381,6 +1410,14 @@ fun AppNavHost(
                 },
                 onSendRemoteStop = {
                     sendRemoteStopIfNeeded(pttTargetPeerId)
+                },
+                onSendChat = { text ->
+                    val targetPeerId = pttTargetPeerId
+                    if (targetPeerId.isNullOrBlank()) {
+                        onSendMessage(text)
+                    } else {
+                        appViewModel.onSendDirectMessage(targetPeerId, text)
+                    }
                 }
             )
         }
