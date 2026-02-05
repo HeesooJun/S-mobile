@@ -25,4 +25,7 @@
 - 함수/변수: camelCase
 - 패키지: 소문자
 - 리소스: snake_case
+- 문서 파일명(.md): snake_case (예: `system_architecture.md`, `packet_types.md`, 폴더 인덱스는 `README.md` 예외 허용)
+- 문서 폴더명: 소문자 (예: `docs/architecture`, `docs/protocol`, `docs/ai`)
+- 문서 링크: README 기준 상대경로 사용
 - 도구: ktlint + detekt + EditorConfig
