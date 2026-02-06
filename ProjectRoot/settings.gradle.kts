@@ -19,10 +19,10 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Lifesaiver"
-include(":lifesaiver", ":rescuer", ":shared")
+rootProject.name = "Lifesaivior"
+include(":lifesaivior", ":rescuer", ":shared")
 
-project(":lifesaiver").projectDir = file("Lifesaiver")
+project(":lifesaivior").projectDir = file("Lifesaivior")
 project(":rescuer").projectDir = file("Rescuer")
 project(":shared").projectDir = file("shared")
  

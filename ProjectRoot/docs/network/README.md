@@ -8,6 +8,6 @@
 - 보안: [`security.md`](security.md)
 
 ## 적용 범위
-- 피구조자 앱(`:lifesaiver`)
+- 피구조자 앱(`:lifesaivior`)
 - 구조자 앱(`:rescuer`)
 - 공통 엔진(`:shared`)
