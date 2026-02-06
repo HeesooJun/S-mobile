@@ -14,6 +14,7 @@ class DeviceMonitoringManager(
     private val log: (String) -> Unit = {},
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
+    private val autoBlockEnabled = false
     private data class BlockEntry(val expiresAtMs: Long, val reason: String)
 
     private val blocked = ConcurrentHashMap<String, BlockEntry>()
@@ -24,6 +25,7 @@ class DeviceMonitoringManager(
 
     @Synchronized
     fun isBlocked(address: String): Boolean {
+        if (!autoBlockEnabled) return false
         val entry = blocked[address] ?: return false
         if (entry.expiresAtMs <= clock()) {
             unblockInternal(address, logEvent = false)
@@ -34,6 +36,7 @@ class DeviceMonitoringManager(
 
     @Synchronized
     fun onConnectionEstablished(address: String) {
+        if (!autoBlockEnabled) return
         if (isBlocked(address)) {
             disconnectCallback(address)
             return
@@ -49,12 +52,14 @@ class DeviceMonitoringManager(
 
     @Synchronized
     fun onAnyPacketReceived(address: String) {
+        if (!autoBlockEnabled) return
         if (isBlocked(address)) return
         startInactivityTimer(address)
     }
 
     @Synchronized
     fun onDeviceDisconnected(address: String, isError: Boolean) {
+        if (!autoBlockEnabled) return
         cancelTimer(announceTimers, address)
         cancelTimer(inactivityTimers, address)
         if (!isError) return
@@ -71,6 +76,7 @@ class DeviceMonitoringManager(
 
     @Synchronized
     fun block(address: String, reason: String) {
+        if (!autoBlockEnabled) return
         if (isBlocked(address)) return
         val expiresAt = clock() + ProtocolConstants.Ble.BLOCKLIST_TTL_MS
         blocked[address] = BlockEntry(expiresAt, reason)
