@@ -27,16 +27,16 @@
 
 ```text
 ProjectRoot/
-├── Lifesaiver/src/main/java/com/example/lifesaiver/
+├── Lifesaivior/src/main/java/com/example/lifesaivior/
 │   ├── ui/
 │   ├── presentation/
 │   ├── wakeup/
 │   └── core/
-├── Rescuer/src/main/java/com/example/lifesaiver/
+├── Rescuer/src/main/java/com/example/lifesaivior/
 │   ├── ui/
 │   ├── presentation/
 │   └── core/
-└── shared/src/main/java/com/example/lifesaiver/
+└── shared/src/main/java/com/example/lifesaivior/
     ├── protocol/
     └── core/
 ```
@@ -45,18 +45,18 @@ ProjectRoot/
 
 | 영역 | 컴포넌트 | 역할 | 파일 |
 |---|---|---|---|
-| 앱 오케스트레이션 | AppViewModel | 화면 상태, 패킷 송수신, 호출/제어 이벤트 제어 | [Rescuer AppViewModel](../../Rescuer/src/main/java/com/example/lifesaiver/presentation/AppViewModel.kt) |
-| 앱 오케스트레이션 | AppViewModel | 피구조자 UI 상태, 호출 흐름, 패킷 처리 제어 | [Lifesaiver AppViewModel](../../Lifesaiver/src/main/java/com/example/lifesaiver/presentation/AppViewModel.kt) |
-| 프로토콜 코어 | ProtocolCore | 패킷 생성/전파/수신 진입점 | [ProtocolCore](../../shared/src/main/java/com/example/lifesaiver/protocol/core/ProtocolCore.kt) |
-| 파이프라인 | PacketPipeline | 중복 제거, 조각화/재조립 처리 | [PacketPipeline](../../shared/src/main/java/com/example/lifesaiver/protocol/pipeline/PacketPipeline.kt) |
-| 동기화 | GossipSyncManager | RequestSync + GCS 기반 누락 복구 | [GossipSyncManager](../../shared/src/main/java/com/example/lifesaiver/protocol/sync/GossipSyncManager.kt) |
-| 보안 | SignatureManager | Ed25519 서명/검증 및 키 로드 | [SignatureManager](../../shared/src/main/java/com/example/lifesaiver/protocol/security/SignatureManager.kt) |
-| BLE 전송 | BleManager | 광고/스캔/연결 및 메쉬 중계 | [BleManager](../../shared/src/main/java/com/example/lifesaiver/core/ble/BleManager.kt) |
-| 거리 추정 | HybridDistanceManager | UWB 우선 + RTT/RSSI 보조 거리 계산 | [HybridDistanceManager](../../shared/src/main/java/com/example/lifesaiver/core/location/HybridDistanceManager.kt) |
-| UWB | UwbRanger | UWB 세션 생성 및 거리 측정 처리 | [UwbRanger](../../shared/src/main/java/com/example/lifesaiver/core/uwb/UwbRanger.kt) |
-| 통화 경로 | WifiAwareRanger / WifiDirectRanger | 실시간 통화 데이터 경로 선택/유지 | [WifiAwareRanger](../../shared/src/main/java/com/example/lifesaiver/core/wifi/WifiAwareRanger.kt) / [WifiDirectRanger](../../shared/src/main/java/com/example/lifesaiver/core/wifi/WifiDirectRanger.kt) |
-| 음성 인식 | VoiceTriggerDetector | STT 입력 수집 및 자동 호출 연계 | [VoiceTriggerDetector](../../Lifesaiver/src/main/java/com/example/lifesaiver/ai/stt/VoiceTriggerDetector.kt) |
-| 의도 분류 | EmergencyIntentClassifierKorean | `bert_kor.tflite` 기반 비상/일상 분류 | [EmergencyIntentClassifierKorean](../../Lifesaiver/src/main/java/com/example/lifesaiver/ai/stt/EmergencyIntentClassifierKorean.kt) |
+| 앱 오케스트레이션 | AppViewModel | 화면 상태, 패킷 송수신, 호출/제어 이벤트 제어 | [Rescuer AppViewModel](../../Rescuer/src/main/java/com/example/lifesaivior/presentation/AppViewModel.kt) |
+| 앱 오케스트레이션 | AppViewModel | 피구조자 UI 상태, 호출 흐름, 패킷 처리 제어 | [Lifesaivior AppViewModel](../../Lifesaivior/src/main/java/com/example/lifesaivior/presentation/AppViewModel.kt) |
+| 프로토콜 코어 | ProtocolCore | 패킷 생성/전파/수신 진입점 | [ProtocolCore](../../shared/src/main/java/com/example/lifesaivior/protocol/core/ProtocolCore.kt) |
+| 파이프라인 | PacketPipeline | 중복 제거, 조각화/재조립 처리 | [PacketPipeline](../../shared/src/main/java/com/example/lifesaivior/protocol/pipeline/PacketPipeline.kt) |
+| 동기화 | GossipSyncManager | RequestSync + GCS 기반 누락 복구 | [GossipSyncManager](../../shared/src/main/java/com/example/lifesaivior/protocol/sync/GossipSyncManager.kt) |
+| 보안 | SignatureManager | Ed25519 서명/검증 및 키 로드 | [SignatureManager](../../shared/src/main/java/com/example/lifesaivior/protocol/security/SignatureManager.kt) |
+| BLE 전송 | BleManager | 광고/스캔/연결 및 메쉬 중계 | [BleManager](../../shared/src/main/java/com/example/lifesaivior/core/ble/BleManager.kt) |
+| 거리 추정 | HybridDistanceManager | UWB 우선 + RTT/RSSI 보조 거리 계산 | [HybridDistanceManager](../../shared/src/main/java/com/example/lifesaivior/core/location/HybridDistanceManager.kt) |
+| UWB | UwbRanger | UWB 세션 생성 및 거리 측정 처리 | [UwbRanger](../../shared/src/main/java/com/example/lifesaivior/core/uwb/UwbRanger.kt) |
+| 통화 경로 | WifiAwareRanger / WifiDirectRanger | 실시간 통화 데이터 경로 선택/유지 | [WifiAwareRanger](../../shared/src/main/java/com/example/lifesaivior/core/wifi/WifiAwareRanger.kt) / [WifiDirectRanger](../../shared/src/main/java/com/example/lifesaivior/core/wifi/WifiDirectRanger.kt) |
+| 음성 인식 | VoiceTriggerDetector | STT 입력 수집 및 자동 호출 연계 | [VoiceTriggerDetector](../../Lifesaivior/src/main/java/com/example/lifesaivior/ai/stt/VoiceTriggerDetector.kt) |
+| 의도 분류 | EmergencyIntentClassifierKorean | `bert_kor.tflite` 기반 비상/일상 분류 | [EmergencyIntentClassifierKorean](../../Lifesaivior/src/main/java/com/example/lifesaivior/ai/stt/EmergencyIntentClassifierKorean.kt) |
 
 ## 5) 의존성
 

@@ -8,13 +8,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.lifesaiver"
+    namespace = "com.example.lifesaivior"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.lifesaiver.rescuer"
+        applicationId = "com.example.lifesaivior.rescuer"
         minSdk = 31
         targetSdk = 34
         versionCode = 1

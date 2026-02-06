@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.lifesaiver.shared"
+    namespace = "com.example.lifesaivior.shared"
     compileSdk {
         version = release(36)
     }
