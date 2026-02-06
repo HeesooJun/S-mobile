@@ -24,6 +24,8 @@
 | `VIBRATE` | 진동 실행 | [DeviceControlCommand](../../shared/src/main/java/com/example/lifesaivior/protocol/model/DeviceControlPayload.kt) |
 | `HIGH_TONE` | 고주파 톤 재생 | [DeviceControlCommand](../../shared/src/main/java/com/example/lifesaivior/protocol/model/DeviceControlPayload.kt) |
 | `STOP_ALERTS` | 실행 중 경보/알림 중지 | [DeviceControlCommand](../../shared/src/main/java/com/example/lifesaivior/protocol/model/DeviceControlPayload.kt) |
+| `POWER_SAVE_ON` | 절전 모드 켜기 | [DeviceControlCommand](../../shared/src/main/java/com/example/lifesaivior/protocol/model/DeviceControlPayload.kt) |
+| `POWER_SAVE_OFF` | 절전 모드 끄기 | [DeviceControlCommand](../../shared/src/main/java/com/example/lifesaivior/protocol/model/DeviceControlPayload.kt) |
 
 ## CALL_HANDSHAKE 액션 상세
 
