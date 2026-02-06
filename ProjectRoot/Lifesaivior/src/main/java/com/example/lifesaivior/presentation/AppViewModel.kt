@@ -220,6 +220,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val meshRegistry = MeshPeerRegistry()
     private val peerDirectAddresses = ConcurrentHashMap<String, String>()
     private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
+    private val announcedProfiles = ConcurrentHashMap<String, SurvivorProfile>()
     private val announcedPeerLastSeen = ConcurrentHashMap<String, Long>()
     private var announceJob: kotlinx.coroutines.Job? = null
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
@@ -1077,6 +1078,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         announcedPeerLastSeen.remove(removedPeerId)
                         peerDirectAddresses.remove(removedPeerId)
                         peerNicknames.remove(removedPeerId)
+                        announcedProfiles.remove(removedPeerId)
                     }
                     val directAddress = announcement.wifiDirectAddress?.trim()?.lowercase()?.ifBlank { null }
                     if (announcement.nickname.isNotBlank()) {
@@ -1085,6 +1087,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (directAddress != null) {
                         peerDirectAddresses[peerHex] = directAddress
                     }
+                    updateAnnouncedProfile(peerHex, announcement)
                     _uiState.update { state ->
                         val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peerHex) {
                             directAddress
@@ -1138,6 +1141,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     announcedToPeers.remove(peerHex)
                     announcedPeerLastSeen.remove(peerHex)
                     peerDirectAddresses.remove(peerHex)
+                    announcedProfiles.remove(peerHex)
                     if (peerNicknames.remove(peerHex) != null) {
                         _uiState.update {
                             it.copy(
@@ -1336,13 +1340,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val localBattery = _uiState.value.batteryLevel.coerceIn(0, 100)
         val noisePublicKey = signatureManager.getNoisePublicKeyBytes()
         val signingPublicKey = signatureManager.getPublicKeyBytes()
+        val profileSnapshot = cachedProfile
         val announcement = IdentityAnnouncementPayload(
             nickname = nickname,
             noisePublicKey = noisePublicKey,
             signingPublicKey = signingPublicKey,
             wifiDirectAddress = directAddress,
             batteryLevel = localBattery,
-            powerSavingEnabled = localPowerSavingEnabled
+            powerSavingEnabled = localPowerSavingEnabled,
+            gender = profileSnapshot.gender,
+            birthDate = profileSnapshot.birthDate,
+            notes = profileSnapshot.notes
         )
         val basePayload = announcement.encode() ?: return
         val directPeers = bleManager.getConnectedPeerIds()
@@ -1587,16 +1595,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val list = peerIds.map { peerId ->
                 val base = discoveredSurvivors[peerId]
                     ?: SurvivorProfile(name = peerNicknames[peerId].orEmpty(), peerId = peerId)
+                val merged = mergeProfile(base, announcedProfiles[peerId], peerNicknames[peerId].orEmpty())
                 val info = meshRegistry.getPeer(peerId)
-                base.copy(
-                    isWifiAware = info?.isWifiAware ?: base.isWifiAware,
-                    isWifiDirect = info?.isWifiDirect ?: base.isWifiDirect,
-                    isUwb = info?.isUwb ?: base.isUwb,
+                merged.copy(
+                    isWifiAware = info?.isWifiAware ?: merged.isWifiAware,
+                    isWifiDirect = info?.isWifiDirect ?: merged.isWifiDirect,
+                    isUwb = info?.isUwb ?: merged.isUwb,
                     peerId = peerId
                 )
             }
             state.copy(survivors = list)
         }
+    }
+
+    private fun updateAnnouncedProfile(peerId: String, announcement: IdentityAnnouncementPayload) {
+        val profile = SurvivorProfile(
+            name = announcement.nickname,
+            gender = announcement.gender.orEmpty(),
+            birthDate = announcement.birthDate.orEmpty(),
+            notes = announcement.notes.orEmpty(),
+            peerId = peerId
+        )
+        announcedProfiles[peerId] = profile
+    }
+
+    private fun mergeProfile(
+        base: SurvivorProfile,
+        announced: SurvivorProfile?,
+        fallbackName: String
+    ): SurvivorProfile {
+        val mergedName = pickNonBlank(base.name, announced?.name).ifBlank { fallbackName }
+        return base.copy(
+            name = mergedName,
+            gender = pickNonBlank(base.gender, announced?.gender),
+            birthDate = pickNonBlank(base.birthDate, announced?.birthDate),
+            notes = pickNonBlank(base.notes, announced?.notes)
+        )
+    }
+
+    private fun pickNonBlank(primary: String, fallback: String?): String {
+        return if (primary.isNotBlank()) primary else fallback?.takeIf { it.isNotBlank() }.orEmpty()
     }
 
     private fun pruneAnnouncedPeers(now: Long) {
@@ -1607,6 +1645,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             announcedPeerLastSeen.remove(peerId)
             peerDirectAddresses.remove(peerId)
             meshRegistry.remove(peerId)
+            announcedProfiles.remove(peerId)
         }
         _uiState.update {
             it.copy(peerDirectAddresses = peerDirectAddresses.toMap())
