@@ -87,7 +87,8 @@ fun RescuerMeshMapScreen(
                 Text(
                     text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
                     color = AppColors.Gray400,
-                    fontSize = scaledSp(12, scale)
+                    fontSize = scaledSp(12, scale),
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }

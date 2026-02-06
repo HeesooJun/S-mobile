@@ -1,4 +1,4 @@
-﻿package com.example.lifesaivior.ui.screen.rescuer.db
+package com.example.lifesaivior.ui.screen.rescuer.db
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -119,7 +119,7 @@ fun RescuerSurvivorDbScreen(
                         text = "LIFESAIVIOR",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     ActionPill(
@@ -158,7 +158,7 @@ fun RescuerSurvivorDbScreen(
                                     text = "신호 수신 ${survivors.size}명 · 탭하여 자세히 보기",
                                     color = AppColors.Gray500,
                                     fontSize = scaledSp(12, scale),
-                                    fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                                 )
                             }
                             ActionPill(
@@ -189,7 +189,7 @@ fun RescuerSurvivorDbScreen(
                         placeholder = {
                             Text(
                                 "이름으로 검색",
-                                color = Color.White.copy(alpha = 0.45f),
+                                color = AppColors.White.copy(alpha = 0.45f),
                                 fontSize = scaledSp(14, scale)
                             )
                         },
@@ -197,7 +197,7 @@ fun RescuerSurvivorDbScreen(
                             Icon(
                                 imageVector = Icons.Outlined.Search,
                                 contentDescription = "검색",
-                                tint = Color.White.copy(alpha = 0.6f)
+                                tint = AppColors.White.copy(alpha = 0.6f)
                             )
                         },
                         colors = TextFieldDefaults.colors(
@@ -207,8 +207,8 @@ fun RescuerSurvivorDbScreen(
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
                             cursorColor = neonGreen,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            focusedTextColor = AppColors.White,
+                            unfocusedTextColor = AppColors.White
                         )
                     )
                 }
@@ -233,16 +233,16 @@ fun RescuerSurvivorDbScreen(
                         ) {
                             Text(
                                 text = "수신된 생존자 정보가 없습니다",
-                                color = Color.White.copy(alpha = 0.85f),
+                                color = AppColors.White.copy(alpha = 0.85f),
                                 fontSize = scaledSp(14, scale),
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
                                 text = "연결되면 이 화면에 자동으로 표시됩니다",
-                                color = Color.White.copy(alpha = 0.5f),
+                                color = AppColors.White.copy(alpha = 0.5f),
                                 fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -302,7 +302,7 @@ fun RescuerSurvivorDbScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.55f)),
+                        .background(AppColors.Shadow.copy(alpha = 0.55f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Surface(
@@ -331,16 +331,16 @@ fun RescuerSurvivorDbScreen(
                             Spacer(modifier = Modifier.height(scaledDp(14, scale)))
                             Text(
                                 text = "통화 연결 시도 중",
-                                color = Color.White,
+                                color = AppColors.White,
                                 fontSize = scaledSp(15, scale),
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                             Text(
                                 text = "$callingSurvivorName · 최대 15초 대기",
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = AppColors.White.copy(alpha = 0.72f),
                                 fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -495,16 +495,16 @@ private fun SurvivorCard(
                 ) {
                     Text(
                         text = if (survivor.name.isBlank()) "이름 미상" else survivor.name,
-                        color = Color.White,
+                        color = AppColors.White,
                         fontSize = scaledSp(16, scale),
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(scaledDp(4, scale)))
                     Text(
                         text = summaryText,
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = AppColors.White.copy(alpha = 0.55f),
                         fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -564,9 +564,9 @@ private fun SurvivorCard(
                             append(" · ")
                             append(if (survivor.birthDate.isBlank()) "생년월일 미상" else survivor.birthDate)
                         },
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = AppColors.White.copy(alpha = 0.55f),
                         fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                     MiniChip(

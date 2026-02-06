@@ -1,4 +1,4 @@
-﻿package com.example.lifesaivior.ui.screen.rescuer.ptt
+package com.example.lifesaivior.ui.screen.rescuer.ptt
 
 import android.media.MediaPlayer
 import androidx.compose.foundation.border
@@ -195,7 +195,7 @@ fun RescuerPTTLinkScreen(
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
-        vignetteColor = AppColors.Black.copy(alpha = 0.7f)
+        vignetteColor = AppColors.Shadow.copy(alpha = 0.7f)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             PowerSavingLayer(
@@ -278,8 +278,8 @@ fun RescuerPTTLinkScreen(
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = if (isInCall) AppColors.Red else AppColors.Green,
                             disabledContainerColor = AppColors.Green.copy(alpha = 0.4f),
-                            contentColor = AppColors.White,
-                            disabledContentColor = AppColors.White.copy(alpha = 0.8f)
+                            contentColor = AppColors.PureWhite,
+                            disabledContentColor = AppColors.PureWhite.copy(alpha = 0.8f)
                         )
                     ) {
                         Icon(
@@ -428,12 +428,13 @@ fun RescuerPTTLinkScreen(
             }
             if (showControlModal) {
                 Dialog(onDismissRequest = { showControlModal = false }) {
+                    val modalScale = scale / 1.08f
                     Surface(
                         color = AppColors.Gray900,
                         shape = RoundedCornerShape(scaledDp(18, scale)),
                         modifier = Modifier
-                            .fillMaxWidth(0.98f)
-                            .padding(horizontal = scaledDp(12, scale))
+                            .fillMaxWidth()
+                            .padding(horizontal = scaledDp(6, scale))
                     ) {
                         Column(
                             modifier = Modifier
@@ -443,14 +444,14 @@ fun RescuerPTTLinkScreen(
                             Text(
                                 text = "원격 제어",
                                 color = AppColors.White,
-                                fontSize = scaledSp(16, scale),
+                                fontSize = scaledSp(16, modalScale),
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
                                 text = "RSSI 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
                                 color = AppColors.Gray400,
-                                fontSize = scaledSp(11, scale),
+                                fontSize = scaledSp(11, modalScale),
                                 fontWeight = FontWeight.Medium
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
@@ -470,7 +471,7 @@ fun RescuerPTTLinkScreen(
                                 ) {
                                     Text(
                                         text = "알림 모드 변경",
-                                        fontSize = scaledSp(11, scale)
+                                        fontSize = scaledSp(11, modalScale)
                                     )
                                 }
                                 Button(
@@ -485,7 +486,7 @@ fun RescuerPTTLinkScreen(
                                 ) {
                                     Text(
                                         text = "강도 변경",
-                                        fontSize = scaledSp(11, scale)
+                                        fontSize = scaledSp(11, modalScale)
                                     )
                                 }
                             }
@@ -501,7 +502,7 @@ fun RescuerPTTLinkScreen(
                                     false -> AppColors.Green
                                     null -> AppColors.Gray500
                                 },
-                                fontSize = scaledSp(11, scale),
+                                fontSize = scaledSp(11, modalScale),
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
@@ -518,9 +519,11 @@ fun RescuerPTTLinkScreen(
                                         disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
                                         disabledContentColor = AppColors.Gray500
                                     ),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(scaledDp(52, scale))
                                 ) {
-                                    Text("절전 켜기", fontSize = scaledSp(11, scale))
+                                    Text("절전 켜기", fontSize = scaledSp(11, modalScale))
                                 }
                                 Button(
                                     enabled = remoteControlEnabled,
@@ -531,23 +534,12 @@ fun RescuerPTTLinkScreen(
                                         disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
                                         disabledContentColor = AppColors.Gray500
                                     ),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(scaledDp(52, scale))
                                 ) {
-                                    Text("절전 해제", fontSize = scaledSp(11, scale))
+                                    Text("절전 해제", fontSize = scaledSp(11, modalScale))
                                 }
-                            }
-                            Spacer(modifier = Modifier.height(scaledDp(8, scale)))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
-                            ) {
-                                RepeatActionButton(
-                                    label = "화면 깨우기",
-                                    enabled = remoteControlEnabled,
-                                    onTap = onSendRemoteWake,
-                                    isRepeating = false,
-                                    modifier = Modifier.weight(1f)
-                                )
                                 RepeatActionButton(
                                     label = "비프음",
                                     enabled = remoteControlEnabled,
@@ -556,8 +548,16 @@ fun RescuerPTTLinkScreen(
                                     onStickyStateChanged = { stickyBeep = it },
                                     isRepeating = isBeepRepeating,
                                     onActiveStateChanged = { isBeepRepeating = it },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(scaledDp(44, scale))
                                 )
+                            }
+                            Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
+                            ) {
                                 TextButton(
                                     enabled = remoteControlEnabled,
                                     onClick = {
@@ -572,16 +572,12 @@ fun RescuerPTTLinkScreen(
                                         disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
                                         disabledContentColor = AppColors.Gray500
                                     ),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(scaledDp(44, scale))
                                 ) {
-                                    Text("송출 중지", fontSize = scaledSp(11, scale))
+                                    Text("송출 중지", fontSize = scaledSp(11, modalScale))
                                 }
-                            }
-                            Spacer(modifier = Modifier.height(scaledDp(4, scale)))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(scaledDp(6, scale))
-                            ) {
                                 RepeatActionButton(
                                     label = "저주파",
                                     enabled = remoteControlEnabled,
@@ -590,7 +586,9 @@ fun RescuerPTTLinkScreen(
                                     onStickyStateChanged = { stickyVibrate = it },
                                     isRepeating = isVibrateRepeating,
                                     onActiveStateChanged = { isVibrateRepeating = it },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(scaledDp(44, scale))
                                 )
                                 RepeatActionButton(
                                     label = "고주파",
@@ -600,7 +598,9 @@ fun RescuerPTTLinkScreen(
                                     onStickyStateChanged = { stickyHighTone = it },
                                     isRepeating = isHighToneRepeating,
                                     onActiveStateChanged = { isHighToneRepeating = it },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(scaledDp(44, scale))
                                 )
                             }
                             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
@@ -616,52 +616,47 @@ fun RescuerPTTLinkScreen(
                                     "안내: 비프음/저주파/고주파를 3초 길게 누르면 반복 고정"
                                 },
                                 color = if (repeatingItems.isNotEmpty()) AppColors.Green else AppColors.Gray500,
-                                fontSize = scaledSp(10, scale),
+                                fontSize = scaledSp(10, modalScale),
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
-                                text = "화면 깨우기: 대상 기기의 화면을 잠깐 깨웁니다.",
-                                color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
-                            )
-                            Text(
                                 text = "절전 켜기/해제: 대상 기기의 절전 상태를 직접 변경합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
+                                fontSize = scaledSp(10, modalScale)
                             )
                             Text(
                                 text = "비프음: 대상 기기에서 경고음을 재생합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
+                                fontSize = scaledSp(10, modalScale)
                             )
                             Text(
                                 text = "저주파: 대상 기기에서 진동을 울립니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
+                                fontSize = scaledSp(10, modalScale)
                             )
                             Text(
                                 text = "고주파: 대상 기기에서 높은 주파수대의 음을 재생합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
+                                fontSize = scaledSp(10, modalScale)
                             )
                             Text(
                                 text = "강도 변경: 알림 강도를 약/중/강으로 순환합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
+                                fontSize = scaledSp(10, modalScale)
                             )
                             Text(
                                 text = "송출 중지: 현재 실행 중인 반복 송출을 즉시 멈춥니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
+                                fontSize = scaledSp(10, modalScale)
                             )
                             Spacer(modifier = Modifier.height(scaledDp(14, scale)))
                             Text(
                                 text = "닫기",
                                 color = AppColors.Green,
-                                fontSize = scaledSp(12, scale),
+                                fontSize = scaledSp(12, modalScale),
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier
                                     .align(Alignment.End)
@@ -865,7 +860,7 @@ private fun PttChatPanel(
                 if (inputValue.isNotBlank()) {
                     Text(
                         text = "전송",
-                        color = AppColors.Black,
+                        color = AppColors.PureWhite,
                         fontSize = scaledSp(10, scale),
                         fontWeight = FontWeight.Bold
                     )
@@ -906,7 +901,7 @@ private fun PttChatPanel(
 private fun PttChatMessageBubble(message: ChatMessage) {
     val scale = LocalAppScale.current
     val background = if (message.isMine) Color(0xFF2B2F33) else Color(0xFFF27B7B)
-    val textColor = AppColors.White
+    val textColor = AppColors.PureWhite
     val voicePath = message.text.takeIf { it.startsWith(VOICE_PREFIX) }
         ?.removePrefix(VOICE_PREFIX)
         ?.trim()
@@ -1040,7 +1035,7 @@ private fun PttAudioMessageBubble(
                     text = if (isPlaying) "Pause" else "Play",
                     fontSize = scaledSp(10, scale),
                     fontWeight = FontWeight.Bold,
-                    color = AppColors.White
+                    color = AppColors.PureWhite
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -1048,7 +1043,7 @@ private fun PttAudioMessageBubble(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(scaledDp(3, scale))
-                        .background(AppColors.White.copy(alpha = 0.35f), shape = RoundedCornerShape(999.dp))
+                        .background(AppColors.PureWhite.copy(alpha = 0.35f), shape = RoundedCornerShape(999.dp))
                 ) {
                     val progress = if (durationMs > 0) {
                         positionMs.toFloat() / durationMs.toFloat()
@@ -1059,13 +1054,13 @@ private fun PttAudioMessageBubble(
                         modifier = Modifier
                             .fillMaxWidth(progress.coerceIn(0f, 1f))
                             .height(scaledDp(3, scale))
-                            .background(AppColors.White, shape = RoundedCornerShape(999.dp))
+                            .background(AppColors.PureWhite, shape = RoundedCornerShape(999.dp))
                     )
                 }
                 Spacer(modifier = Modifier.height(scaledDp(3, scale)))
                 Text(
                     text = "${formatAudioTime(positionMs)}/${formatAudioTime(durationMs)}",
-                    color = AppColors.White.copy(alpha = 0.85f),
+                    color = AppColors.PureWhite.copy(alpha = 0.85f),
                     fontSize = scaledSp(9, scale)
                 )
             }
@@ -1281,3 +1276,4 @@ private fun buildMeshGraphState(
 
     return MeshGraphUiState(nodes = nodes, edges = edges)
 }
+

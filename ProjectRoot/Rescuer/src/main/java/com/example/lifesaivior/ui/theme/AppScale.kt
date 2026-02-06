@@ -11,6 +11,8 @@ import androidx.compose.ui.unit.sp
 
 val LocalAppScale = staticCompositionLocalOf { 1f }
 
+private const val TEXT_SCALE_BOOST = 1.08f
+
 @Composable
 @ReadOnlyComposable
 fun rememberAppScale(
@@ -26,6 +28,6 @@ fun scaledDp(value: Int, scale: Float): Dp = (value * scale).dp
 
 fun scaledDp(value: Float, scale: Float): Dp = (value * scale).dp
 
-fun scaledSp(value: Int, scale: Float): TextUnit = (value * scale).sp
+fun scaledSp(value: Int, scale: Float): TextUnit = (value * scale * TEXT_SCALE_BOOST).sp
 
-fun scaledSp(value: Float, scale: Float): TextUnit = (value * scale).sp
+fun scaledSp(value: Float, scale: Float): TextUnit = (value * scale * TEXT_SCALE_BOOST).sp

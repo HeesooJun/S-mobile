@@ -64,8 +64,8 @@ fun PowerSavingLayer(
             .fillMaxSize()
             .zIndex(999f)
             .background(
-                if (!revealed) AppColors.Black.copy(alpha = 0.96f)
-                else AppColors.Black.copy(alpha = 0.0f) // 잠깐 보여줄 때는 투명
+                if (!revealed) AppColors.Shadow.copy(alpha = 0.96f)
+                else AppColors.Shadow.copy(alpha = 0.0f) // 잠깐 보여줄 때는 투명
             )
             // revealed 상태에서는 포인터를 가로채지 않아 하단 버튼(절전 모드 토글)이 동작하도록 함.
             .then(wakeModifier)
@@ -106,3 +106,4 @@ fun PowerSavingLayer(
         }
     }
 }
+
