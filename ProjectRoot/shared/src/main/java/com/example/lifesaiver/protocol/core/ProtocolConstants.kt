@@ -42,4 +42,11 @@ object ProtocolConstants {
         const val MAX_CACHED_MESSAGES: Int = 100
         const val CLEANUP_INTERVAL_MS: Long = 600_000L
     }
+
+    object Capabilities {
+        const val WIFI_AWARE: Int = 0x01
+        const val UWB: Int = 0x02
+        const val WIFI_DIRECT: Int = 0x04
+        const val RESCUER: Int = 0x08
+    }
 }

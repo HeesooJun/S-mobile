@@ -7,6 +7,7 @@ data class MeshPeer(
     val isWifiAware: Boolean,
     val isWifiDirect: Boolean,
     val isUwb: Boolean,
+    val isRescuer: Boolean,
     val lastSeen: Long
 )
 
@@ -17,12 +18,19 @@ class MeshPeerRegistry(
 
     fun getPeer(id: String): MeshPeer? = peers[id]
 
-    fun updatePeer(peerIdHex: String, isWifiAware: Boolean, isWifiDirect: Boolean, isUwb: Boolean) {
+    fun updatePeer(
+        peerIdHex: String,
+        isWifiAware: Boolean,
+        isWifiDirect: Boolean,
+        isUwb: Boolean,
+        isRescuer: Boolean
+    ) {
         peers[peerIdHex] = MeshPeer(
             id = peerIdHex,
             isWifiAware = isWifiAware,
             isWifiDirect = isWifiDirect,
             isUwb = isUwb,
+            isRescuer = isRescuer,
             lastSeen = clock()
         )
     }

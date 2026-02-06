@@ -2,6 +2,7 @@ package com.example.lifesaiver.presentation.packet
 
 import com.example.lifesaiver.core.database.dao.ProfileDao
 import com.example.lifesaiver.core.database.entity.ProfileEntity
+import com.example.lifesaiver.protocol.core.ProtocolConstants
 import com.example.lifesaiver.protocol.model.Packet
 import com.example.lifesaiver.protocol.model.PacketType
 import com.example.lifesaiver.protocol.profile.ProfileSyncLogEntry
@@ -37,6 +38,7 @@ class ProfilePacketHandler(
                 val updatedAt = decoded.updatedAt
                 val kind = decoded.kind
                 val schemaVersion = decoded.schemaVersion
+                val isRescuer = (packet.header.flags and ProtocolConstants.Capabilities.RESCUER) != 0
                 if (kind == null || updatedAt == null) {
                     logSink(
                         ProfileSyncLogEntry(
@@ -47,6 +49,21 @@ class ProfilePacketHandler(
                             detail = "len=$payloadSize path=$pathLabel missing=${missingFields(kind, updatedAt)}"
                         )
                     )
+                    return
+                }
+                if (isRescuer) {
+                    logSink(
+                        ProfileSyncLogEntry(
+                            timestamp = System.currentTimeMillis(),
+                            peerId = peerHex,
+                            packetType = packet.header.type,
+                            result = ProfileSyncLogResult.UPSERT_SKIPPED,
+                            detail = "path=$pathLabel rescuer profile"
+                        )
+                    )
+                    scope.launch(Dispatchers.IO) {
+                        runCatching { profileDao.deleteByPeerId(peerHex) }
+                    }
                     return
                 }
                 if (schemaVersion != null && schemaVersion != 1) {
