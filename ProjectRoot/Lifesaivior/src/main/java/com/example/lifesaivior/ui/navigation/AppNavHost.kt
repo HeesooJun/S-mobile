@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +60,7 @@ import com.example.lifesaivior.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaivior.protocol.model.CallHandshakeAction
 import com.example.lifesaivior.protocol.model.CallHandshakeState
 import com.example.lifesaivior.protocol.security.SignatureLogEntry
+import com.example.lifesaivior.ui.components.PowerSavingLayer
 import com.example.lifesaivior.ui.components.ptt.PttBottomBar
 import com.example.lifesaivior.ui.components.ptt.PttBottomTab
 import com.example.lifesaivior.ui.screen.survivor.ptt.PTTLinkScreen
@@ -163,6 +165,7 @@ fun AppNavHost(
 
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
+    var isPowerSaving by rememberSaveable { mutableStateOf(false) }
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
@@ -508,6 +511,19 @@ fun AppNavHost(
             forceSetPowerSavingToken = System.currentTimeMillis()
         }
     }
+    LaunchedEffect(forceExitPowerSavingToken) {
+        if (forceExitPowerSavingToken > 0L) {
+            isPowerSaving = false
+        }
+    }
+    LaunchedEffect(forceSetPowerSavingToken) {
+        if (forceSetPowerSavingToken > 0L) {
+            isPowerSaving = forceSetPowerSavingEnabled
+        }
+    }
+    LaunchedEffect(isPowerSaving) {
+        appViewModel.updateLocalPowerSavingState(isPowerSaving)
+    }
 
     Box(
         modifier = Modifier
@@ -653,11 +669,10 @@ fun AppNavHost(
                     isMicOn = isMicOn,
                     isCallConnected = activeCallTransportReady,
                     isInCall = isInCall,
+                    isPowerSaving = isPowerSaving,
+                    onSetPowerSaving = { isPowerSaving = it },
                     callPeerName = targetSurvivor?.name,
                     pendingCall = pendingRequest,
-                    forceExitPowerSavingToken = forceExitPowerSavingToken,
-                    forceSetPowerSavingToken = forceSetPowerSavingToken,
-                    forceSetPowerSavingEnabled = forceSetPowerSavingEnabled,
                     onBack = { navController.popBackStack() },
                     onDisconnect = {
                         if (isInCall) {
@@ -790,5 +805,10 @@ fun AppNavHost(
                     .padding(bottom = scaledDp(4, scale))
             )
         }
+        PowerSavingLayer(
+            isPowerSaving = isPowerSaving,
+            isForceExit = !isPowerSaving,
+            onRequestExitPowerSaving = { isPowerSaving = false }
+        )
     }
 }

@@ -60,7 +60,6 @@ import com.example.lifesaivior.ui.components.tripleClickable
 import com.example.lifesaivior.ui.components.ScreenScaffold
 import com.example.lifesaivior.ui.components.SignalBars
 import com.example.lifesaivior.ui.components.SignalVariant
-import com.example.lifesaivior.ui.components.PowerSavingLayer
 import com.example.lifesaivior.ui.theme.AppColors
 import com.example.lifesaivior.ui.theme.LocalAppScale
 import com.example.lifesaivior.ui.theme.scaledDp
@@ -84,6 +83,8 @@ fun PTTLinkScreen(
     isMicOn: Boolean,
     isCallConnected: Boolean,
     isInCall: Boolean,
+    isPowerSaving: Boolean,
+    onSetPowerSaving: (Boolean) -> Unit,
     isSpeakerphoneOn: Boolean = true,
     callPeerName: String? = null,
     pendingCall: SurvivorCallRequest? = null,
@@ -100,7 +101,6 @@ fun PTTLinkScreen(
     onOpenUserList: (() -> Unit)? = null
 ) {
     val scale = LocalAppScale.current
-    val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     val (expandedAction, setExpandedAction) = remember { mutableStateOf<ActionType?>(null) }
     val (showDoubleTapHint, setShowDoubleTapHint) = remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
@@ -141,12 +141,6 @@ fun PTTLinkScreen(
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            PowerSavingLayer(
-                isPowerSaving = isPowerSaving,
-                // 완전 해제 개념이 없으면 아래처럼 단순 처리해도 됨
-                isForceExit = !isPowerSaving,
-                onRequestExitPowerSaving = { setPowerSaving(false) }
-            )
             Text(
                 text = "LIFESAIVIOR",
                 color = AppColors.Gray500,
@@ -241,7 +235,7 @@ fun PTTLinkScreen(
                             isExpanded = expandedAction == ActionType.Power,
                             showLabelAlways = showActionLabelsAlways,
                             onClick = {
-                                setPowerSaving(!isPowerSaving)
+                                onSetPowerSaving(!isPowerSaving)
                                 setExpandedAction(ActionType.Power)
                             }
                         )

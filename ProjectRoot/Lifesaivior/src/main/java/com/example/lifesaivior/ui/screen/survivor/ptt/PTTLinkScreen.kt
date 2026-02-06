@@ -31,7 +31,6 @@ import com.example.lifesaivior.presentation.BleDebugStats
 import com.example.lifesaivior.presentation.MeshVisualEvent
 import com.example.lifesaivior.protocol.mesh.MeshGraphRegistry
 import com.example.lifesaivior.R
-import com.example.lifesaivior.ui.components.PowerSavingLayer
 import com.example.lifesaivior.ui.components.ScreenScaffold
 import com.example.lifesaivior.ui.components.ptt.PttActionType
 import com.example.lifesaivior.ui.components.ptt.PttActionsBlock
@@ -72,11 +71,10 @@ fun PTTLinkScreen(
     isMicOn: Boolean = false,
     isCallConnected: Boolean = false,
     isInCall: Boolean = false,
+    isPowerSaving: Boolean,
+    onSetPowerSaving: (Boolean) -> Unit,
     callPeerName: String? = null,
     pendingCall: SurvivorCallRequest? = null,
-    forceExitPowerSavingToken: Long = 0L,
-    forceSetPowerSavingToken: Long = 0L,
-    forceSetPowerSavingEnabled: Boolean = false,
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
     onProfile: () -> Unit,
@@ -88,7 +86,6 @@ fun PTTLinkScreen(
     onEndCall: () -> Unit = {}
 ) {
     val scale = LocalAppScale.current
-    val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
     var expandedAction by remember { mutableStateOf<PttActionType?>(null) }
     var showDoubleTapHint by remember { mutableStateOf(false) }
     var showMeshMap by remember { mutableStateOf(false) }
@@ -114,16 +111,6 @@ fun PTTLinkScreen(
             showDoubleTapHint = false
         }
     }
-    LaunchedEffect(forceExitPowerSavingToken) {
-        if (forceExitPowerSavingToken > 0L) {
-            setPowerSaving(false)
-        }
-    }
-    LaunchedEffect(forceSetPowerSavingToken) {
-        if (forceSetPowerSavingToken > 0L) {
-            setPowerSaving(forceSetPowerSavingEnabled)
-        }
-    }
     LaunchedEffect(isPowerSaving) {
         onPowerSavingChanged(isPowerSaving)
     }
@@ -133,12 +120,6 @@ fun PTTLinkScreen(
         vignetteColor = AppColors.Black.copy(alpha = 0.7f)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            PowerSavingLayer(
-                isPowerSaving = isPowerSaving,
-                isForceExit = !isPowerSaving,
-                onRequestExitPowerSaving = { setPowerSaving(false) }
-            )
-
             PttTopBar(
                 onPanicClear = onPanicClear,
                 onSettings = onSettings
@@ -175,7 +156,7 @@ fun PTTLinkScreen(
                     isPowerSaving = isPowerSaving,
                     showDoubleTapHint = showDoubleTapHint,
                     onPowerClick = {
-                        setPowerSaving(!isPowerSaving)
+                        onSetPowerSaving(!isPowerSaving)
                         expandedAction = PttActionType.Power
                     },
                     onDisconnectClick = {
