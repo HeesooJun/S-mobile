@@ -393,7 +393,6 @@ private fun SurvivorCard(
 ) {
     val rssi = peerRssiMap[survivor.peerId]
     val battery = peerBatteryMap[survivor.peerId]?.coerceIn(0, 100)
-    val rssiText = rssi?.let { "$it dBm" } ?: "-"
     val estimatedDistanceMeters = rssi?.let { estimateDistanceMeters(it) }
     val resolvedDistance = when {
         liveDistanceMeters != null && liveDistanceSource == DistanceMeasurementSource.UWB ->
@@ -419,22 +418,6 @@ private fun SurvivorCard(
         DistanceMeasurementSource.RTT -> "RTT 약 "
         DistanceMeasurementSource.RSSI -> "약 "
         else -> "약 "
-    }
-    val signalChipText = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> "UWB"
-        DistanceMeasurementSource.RTT -> "RTT"
-        DistanceMeasurementSource.RSSI -> "RSSI $rssiText"
-        else -> "RSSI $rssiText"
-    }
-    val signalChipBg = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> neonGreen.copy(alpha = 0.16f)
-        DistanceMeasurementSource.RTT -> neonGreen.copy(alpha = 0.16f)
-        else -> AppColors.Gray700.copy(alpha = 0.5f)
-    }
-    val signalChipFg = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> neonGreen
-        DistanceMeasurementSource.RTT -> neonGreen
-        else -> AppColors.Gray400
     }
     val batteryChipText = battery?.let { "배터리 $it%" } ?: "배터리 미수신"
     val batteryChipBg = when {
@@ -462,15 +445,6 @@ private fun SurvivorCard(
         else -> "수신됨"
     }
     var isExpanded by rememberSaveable(survivor.peerId) { mutableStateOf(false) }
-    val summaryText = buildString {
-        append("RSSI $rssiText")
-        append(" · ")
-        append(battery?.let { "배터리 $it%" } ?: "배터리 -")
-        if (distanceText != null) {
-            append(" · ")
-            append("${distancePrefix}${distanceText}m")
-        }
-    }
 
     Surface(
         color = if (isSelected) charcoal.copy(alpha = 0.95f) else charcoal.copy(alpha = 0.82f),
@@ -498,15 +472,6 @@ private fun SurvivorCard(
                         color = AppColors.White,
                         fontSize = scaledSp(16, scale),
                         fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(scaledDp(4, scale)))
-                    Text(
-                        text = summaryText,
-                        color = AppColors.White.copy(alpha = 0.55f),
-                        fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (isCalling) {
@@ -567,12 +532,6 @@ private fun SurvivorCard(
                         color = AppColors.White.copy(alpha = 0.55f),
                         fontSize = scaledSp(12, scale),
                         fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-                    MiniChip(
-                        text = signalChipText,
-                        bg = signalChipBg,
-                        fg = signalChipFg
                     )
                     Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                     MiniChip(
