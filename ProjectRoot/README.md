@@ -19,7 +19,7 @@ Lifesaivior는 재난 상황에서 인터넷과 기지국이 끊겨도 구조 �
 ## 아키텍처
 - 앱 아키텍처: MVVM 기반(`UI -> ViewModel -> Domain/Engine`)으로 화면 상태와 통신 상태를 분리 관리
 - 시스템 아키텍처: `:shared`의 `ProtocolCore`를 중심으로 패킷 생성/중계/검증/동기화 처리
-- 통신 아키텍처: 일반 데이터는 BLE 메쉬, 통화는 Wi-Fi Aware 우선 후 Wi-Fi Direct fallback
+- 통신 아키텍처: 일반 데이터는 BLE 메쉬, 통화는 Wi-Fi Aware 우선 (Wi-Fi Direct fallback은 현재 코드 기본값 비활성화)
 - 거리 추정 아키텍처: UWB 우선, 가용하지 않으면 RTT/RSSI 보조 소스 사용
 - 저장 아키텍처: Room(SQLite), DataStore, EncryptedSharedPreferences/Keystore 병행
 
@@ -28,18 +28,22 @@ Lifesaivior는 재난 상황에서 인터넷과 기지국이 끊겨도 구조 �
 ProjectRoot/
 ├── Lifesaivior/
 │   └── src/main/java/com/example/lifesaivior/
+│       ├── ai/            # 음성 인식/의도 분류
 │       ├── ui/            # 화면(Compose), 네비게이션, 컴포넌트
 │       ├── presentation/  # ViewModel, 상태, 화면 로직
 │       ├── wakeup/        # 음성/센서/고립 감지 기반 자동 호출
 │       └── core/          # 앱 내부 서비스/DB/프로필
 ├── Rescuer/
 │   └── src/main/java/com/example/lifesaivior/
+│       ├── ai/            # 음성 인식/의도 분류
 │       ├── ui/            # 구조자 화면, 탐색/대응 UI
 │       ├── presentation/  # 구조자 ViewModel, 상태/이벤트 관리
+│       ├── wakeup/        # 음성/센서/고립 감지 기반 자동 호출
 │       └── core/          # 구조자 서비스/DB/로컬 처리
 └── shared/
     └── src/main/java/com/example/lifesaivior/
         ├── protocol/      # 패킷, 코덱, 파이프라인, 동기화, 보안
+        ├── presentation/  # 공통 화면/상태 관리
         └── core/          # BLE/UWB/Wi-Fi/오디오/거리 추정 공통 계층
 ```
 
@@ -155,5 +159,5 @@ AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](docs/ai/ai_pipeline.md)�
 
 ## 지원 범위 / 제약
 - UWB는 단말 하드웨어 지원 + 권한 허용 시에만 동작
-- 기본 전파 경로는 BLE 메쉬, 통화 경로는 Wi-Fi Aware 우선 후 Wi-Fi Direct fallback
+- 기본 전파 경로는 BLE 메쉬, 통화 경로는 Wi-Fi Aware 우선 (Wi-Fi Direct fallback은 현재 코드 기본값 비활성화)
 - 오프라인 환경에서 동기화는 RequestSync + GCS 기반 누락 복구 방식으로 수행

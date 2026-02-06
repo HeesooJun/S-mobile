@@ -3,7 +3,7 @@
 ## 1) 런타임 처리 흐름
 
 1. 피구조자 앱에서 SOS/음성/센서/타이머 트리거가 발생하면 패킷 생성 요청이 시작됩니다.
-2. `ProtocolCore`가 `ANNOUNCE`, `MESSAGE`를 생성하고 파이프라인에서 TTL, 중복 처리, 조각화 여부를 적용합니다.
+2. AppViewModel/서비스에서 패킷을 생성하고 `ProtocolCore`로 전달합니다. `ProtocolCore`는 파이프라인에서 TTL, 중복 처리, 조각화를 적용합니다.
 3. BLE 메쉬가 패킷을 주변 노드로 전달하고, 필요 시 멀티홉으로 릴레이합니다.
 4. 구조자 앱은 수신 패킷을 기반으로 피구조자 상태를 갱신하고 대응 대상을 선택합니다.
 5. 구조자 앱은 `DEVICE_CONTROL`, `CALL_HANDSHAKE`, `MESSAGE`를 송신해 원격 대응과 통신을 이어갑니다.
@@ -13,7 +13,7 @@
 | 구분 | 기본 경로 | 보조/대체 경로 | 용도 |
 |---|---|---|---|
 | 일반 데이터 | BLE 메쉬 | 없음 | 신호/텍스트/프로필/제어 명령 전달 |
-| 통화 경로 | Wi-Fi Aware 우선 | Wi-Fi Direct fallback | 실시간 음성 통신 |
+| 통화 경로 | Wi-Fi Aware 우선 | Wi-Fi Direct fallback(현재 코드 기본값은 비활성화) | 실시간 음성 통신 |
 | 거리 추정 | UWB 우선(가용 시) | RTT/RSSI 보조 | 탐색 동선 판단 |
 
 ## 3) 앱 아키텍처(MVVM)와 폴더 구조
@@ -28,16 +28,20 @@
 ```text
 ProjectRoot/
 ├── Lifesaivior/src/main/java/com/example/lifesaivior/
+│   ├── ai/
 │   ├── ui/
 │   ├── presentation/
 │   ├── wakeup/
 │   └── core/
 ├── Rescuer/src/main/java/com/example/lifesaivior/
+│   ├── ai/
 │   ├── ui/
 │   ├── presentation/
+│   ├── wakeup/
 │   └── core/
 └── shared/src/main/java/com/example/lifesaivior/
     ├── protocol/
+    ├── presentation/
     └── core/
 ```
 
