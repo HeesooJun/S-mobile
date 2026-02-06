@@ -38,7 +38,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,12 +54,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.example.lifesaivior.R
-import com.example.lifesaivior.core.log.ConnectionLog
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.presentation.MeshVisualEvent
-import com.example.lifesaivior.presentation.BleDebugStats
 import com.example.lifesaivior.core.location.DistanceMeasurementSource
 import com.example.lifesaivior.core.location.DistanceTrend
 import com.example.lifesaivior.ui.components.MeshEdge
@@ -102,9 +98,6 @@ fun RescuerPTTLinkScreen(
     peerNicknames: Map<String, String>,
     meshGraphSnapshot: com.example.lifesaivior.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     meshVisualEvents: SharedFlow<MeshVisualEvent>,
-    bleDebugStats: BleDebugStats,
-    callStatusLabel: String,
-    callDecisionLabel: String? = null,
     isInCall: Boolean,
     isCalling: Boolean = false,
     isMicOn: Boolean = false,
@@ -140,7 +133,6 @@ fun RescuerPTTLinkScreen(
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
-    var showDebugModal by remember { mutableStateOf(false) }
     var showControlModal by remember { mutableStateOf(false) }
     var stickyBeep by remember { mutableStateOf(false) }
     var stickyVibrate by remember { mutableStateOf(false) }
@@ -148,7 +140,6 @@ fun RescuerPTTLinkScreen(
     var isBeepRepeating by remember { mutableStateOf(false) }
     var isVibrateRepeating by remember { mutableStateOf(false) }
     var isHighToneRepeating by remember { mutableStateOf(false) }
-    val connectionLogs by ConnectionLog.logs.collectAsState()
     val meshDisplayCount = (meshPeerCount - 1).coerceAtLeast(0)
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
@@ -221,16 +212,6 @@ fun RescuerPTTLinkScreen(
                     .align(Alignment.TopStart)
                     .padding(start = scaledDp(60, scale), top = scaledDp(18, scale))
                     .quintupleClickable(onQuintupleClick = onPanicClear)
-            )
-            Text(
-                text = "디버그",
-                color = AppColors.Gray400,
-                fontSize = scaledSp(11, scale),
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = scaledDp(20, scale), top = scaledDp(16, scale))
-                    .clickable { showDebugModal = true }
             )
             BoxWithConstraints(
                 modifier = Modifier
@@ -337,94 +318,6 @@ fun RescuerPTTLinkScreen(
                 )
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
             }
-            }
-            if (showDebugModal) {
-                Dialog(onDismissRequest = { showDebugModal = false }) {
-                    Surface(
-                        color = AppColors.Gray900,
-                        shape = RoundedCornerShape(scaledDp(18, scale)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = scaledDp(24, scale))
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(scaledDp(18, scale)),
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Text(
-                                text = "디버그",
-                                color = AppColors.White,
-                                fontSize = scaledSp(16, scale),
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
-                            Text(
-                                text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
-                                color = AppColors.Gray400,
-                                fontSize = scaledSp(12, scale)
-                            )
-                            val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
-                            val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
-                            Text(
-                                text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
-                                color = AppColors.Gray500,
-                                fontSize = scaledSp(11, scale),
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "통화 상태: $callStatusLabel",
-                                color = AppColors.Gray400,
-                                fontSize = scaledSp(11, scale),
-                                fontWeight = FontWeight.Medium
-                            )
-                            if (!callDecisionLabel.isNullOrBlank()) {
-                                Text(
-                                    text = "결정: $callDecisionLabel",
-                                    color = AppColors.Gray500,
-                                    fontSize = scaledSp(10, scale)
-                                )
-                            }
-                            Text(
-                                text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
-                                color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
-                            )
-                            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
-                            Text(
-                                text = "통신 로그",
-                                color = AppColors.White,
-                                fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.Bold
-                            )
-                            val displayedLogs = connectionLogs.takeLast(12)
-                            if (displayedLogs.isEmpty()) {
-                                Text(
-                                    text = "로그 없음",
-                                    color = AppColors.Gray500,
-                                    fontSize = scaledSp(10, scale)
-                                )
-                            } else {
-                                displayedLogs.forEach { line ->
-                                    Text(
-                                        text = line,
-                                        color = AppColors.Gray400,
-                                        fontSize = scaledSp(10, scale)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
-                            Text(
-                                text = "닫기",
-                                color = AppColors.Green,
-                                fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .align(Alignment.End)
-                                    .clickable { showDebugModal = false }
-                            )
-                        }
-                    }
-                }
             }
             if (showControlModal) {
                 Dialog(onDismissRequest = { showControlModal = false }) {
