@@ -219,6 +219,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var lastUwbSyncTargetPeerId: String? = null
     private var lastUwbSyncRequestAtMs: Long = 0L
     private val uwbSyncMinIntervalMs: Long = 2_000L
+    @Volatile private var uwbTargetPeerId: String? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) { intent?.let { updateBatteryLevel(it) } }
@@ -468,6 +469,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             lastUwbSyncTargetPeerId = normalizedTarget
             lastUwbSyncRequestAtMs = now
         }
+        uwbTargetPeerId = normalizedTarget
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val recipientId = runCatching { hexToBytes(normalizedTarget) }.getOrNull() ?: return@launch
@@ -516,6 +518,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             lastUwbSyncTargetPeerId = null
             lastUwbSyncRequestAtMs = 0L
         }
+        uwbTargetPeerId = null
         uwbRanger.endSession()
     }
 
@@ -867,7 +870,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (recipient != null && !recipient.contentEquals(senderId)) {
                         return@setOnPacketReceived
                     }
-                    handleCallHandshake(peer, CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived)
+                    val payload = CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    // UWB_SYNC는 수신자 지정 패킷만 처리해 다른 peer 응답 혼선을 막습니다.
+                    if (payload.action == CallHandshakeAction.UWB_SYNC && recipient == null) {
+                        return@setOnPacketReceived
+                    }
+                    // 선택된 대상 외 UWB_SYNC 응답은 무시합니다.
+                    if (payload.action == CallHandshakeAction.UWB_SYNC) {
+                        val expectedTarget = uwbTargetPeerId
+                        if (expectedTarget != null && peer != expectedTarget) {
+                            return@setOnPacketReceived
+                        }
+                    }
+                    handleCallHandshake(peer, payload)
                 }
                 else -> Unit
             }
