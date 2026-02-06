@@ -40,6 +40,8 @@ private fun PTTLinkScreenPreviewConnected() {
                 maxAttempts = 6
             ),
             isConnected = true,
+            isPowerSaving = false,
+            onSetPowerSaving = {},
             onBack = {},
             onDisconnect = {},
             onProfile = {},
@@ -68,6 +70,8 @@ private fun PTTLinkScreenPreviewWaiting() {
             meshVisualEvents = MutableSharedFlow(),
             bleDebugStats = BleDebugStats(),
             isConnected = false,
+            isPowerSaving = false,
+            onSetPowerSaving = {},
             onBack = {},
             onDisconnect = {},
             onProfile = {},
