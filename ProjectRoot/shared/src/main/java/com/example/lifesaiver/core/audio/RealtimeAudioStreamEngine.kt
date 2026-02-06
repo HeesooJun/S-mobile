@@ -97,7 +97,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private var lastEchoLogAt = 0L
     private var lastPlaybackRms = 0.0
     private var lastPlaybackAt = 0L
-    private val debugLogIntervalMs = 1000L
+    private val debugLogIntervalMs = 10_000L
     private val silenceGateEnabled = false
     private val silenceGateRmsThreshold = 3.0
     private val silenceGateWarmupFrames = 50
