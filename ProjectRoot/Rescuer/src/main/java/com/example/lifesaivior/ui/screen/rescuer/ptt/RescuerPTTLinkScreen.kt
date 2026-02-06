@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
@@ -52,6 +53,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -75,6 +77,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.Locale
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.scale
 
 enum class RssiFeedbackMode(val label: String) {
     OFF("알림 끔"),
@@ -279,20 +287,33 @@ fun RescuerPTTLinkScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(scaledDp(14, scale)))
-                Text(
-                    text = when {
-                        isCalling && !isInCall -> "통화 연결 대기 중... (최대 15초)"
-                        isInCall -> "통화 중 · 버튼을 눌러 종료"
-                        else -> "통화 요청"
-                    },
-                    color = when {
-                        isCalling && !isInCall -> AppColors.Green
-                        isInCall -> AppColors.Red
-                        else -> AppColors.Green
-                    },
-                    fontSize = scaledSp(13, scale),
-                    fontWeight = FontWeight.Bold
-                )
+                if (isCalling && !isInCall) {
+                    Text(
+                        text = "통화 연결 대기 중... (최대 15초)",
+                        color = AppColors.Green,
+                        fontSize = scaledSp(13, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else if (isInCall) {
+                    Text(
+                        text = "통화 중 · 버튼을 눌러 종료",
+                        color = AppColors.Red,
+                        fontSize = scaledSp(13, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else if (!isConnected) {
+                    ProximityCallHint(
+                        textPrimary = "생존자 근처로 이동하면 통화가 가능합니다",
+                        textSecondary = "조금 더 가까이 이동해 주세요"
+                    )
+                } else {
+                    Text(
+                        text = "통화 요청",
+                        color = AppColors.Green,
+                        fontSize = scaledSp(13, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 if (isInCall) {
                     Spacer(modifier = Modifier.height(scaledDp(10, scale)))
                     OutlinedButton(onClick = onToggleSpeakerphone) {
@@ -639,6 +660,73 @@ private fun DistanceStatusCard(
             color = AppColors.Gray400,
             fontSize = scaledSp(11, scale),
             fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun ProximityCallHint(
+    textPrimary: String,
+    textSecondary: String
+) {
+    val scale = LocalAppScale.current
+    val pulse = rememberInfiniteTransition(label = "proximity-pulse")
+    val ringAlpha by pulse.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing)
+        ),
+        label = "ring-alpha"
+    )
+    val ringScale by pulse.animateFloat(
+        initialValue = 0.86f,
+        targetValue = 1.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing)
+        ),
+        label = "ring-scale"
+    )
+    val baseColor = AppColors.Green.copy(alpha = 0.88f)
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier.size(scaledDp(54, scale)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(scaledDp(54, scale))
+                    .scale(ringScale)
+                    .background(baseColor.copy(alpha = ringAlpha), shape = CircleShape)
+            )
+            Box(
+                modifier = Modifier
+                    .size(scaledDp(38, scale))
+                    .background(baseColor.copy(alpha = 0.18f), shape = CircleShape)
+            )
+            Icon(
+                imageVector = Icons.Filled.Person,
+                contentDescription = "접근 필요",
+                tint = baseColor,
+                modifier = Modifier.size(scaledDp(22, scale))
+            )
+        }
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Text(
+            text = textPrimary,
+            color = baseColor,
+            fontSize = scaledSp(12, scale),
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(scaledDp(2, scale)))
+        Text(
+            text = textSecondary,
+            color = AppColors.Gray400,
+            fontSize = scaledSp(11, scale),
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
         )
     }
 }
