@@ -50,5 +50,9 @@ class MeshPeerRegistry(
         peers.remove(peerIdHex)
     }
 
+    fun clear() {
+        peers.clear()
+    }
+
     fun count(): Int = peers.size
 }

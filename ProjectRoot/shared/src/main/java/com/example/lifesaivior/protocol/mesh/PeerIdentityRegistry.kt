@@ -59,6 +59,14 @@ class PeerIdentityRegistry {
         removePeerInternal(peerId)
     }
 
+    @Synchronized
+    fun clear() {
+        noiseKeyByPeer.clear()
+        peerByNoiseKey.clear()
+        nicknameByPeer.clear()
+        lastSeenByPeer.clear()
+    }
+
     private fun removePeerInternal(peerId: String) {
         val noiseKey = noiseKeyByPeer.remove(peerId)
         if (noiseKey != null) {

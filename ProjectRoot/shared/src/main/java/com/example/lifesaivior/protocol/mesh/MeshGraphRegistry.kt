@@ -92,6 +92,15 @@ class MeshGraphRegistry {
         return buildSnapshot()
     }
 
+    @Synchronized
+    fun clear() {
+        nicknames.clear()
+        announcements.clear()
+        lastUpdate.clear()
+        suppressedPeers.clear()
+        publishSnapshot()
+    }
+
     private fun buildSnapshot(): GraphSnapshot {
         val allNodes = mutableSetOf<String>()
         allNodes.addAll(nicknames.keys)
