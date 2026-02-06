@@ -115,12 +115,14 @@ fun EmergencyBeaconScreen(
             Text(
                 text = "주변 기기의 SOS 신호를 스캔하고 있습니다",
                 color = AppColors.Gray500,
-                fontSize = scaledSp(12, scale)
+                fontSize = scaledSp(12, scale),
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = "인근 SOS 수신 시 자동으로 연결됩니다",
                 color = AppColors.Gray500,
-                fontSize = scaledSp(12, scale)
+                fontSize = scaledSp(12, scale),
+                fontWeight = FontWeight.SemiBold
             )
 
             Spacer(modifier = Modifier.height(scaledDp(36, scale)))

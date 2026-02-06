@@ -128,24 +128,28 @@ fun RescuerStandbyScreen(
                         text = "주변 기기의 SOS 신호를 탐색합니다.",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center
                     )
                     Text(
                         text = "신호를 포착하면 거리 정보가 표시됩니다.",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center
                     )
                     Text(
                         text = "연결되면 음성·채팅으로 즉시 대응할 수 있습니다.",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center
                     )
                     Text(
                         text = "누군가 신호를 받으면 음성·채팅으로 바로 연결됩니다.",
                         color = AppColors.Gray500,
                         fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -217,7 +221,7 @@ fun RescuerStandbyScreen(
                                 text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
                                 color = AppColors.Gray500,
                                 fontSize = scaledSp(11, scale),
-                                fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
