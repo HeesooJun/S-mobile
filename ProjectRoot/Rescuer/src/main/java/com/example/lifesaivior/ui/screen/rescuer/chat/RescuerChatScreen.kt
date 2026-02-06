@@ -1,4 +1,4 @@
-﻿package com.example.lifesaivior.ui.screen.rescuer.chat
+package com.example.lifesaivior.ui.screen.rescuer.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -90,7 +90,8 @@ fun RescuerChatScreen(
                 Text(
                     text = "인원 ${participantCount}명",
                     color = AppColors.Green,
-                    fontSize = scaledSp(12, scale)
+                    fontSize = scaledSp(12, scale),
+                    fontWeight = FontWeight.SemiBold
                 )
                 Box(
                     modifier = Modifier
@@ -258,7 +259,7 @@ private fun MessageBubble(message: ChatMessage) {
                 text = labelText,
                 color = AppColors.Gray500,
                 fontSize = scaledSp(10, scale),
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(scaledDp(2, scale)))
             Box(

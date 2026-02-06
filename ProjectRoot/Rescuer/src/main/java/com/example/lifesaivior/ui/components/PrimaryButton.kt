@@ -34,11 +34,11 @@ fun PrimaryButton(
         )
         PrimaryButtonVariant.Red -> ButtonDefaults.buttonColors(
             containerColor = AppColors.Red,
-            contentColor = AppColors.White
+            contentColor = AppColors.PureWhite
         )
         PrimaryButtonVariant.Green -> ButtonDefaults.buttonColors(
             containerColor = AppColors.Green,
-            contentColor = AppColors.Black
+            contentColor = AppColors.PureWhite
         )
     }
 
