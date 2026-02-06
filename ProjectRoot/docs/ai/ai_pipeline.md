@@ -9,13 +9,13 @@
 - Android `SpeechRecognizer`로 음성을 텍스트로 변환
 - 고립 상황에서 백그라운드 감시 흐름과 연동
 - 인식기 오류가 발생하면 재시작해 감시를 이어가도록 구성
-- 구현: [VoiceTriggerDetector](../../Lifesaiver/src/main/java/com/example/lifesaiver/ai/stt/VoiceTriggerDetector.kt)
+- 구현: [VoiceTriggerDetector](../../Lifesaivior/src/main/java/com/example/lifesaivior/ai/stt/VoiceTriggerDetector.kt)
 
 ### 의도 분류 (NLU)
 - `bert_kor.tflite` + `vocab.txt` 기반 온디바이스 분류
 - STT 텍스트를 비상/일상 의도로 구분
 - 네트워크 없이도 단말 내부에서 분류 수행
-- 구현: [EmergencyIntentClassifierKorean](../../Lifesaiver/src/main/java/com/example/lifesaiver/ai/stt/EmergencyIntentClassifierKorean.kt), [WordPieceTokenizer](../../Lifesaiver/src/main/java/com/example/lifesaiver/ai/stt/WordPieceTokenizer.kt)
+- 구현: [EmergencyIntentClassifierKorean](../../Lifesaivior/src/main/java/com/example/lifesaivior/ai/stt/EmergencyIntentClassifierKorean.kt), [WordPieceTokenizer](../../Lifesaivior/src/main/java/com/example/lifesaivior/ai/stt/WordPieceTokenizer.kt)
 
 ## 3) 입력/출력
 - 입력: 사용자 음성 발화
