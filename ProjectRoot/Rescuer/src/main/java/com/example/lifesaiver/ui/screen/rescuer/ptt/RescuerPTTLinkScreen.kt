@@ -432,8 +432,8 @@ fun RescuerPTTLinkScreen(
                         color = AppColors.Gray900,
                         shape = RoundedCornerShape(scaledDp(18, scale)),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = scaledDp(24, scale))
+                            .fillMaxWidth(0.98f)
+                            .padding(horizontal = scaledDp(12, scale))
                     ) {
                         Column(
                             modifier = Modifier

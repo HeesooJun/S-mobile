@@ -359,7 +359,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendProfileUpdate(profile: SurvivorProfile) {
         val now = System.currentTimeMillis()
         val payload = ProfileTlv.encodeUpdate(profile.name, mapGender(profile.gender), profile.birthDate, profile.notes, now)
-        val packet = Packet(PacketHeader(2, PacketType.MESSAGE, ProtocolConstants.MESSAGE_TTL_HOPS, 0, payload.size, now, senderId), payload)
+        val packet = Packet(
+            PacketHeader(
+                2,
+                PacketType.MESSAGE,
+                ProtocolConstants.MESSAGE_TTL_HOPS,
+                getCurrentCapabilityFlags(),
+                payload.size,
+                now,
+                senderId
+            ),
+            payload
+        )
         gossipSyncManager.onPublicPacketSeen(packet); protocolCore.broadcast(packet)
     }
 
@@ -637,7 +648,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 payload.uwbDeviceAddress?.let { remoteAddress ->
                     uwbRanger.configureControllerSession(peerAddress = remoteAddress)
                 }
-                meshRegistry.updatePeer(peerIdHex, wa, wd, peerUwb)
+                meshRegistry.updatePeer(
+                    peerIdHex,
+                    wa,
+                    wd,
+                    peerUwb,
+                    meshRegistry.getPeer(peerIdHex)?.isRescuer ?: false
+                )
                 refreshSurvivorCapabilities()
                 _uiState.update {
                     val inActiveCallWithPeer = it.isCallConnected && it.callPeerId == peerIdHex
@@ -722,7 +739,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 payload.uwbDeviceAddress?.let { remoteAddress ->
                     uwbRanger.configureControllerSession(peerAddress = remoteAddress)
                 }
-                meshRegistry.updatePeer(peerIdHex, wa, wd, peerUwb); refreshSurvivorCapabilities()
+                meshRegistry.updatePeer(
+                    peerIdHex,
+                    wa,
+                    wd,
+                    peerUwb,
+                    meshRegistry.getPeer(peerIdHex)?.isRescuer ?: false
+                )
+                refreshSurvivorCapabilities()
                 _uiState.update {
                     it.copy(
                         callPeerWifiAware = wa,
@@ -751,7 +775,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 payload.uwbDeviceAddress?.let { remoteAddress ->
                     uwbRanger.configureControllerSession(peerAddress = remoteAddress)
                 }
-                meshRegistry.updatePeer(peerIdHex, wa, wd, peerUwb)
+                meshRegistry.updatePeer(
+                    peerIdHex,
+                    wa,
+                    wd,
+                    peerUwb,
+                    meshRegistry.getPeer(peerIdHex)?.isRescuer ?: false
+                )
                 refreshSurvivorCapabilities()
             }
         }
@@ -760,7 +790,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendProfileTestPacket() {
         val now = System.currentTimeMillis()
         val payload = ProfileTlv.encodeUpdate(cachedNickname.ifBlank { "rescuer-user" }, 'U', "1990-01-01", "rescuer-test", now)
-        val packet = Packet(PacketHeader(2, PacketType.MESSAGE, ProtocolConstants.MESSAGE_TTL_HOPS, 0, payload.size, now, senderId), payload)
+        val packet = Packet(
+            PacketHeader(
+                2,
+                PacketType.MESSAGE,
+                ProtocolConstants.MESSAGE_TTL_HOPS,
+                getCurrentCapabilityFlags(),
+                payload.size,
+                now,
+                senderId
+            ),
+            payload
+        )
         gossipSyncManager.onPublicPacketSeen(packet); protocolCore.broadcast(packet)
     }
 
@@ -785,6 +826,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     val decision = peerIdentityRegistry.handleAnnounce(peer, announcement.nickname, announcement.noisePublicKey, now, ProtocolConstants.Mesh.DUPLICATE_NICKNAME_STALE_MS)
                     if (!decision.accept) return@setOnPacketReceived
+                    val flags = packet.header.flags
+                    val wa = (flags and ProtocolConstants.Capabilities.WIFI_AWARE) != 0
+                    val wd = (flags and ProtocolConstants.Capabilities.WIFI_DIRECT) != 0
+                    val uwb = (flags and ProtocolConstants.Capabilities.UWB) != 0
+                    val isRescuer = (flags and ProtocolConstants.Capabilities.RESCUER) != 0
+                    ConnectionLog.add(
+                        "Announce",
+                        "flags=0x${flags.toString(16)} rescuer=$isRescuer wa=$wa wd=$wd uwb=$uwb peer=$peer"
+                    )
+                    meshGraphRegistry.updateFromAnnouncement(peer, announcement.nickname, GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload), packet.header.timestamp)
+                    meshRegistry.updatePeer(peer, wa, wd, uwb, isRescuer)
+                    if (isRescuer) {
+                        announcedPeerLastSeen.remove(peer)
+                        peerNicknames.remove(peer)
+                        peerDirectAddresses.remove(peer)
+                        peerBatteryLevels.remove(peer)
+                        peerPowerSavingModes.remove(peer)
+                        discoveredSurvivors.remove(peer)
+                        _uiState.update {
+                            it.copy(
+                                peerNicknames = peerNicknames.toMap(),
+                                peerDirectAddresses = peerDirectAddresses.toMap(),
+                                peerBatteryLevels = peerBatteryLevels.toMap(),
+                                peerPowerSavingModes = peerPowerSavingModes.toMap()
+                            )
+                        }
+                        viewModelScope.launch(Dispatchers.IO) {
+                            profileDao.deleteByPeerId(peer)
+                        }
+                        refreshSurvivorCapabilities()
+                        gossipSyncManager.onPublicPacketSeen(packet)
+                        return@setOnPacketReceived
+                    }
                     announcedPeerLastSeen[peer] = now
                     val directAddress = announcement.wifiDirectAddress?.trim()?.lowercase()?.ifBlank { null }
                     val remoteBattery = announcement.batteryLevel
@@ -821,9 +895,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             callPeerDirectAddress = callPeerDirect
                         )
                     }
-                    meshGraphRegistry.updateFromAnnouncement(peer, announcement.nickname, GossipTlv.decodeNeighborsFromAnnouncementPayload(packet.payload), packet.header.timestamp)
-                    meshRegistry.updatePeer(peer, (packet.header.flags and 0x01) != 0, (packet.header.flags and 0x04) != 0, (packet.header.flags and 0x02) != 0)
-                    refreshSurvivorCapabilities(); gossipSyncManager.onPublicPacketSeen(packet)
+                    refreshSurvivorCapabilities()
+                    gossipSyncManager.onPublicPacketSeen(packet)
                 }
                 PacketType.LEAVE -> {
                     meshGraphRegistry.removePeer(peer)
@@ -991,10 +1064,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun refreshSurvivorCapabilities() {
         _uiState.update { s ->
             val peerIds = announcedPeerLastSeen.keys.sorted()
-            val list = peerIds.map { id ->
+            val list = peerIds.mapNotNull { id ->
                 val base = discoveredSurvivors[id]
                     ?: SurvivorProfile(name = peerNicknames[id].orEmpty(), peerId = id)
                 val info = meshRegistry.getPeer(id)
+                val displayName = base.name.ifBlank { peerNicknames[id].orEmpty() }
+                if (info?.isRescuer == true || isRescuerDisplayName(displayName)) {
+                    return@mapNotNull null
+                }
                 base.copy(
                     isWifiAware = info?.isWifiAware ?: base.isWifiAware,
                     isWifiDirect = info?.isWifiDirect ?: base.isWifiDirect,
@@ -1005,6 +1082,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             s.copy(survivors = list)
         }
+    }
+
+    private fun isRescuerDisplayName(name: String?): Boolean {
+        val trimmed = name?.trim().orEmpty()
+        if (trimmed.isBlank()) return false
+        return trimmed.startsWith("구조자") || trimmed.startsWith("rescuer", ignoreCase = true)
     }
     private fun pruneAnnouncedPeers(now: Long) {
         val cutoff = now - ProtocolConstants.Mesh.PEER_TIMEOUT_MS
@@ -1038,16 +1121,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun isWifiAwareSupportedLocally(): Boolean = if (wifiAwareEnabled) {
-        (getCurrentCapabilityFlags() and 0x01) != 0
+        (getCurrentCapabilityFlags() and ProtocolConstants.Capabilities.WIFI_AWARE) != 0
     } else {
         false
     }
     fun isWifiDirectSupportedLocally(): Boolean = if (wifiDirectEnabled) {
-        (getCurrentCapabilityFlags() and 0x04) != 0
+        (getCurrentCapabilityFlags() and ProtocolConstants.Capabilities.WIFI_DIRECT) != 0
     } else {
         false
     }
-    fun isUwbSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x02) != 0
+    fun isUwbSupportedLocally(): Boolean =
+        (getCurrentCapabilityFlags() and ProtocolConstants.Capabilities.UWB) != 0
     fun isUwbRuntimeAvailableLocally(): Boolean {
         if (!isUwbSupportedLocally()) return false
         return uwbRanger.isRuntimeAvailableCached() != false
@@ -1055,14 +1139,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun getCurrentCapabilityFlags(): Int {
         var f = 0; val pm = app.packageManager; val wifi = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val wa = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) pm.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE) else false
-        if (wifiAwareEnabled && wa && wifi?.isWifiEnabled == true) f = f or 0x01
+        if (wifiAwareEnabled && wa && wifi?.isWifiEnabled == true) {
+            f = f or ProtocolConstants.Capabilities.WIFI_AWARE
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             pm.hasSystemFeature(PackageManager.FEATURE_UWB) &&
             ContextCompat.checkSelfPermission(app, Manifest.permission.UWB_RANGING) == PackageManager.PERMISSION_GRANTED
         ) {
-            f = f or 0x02
+            f = f or ProtocolConstants.Capabilities.UWB
         }
-        if (wifiDirectEnabled && pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) f = f or 0x04
+        if (wifiDirectEnabled && pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) {
+            f = f or ProtocolConstants.Capabilities.WIFI_DIRECT
+        }
+        f = f or ProtocolConstants.Capabilities.RESCUER
         return f
     }
     private fun observeMeshGraph() { viewModelScope.launch { meshGraphRegistry.graphState.collect { snap -> _uiState.update { it.copy(meshGraphSnapshot = snap, meshPeerCount = snap.nodes.size.coerceAtLeast(1)) } } } }

@@ -44,6 +44,9 @@ interface ProfileDao {
     @Query("SELECT * FROM profiles WHERE peerId = :peerId LIMIT 1")
     suspend fun getByPeerId(peerId: String): ProfileEntity?
 
+    @Query("DELETE FROM profiles WHERE peerId = :peerId")
+    suspend fun deleteByPeerId(peerId: String): Int
+
     @Transaction
     suspend fun upsertIfNewer(profile: ProfileEntity): Boolean {
         val inserted = insert(profile)
