@@ -19,34 +19,38 @@ Lifesaivior는 재난 상황에서 인터넷과 기지국이 끊겨도 구조 �
 ## 아키텍처
 - 앱 아키텍처: MVVM 기반(`UI -> ViewModel -> Domain/Engine`)으로 화면 상태와 통신 상태를 분리 관리
 - 시스템 아키텍처: `:shared`의 `ProtocolCore`를 중심으로 패킷 생성/중계/검증/동기화 처리
-- 통신 아키텍처: 일반 데이터는 BLE 메쉬, 통화는 Wi-Fi Aware 우선 후 Wi-Fi Direct fallback
+- 통신 아키텍처: 일반 데이터는 BLE 메쉬, 통화는 Wi-Fi Aware 우선 (Wi-Fi Direct fallback은 현재 코드 기본값 비활성화)
 - 거리 추정 아키텍처: UWB 우선, 가용하지 않으면 RTT/RSSI 보조 소스 사용
 - 저장 아키텍처: Room(SQLite), DataStore, EncryptedSharedPreferences/Keystore 병행
 
 ### 폴더 구조(요약)
 ```text
 ProjectRoot/
-├── Lifesaiver/
-│   └── src/main/java/com/example/lifesaiver/
+├── Lifesaivior/
+│   └── src/main/java/com/example/lifesaivior/
+│       ├── ai/            # 음성 인식/의도 분류
 │       ├── ui/            # 화면(Compose), 네비게이션, 컴포넌트
 │       ├── presentation/  # ViewModel, 상태, 화면 로직
 │       ├── wakeup/        # 음성/센서/고립 감지 기반 자동 호출
 │       └── core/          # 앱 내부 서비스/DB/프로필
 ├── Rescuer/
-│   └── src/main/java/com/example/lifesaiver/
+│   └── src/main/java/com/example/lifesaivior/
+│       ├── ai/            # 음성 인식/의도 분류
 │       ├── ui/            # 구조자 화면, 탐색/대응 UI
 │       ├── presentation/  # 구조자 ViewModel, 상태/이벤트 관리
+│       ├── wakeup/        # 음성/센서/고립 감지 기반 자동 호출
 │       └── core/          # 구조자 서비스/DB/로컬 처리
 └── shared/
-    └── src/main/java/com/example/lifesaiver/
+    └── src/main/java/com/example/lifesaivior/
         ├── protocol/      # 패킷, 코덱, 파이프라인, 동기화, 보안
+        ├── presentation/  # 공통 화면/상태 관리
         └── core/          # BLE/UWB/Wi-Fi/오디오/거리 추정 공통 계층
 ```
 
 아키텍처 흐름도와 상세 설명은 [`docs/architecture/system_architecture.md`](ProjectRoot/docs/architecture/system_architecture.md)에 정리했습니다.
 
 ## 모듈 구성
-- `:lifesaiver`: 피구조자 앱(긴급 모드, 자동 호출, 구조 통신 UI)
+- `:lifesaivior`: 피구조자 앱(긴급 모드, 자동 호출, 구조 통신 UI)
 - `:rescuer`: 구조자 앱(탐색, 대응, 원격 제어 UI)
 - `:shared`: 공통 엔진(프로토콜, 전송 파이프라인, 동기화, 보안)
 
@@ -74,7 +78,7 @@ ProjectRoot/
 - Ed25519 기반 핵심 패킷 서명 검증
 
 ## 유저 플로우
-- 피구조자 앱: `:lifesaiver`
+- 피구조자 앱: `:lifesaivior`
 - 구조자 앱: `:rescuer`
 
 1. 피구조자는 SOS 버튼을 누르거나 음성/센서/무응답 타이머 조건으로 긴급 모드를 실행합니다.
@@ -143,18 +147,18 @@ AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](ProjectRoot/docs/ai/ai_p
 
 ### Build
 ```powershell
-.\ProjectRoot\gradlew.bat :lifesaiver:assembleDebug
+.\ProjectRoot\gradlew.bat :lifesaivior:assembleDebug
 .\ProjectRoot\gradlew.bat :rescuer:assembleDebug
 ```
 
 ### Test
 ```powershell
-.\ProjectRoot\gradlew.bat :lifesaiver:testDebugUnitTest
+.\ProjectRoot\gradlew.bat :lifesaivior:testDebugUnitTest
 .\ProjectRoot\gradlew.bat :rescuer:testDebugUnitTest
 ```
 
 ## 지원 범위 / 제약
 - UWB는 단말 하드웨어 지원 + 권한 허용 시에만 동작
-- 기본 전파 경로는 BLE 메쉬, 통화 경로는 Wi-Fi Aware 우선 후 Wi-Fi Direct fallback
+- 기본 전파 경로는 BLE 메쉬, 통화 경로는 Wi-Fi Aware 우선 (Wi-Fi Direct fallback은 현재 코드 기본값 비활성화)
 - 오프라인 환경에서 동기화는 RequestSync + GCS 기반 누락 복구 방식으로 수행
 
