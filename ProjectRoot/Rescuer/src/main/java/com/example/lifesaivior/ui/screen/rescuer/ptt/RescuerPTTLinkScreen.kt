@@ -54,6 +54,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.example.lifesaivior.R
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.presentation.MeshVisualEvent
