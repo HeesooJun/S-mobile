@@ -116,6 +116,8 @@ fun RescuerPTTLinkScreen(
     distanceTrend: DistanceTrend,
     distanceSource: DistanceMeasurementSource,
     targetDisplayName: String? = null,
+    hasTarget: Boolean,
+    isTargetDirect: Boolean,
     chatRoomTitle: String = "전체 채팅",
     chatMessages: List<ChatMessage> = emptyList(),
     onRequestCall: () -> Unit,
@@ -258,12 +260,13 @@ fun RescuerPTTLinkScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(scaledDp(26, scale)))
+                val callEnabled = isInCall || (!isCalling && isTargetDirect && hasTarget)
                 Box(contentAlignment = Alignment.Center) {
                     FilledIconButton(
                         onClick = {
                             if (isInCall) onEndCall() else onRequestCall()
                         },
-                        enabled = isInCall || !isCalling,
+                        enabled = callEnabled,
                         modifier = Modifier.size(scaledDp(86, scale)),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = if (isInCall) AppColors.Red else AppColors.Green,
@@ -301,7 +304,7 @@ fun RescuerPTTLinkScreen(
                         fontSize = scaledSp(13, scale),
                         fontWeight = FontWeight.Bold
                     )
-                } else if (!isConnected) {
+                } else if (!isTargetDirect && hasTarget) {
                     ProximityCallHint(
                         textPrimary = "생존자 근처로 이동하면 통화가 가능합니다",
                         textSecondary = "조금 더 가까이 이동해 주세요"
