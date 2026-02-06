@@ -10,7 +10,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 internal fun UwbRanger.startInternal() {
-    if (!isSupported() || !hasPermission()) {
+    val supported = isSupported()
+    val permission = hasPermission()
+    val available = isRuntimeAvailableCachedInternal()
+    logUwb("start request supported=$supported permission=$permission available=$available role=$sessionRole")
+    if (!supported || !permission) {
         _distanceMeters.value = null
         synchronized(lock) { trackingEnabled = false }
         return
@@ -25,6 +29,7 @@ internal fun UwbRanger.stopInternal() {
         cancelSessionLocked()
     }
     _distanceMeters.value = null
+    logUwb("stop request")
 }
 
 internal fun UwbRanger.endSessionInternal() {
@@ -42,12 +47,14 @@ internal fun UwbRanger.endSessionInternal() {
         remoteSessionId = null
     }
     _distanceMeters.value = null
+    logUwb("end session")
 }
 
 internal fun UwbRanger.releaseInternal() {
     endSessionInternal()
     clearAvailabilityCallback()
     rangerScope.cancel()
+    logUwb("release")
 }
 
 internal fun UwbRanger.restartSessionIfTracking() {
@@ -69,6 +76,7 @@ internal fun UwbRanger.startSessionIfReady() {
             runSession(snapshot ?: return@launch, token)
         }
     }
+    logUwb("session start role=${snapshot?.role}")
 }
 
 internal suspend fun UwbRanger.runSession(snapshot: UwbRanger.SessionSnapshot, token: Long) {
@@ -174,12 +182,32 @@ internal fun UwbRanger.emitDistanceIfTracking(distance: Float?) {
 }
 
 internal fun UwbRanger.buildSnapshotLocked(): UwbRanger.SessionSnapshot? {
-    if (!trackingEnabled || !isSupported() || !hasPermission()) return null
+    if (!trackingEnabled) {
+        logSnapshotSkip("tracking disabled")
+        return null
+    }
+    if (!isSupported()) {
+        logSnapshotSkip("not supported")
+        return null
+    }
+    if (!hasPermission()) {
+        logSnapshotSkip("no permission")
+        return null
+    }
     return when (sessionRole) {
         UwbRanger.SessionRole.CONTROLLER -> {
-            val offer = controllerOffer ?: return null
-            val scope = controllerScope ?: return null
-            val peerAddress = parseAddress(peerAddressHex) ?: return null
+            val offer = controllerOffer ?: run {
+                logSnapshotSkip("no controller offer")
+                return null
+            }
+            val scope = controllerScope ?: run {
+                logSnapshotSkip("no controller scope")
+                return null
+            }
+            val peerAddress = parseAddress(peerAddressHex) ?: run {
+                logSnapshotSkip("no peer address")
+                return null
+            }
             UwbRanger.SessionSnapshot.Controller(
                 scope = scope,
                 peerAddress = peerAddress,
@@ -188,11 +216,26 @@ internal fun UwbRanger.buildSnapshotLocked(): UwbRanger.SessionSnapshot? {
         }
 
         UwbRanger.SessionRole.CONTROLEE -> {
-            val scope = controleeScope ?: return null
-            val controllerAddress = parseAddress(remoteControllerAddressHex) ?: return null
-            val controllerChannel = remoteControllerChannel ?: return null
-            val controllerPreambleIndex = remoteControllerPreambleIndex ?: return null
-            val sessionId = remoteSessionId ?: return null
+            val scope = controleeScope ?: run {
+                logSnapshotSkip("no controlee scope")
+                return null
+            }
+            val controllerAddress = parseAddress(remoteControllerAddressHex) ?: run {
+                logSnapshotSkip("no controller address")
+                return null
+            }
+            val controllerChannel = remoteControllerChannel ?: run {
+                logSnapshotSkip("no controller channel")
+                return null
+            }
+            val controllerPreambleIndex = remoteControllerPreambleIndex ?: run {
+                logSnapshotSkip("no controller preamble")
+                return null
+            }
+            val sessionId = remoteSessionId ?: run {
+                logSnapshotSkip("no controller sessionId")
+                return null
+            }
             UwbRanger.SessionSnapshot.Controlee(
                 scope = scope,
                 controllerAddress = controllerAddress,

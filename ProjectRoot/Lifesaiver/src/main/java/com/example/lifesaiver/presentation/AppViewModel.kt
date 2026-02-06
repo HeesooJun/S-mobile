@@ -1193,6 +1193,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         return@setOnPacketReceived
                     }
                     val payload = CallHandshakePayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    // UWB_SYNC는 수신자 지정 패킷만 처리해 다른 peer 응답 혼선을 막습니다.
+                    if (payload.action == CallHandshakeAction.UWB_SYNC && recipient == null) {
+                        return@setOnPacketReceived
+                    }
                     handleCallHandshake(peerHex, payload)
                 }
                 PacketType.DEVICE_CONTROL -> {

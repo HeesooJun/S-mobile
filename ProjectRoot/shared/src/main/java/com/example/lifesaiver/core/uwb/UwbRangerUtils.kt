@@ -1,8 +1,21 @@
 package com.example.lifesaiver.core.uwb
 
+import android.os.SystemClock
 import android.util.Log
 import com.example.lifesaiver.core.log.ConnectionLog
 import java.nio.ByteBuffer
+
+private const val SNAPSHOT_LOG_THROTTLE_MS = 1000L
+
+internal fun UwbRanger.logSnapshotSkip(reason: String) {
+    val now = SystemClock.elapsedRealtime()
+    val lastReason = lastSnapshotLogReason
+    val lastAt = lastSnapshotLogAtMs
+    if (lastReason == reason && now - lastAt < SNAPSHOT_LOG_THROTTLE_MS) return
+    lastSnapshotLogReason = reason
+    lastSnapshotLogAtMs = now
+    logUwb("snapshot skip: $reason")
+}
 
 internal fun UwbRanger.parseAddress(rawAddress: String?): ByteArray? {
     val normalized = rawAddress?.trim()?.lowercase()?.replace('-', ':') ?: return null

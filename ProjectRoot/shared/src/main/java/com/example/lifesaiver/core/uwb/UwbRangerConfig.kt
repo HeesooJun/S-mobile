@@ -48,6 +48,10 @@ internal fun UwbRanger.prepareControllerOfferBlockingInternal(): UwbRanger.Contr
         }
         preparedOffer
     } ?: return null
+    logUwb(
+        "controller offer ready addr=${offer.controllerAddress} ch=${offer.channel} " +
+            "preamble=${offer.preambleIndex} sessionId=${offer.sessionId}"
+    )
     restartSessionIfTracking()
     return offer
 }
@@ -82,6 +86,7 @@ internal fun UwbRanger.prepareControleeAddressBlockingInternal(): String? {
             }
             controleeAddressHex = address
         }
+        logUwb("controlee address ready addr=$address")
         address
     }
 }
@@ -110,6 +115,7 @@ internal fun UwbRanger.configureControllerSessionInternal(peerAddress: String?) 
     if (shouldRestart) {
         restartSessionIfTracking()
     }
+    logUwb("configure controller peer=$normalizedPeerAddress restart=$shouldRestart")
 }
 
 internal fun UwbRanger.configureControleeSessionInternal(
@@ -143,4 +149,8 @@ internal fun UwbRanger.configureControleeSessionInternal(
     if (shouldRestart) {
         restartSessionIfTracking()
     }
+    logUwb(
+        "configure controlee addr=$normalizedControllerAddress ch=$channel " +
+            "preamble=$preambleIndex sessionId=$sessionId restart=$shouldRestart"
+    )
 }

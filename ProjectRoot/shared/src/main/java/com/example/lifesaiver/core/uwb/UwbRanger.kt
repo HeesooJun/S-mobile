@@ -41,6 +41,8 @@ class UwbRanger(internal val context: Context) {
     @Volatile internal var runtimeAvailableCache: Boolean? = null
     @Volatile internal var lastAvailabilityCheckAtMs: Long = 0L
     @Volatile internal var lastUnavailableLogAtMs: Long = 0L
+    @Volatile internal var lastSnapshotLogAtMs: Long = 0L
+    @Volatile internal var lastSnapshotLogReason: String? = null
     internal var availabilityCallbackRegistered = false
     internal var trackingEnabled = false
     internal var sessionRole = SessionRole.CONTROLLER
