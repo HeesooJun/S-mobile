@@ -4,7 +4,7 @@
 
 | 타입 | 분류 | 누가 보내나 | 언제 쓰나 | 핵심 목적 | 코드 위치 |
 |---|---|---|---|---|---|
-| `ANNOUNCE` | 제어/식별 | 양쪽 앱 | 주기적 브로드캐스트 | 닉네임, 공개키, 배터리, direct 주소 등 노드 상태 공유 | [PacketType](../../shared/src/main/java/com/example/lifesaivior/protocol/model/PacketType.kt), [IdentityAnnouncementPayload](../../shared/src/main/java/com/example/lifesaivior/protocol/model/IdentityAnnouncementPayload.kt) |
+| `ANNOUNCE` | 제어/식별 | 양쪽 앱 | 주기적 브로드캐스트 | 닉네임, 공개키, 배터리, direct 주소, 프로필 요약(성별/생년월일/특이사항) 공유 | [PacketType](../../shared/src/main/java/com/example/lifesaivior/protocol/model/PacketType.kt), [IdentityAnnouncementPayload](../../shared/src/main/java/com/example/lifesaivior/protocol/model/IdentityAnnouncementPayload.kt) |
 | `LEAVE` | 제어/식별 | 양쪽 앱 | 앱 종료/이탈 시 | 메쉬에서 노드 이탈 알림 | [PacketType](../../shared/src/main/java/com/example/lifesaivior/protocol/model/PacketType.kt) |
 | `MESSAGE` | 메시징 | 양쪽 앱 | 채팅/프로필 TLV 송신 시 | 일반 텍스트/데이터 전달 | [PacketType](../../shared/src/main/java/com/example/lifesaivior/protocol/model/PacketType.kt) |
 | `RESCUE_ID` | 식별 | 양쪽 앱 | 식별정보 공유 시 | 이름/생년월일/성별 TLV 전달 | [PacketType](../../shared/src/main/java/com/example/lifesaivior/protocol/model/PacketType.kt), [RescueIdPayload](../../shared/src/main/java/com/example/lifesaivior/protocol/model/RescueIdPayload.kt) |
