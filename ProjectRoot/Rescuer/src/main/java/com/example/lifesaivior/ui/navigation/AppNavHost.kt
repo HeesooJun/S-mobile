@@ -1173,7 +1173,6 @@ fun AppNavHost(
                 isConnected = isConnected,
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
-                bleDebugStats = bleDebugStats,
                 onPrev = { activity?.finish() },
                 onGoPTT = { navigateSingleRoute(AppRoute.RescuerPTT.route) },
                 onSos = { navigateSingleRoute(AppRoute.RescuerEmergency.route) }
@@ -1464,9 +1463,6 @@ fun AppNavHost(
                 peerNicknames = peerNicknames,
                 meshGraphSnapshot = meshGraphSnapshot,
                 meshVisualEvents = meshVisualEvents,
-                bleDebugStats = bleDebugStats,
-                callStatusLabel = callStatusLabel,
-                callDecisionLabel = callDebugState.lastDecision,
                 isInCall = isInCall,
                 isCalling = isCallingOnPtt,
                 isMicOn = isMicOn,

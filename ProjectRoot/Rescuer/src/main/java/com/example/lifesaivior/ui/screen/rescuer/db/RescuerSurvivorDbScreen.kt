@@ -556,7 +556,7 @@ private fun SurvivorCard(
                     if (survivor.notes.isNotBlank()) {
                         Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                         MiniChip(
-                            text = "특이사항: ${survivor.notes}",
+                            text = "특이사항 ${survivor.notes}",
                             bg = neonRed.copy(alpha = 0.1f),
                             fg = neonRed
                         )
