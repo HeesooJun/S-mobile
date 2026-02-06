@@ -1392,6 +1392,8 @@ fun AppNavHost(
                             ?.trim()
                             ?.ifBlank { null }
                 }
+            val hasPttTarget = !pttTargetPeerId.isNullOrBlank()
+            val isTargetDirect = hasPttTarget && appState.directPeerIds.contains(pttTargetPeerId)
             val pttChatMessages = messages.filter { it.recipientPeerId == null }
             val pttChatRoomTitle = "전체 채팅"
             LaunchedEffect(
@@ -1468,6 +1470,8 @@ fun AppNavHost(
                 distanceTrend = distanceState.trend,
                 distanceSource = displayDistanceSource,
                 targetDisplayName = pttTargetName,
+                hasTarget = hasPttTarget,
+                isTargetDirect = isTargetDirect,
                 chatRoomTitle = pttChatRoomTitle,
                 chatMessages = pttChatMessages,
                 onRequestCall = {
