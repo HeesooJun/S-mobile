@@ -25,6 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -56,6 +59,7 @@ import com.example.lifesaivior.protocol.model.CallHandshakeState
 import com.example.lifesaivior.protocol.model.DeviceControlCommand
 import com.example.lifesaivior.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaivior.protocol.security.SignatureLogEntry
+import com.example.lifesaivior.ui.components.PowerSavingLayer
 import com.example.lifesaivior.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaivior.ui.screen.rescuer.chat.RescuerChatScreen
 import com.example.lifesaivior.ui.screen.rescuer.db.RescuerSurvivorDbScreen
@@ -125,6 +129,7 @@ fun AppNavHost(
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     val appState by appViewModel.uiState.collectAsState()
+    var isSurvivorPowerSaving by rememberSaveable { mutableStateOf(false) }
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var pendingSosRoute by remember { mutableStateOf<String?>(null) }
     var sosStartedAt by remember { mutableStateOf(0L) }
@@ -198,6 +203,7 @@ fun AppNavHost(
     val distanceTargetPeerId = targetSurvivor?.peerId ?: selectedTargetPeerId ?: selectedTargetSurvivor?.peerId
     val distanceTargetSupportsUwb = resolvePeerSupportsUwb(distanceTargetPeerId)
     val currentRoute = backStackEntry?.destination?.route
+    val isSurvivorRoute = currentRoute?.startsWith("survivor_") == true
     val isPttRoute = currentRoute == AppRoute.RescuerPTT.route
     val shouldPreferUwbOnDetail = isPttRoute &&
         !isInCall &&
@@ -921,10 +927,11 @@ fun AppNavHost(
         callViewModel.clearPendingCall()
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = AppRoute.RescuerStandby.route
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = AppRoute.RescuerStandby.route
+        ) {
         composable(AppRoute.SurvivorStandby.route) {
             StandbyStatusScreen(
                 batteryLevel = batteryLevel,
@@ -1020,6 +1027,8 @@ fun AppNavHost(
                 isMicOn = isMicOn,
                 isCallConnected = activeCallTransportReady,
                 isInCall = isInCall,
+                isPowerSaving = isSurvivorPowerSaving,
+                onSetPowerSaving = { isSurvivorPowerSaving = it },
                 isSpeakerphoneOn = callDebugState.audio.speakerphoneEnabled,
                 callPeerName = targetSurvivor?.name,
                 pendingCall = pendingRequest,
@@ -1721,6 +1730,12 @@ fun AppNavHost(
                 onPrev = stopAndBack
             )
         }
+        }
+        PowerSavingLayer(
+            isPowerSaving = isSurvivorRoute && isSurvivorPowerSaving,
+            isForceExit = !isSurvivorPowerSaving,
+            onRequestExitPowerSaving = { isSurvivorPowerSaving = false }
+        )
     }
 }
 
