@@ -58,6 +58,7 @@ import com.example.lifesaivior.protocol.security.SignatureLogEntry
 import com.example.lifesaivior.protocol.sync.GossipSyncManager
 import com.example.lifesaivior.protocol.util.sha256Bytes
 import com.example.lifesaivior.presentation.packet.ProfilePacketHandler
+import com.example.lifesaivior.presentation.connection.ConnectionLifecycle
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -805,10 +806,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         gossipSyncManager.onPublicPacketSeen(packet); protocolCore.broadcast(packet)
     }
 
-    fun onDisconnect() { if (_uiState.value.isDisconnecting) return; _uiState.update { it.copy(isDisconnecting = true) }; sendLeavePacket(); stopRescueSignal(); viewModelScope.launch { delay(200); bleManager.disconnect(); _uiState.update { it.copy(isDisconnecting = false) } } }
+    fun onDisconnect() {
+        if (_uiState.value.isDisconnecting) return
+        ConnectionLifecycle.disconnect(
+            sendLeave = { sendLeavePacket() },
+            clearCaches = { clearRuntimeCaches(it) },
+            stopRescueSignal = { stopRescueSignal() },
+            disconnectBle = { if (::bleManager.isInitialized) bleManager.disconnect() },
+            setDisconnecting = { value -> _uiState.update { it.copy(isDisconnecting = value) } },
+            scope = viewModelScope
+        )
+    }
     fun sendLeaveOnShutdown() {
-        if (::protocolCore.isInitialized) sendLeavePacket()
-        clearRuntimeCaches("shutdown")
+        if (!::protocolCore.isInitialized) return
+        ConnectionLifecycle.sendLeaveAndClear(
+            sendLeave = { sendLeavePacket() },
+            clearCaches = { clearRuntimeCaches(it) },
+            reason = "shutdown"
+        )
     }
     fun stopServicesForShutdown() { if (::bleManager.isInitialized) { bleManager.stopAdvertising(); bleManager.disconnect() }; try { app.startService(Intent(app, RescueService::class.java).apply { action = RescueService.ACTION_STOP_RESCUE }) } catch (e: Exception) {} }
     private fun initAudio() { try { audioEngine = AudioEngine() } catch (e: Exception) { _uiEvents.tryEmit(UiEvent.Toast("오디오 에러")) } }
