@@ -806,7 +806,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onDisconnect() { if (_uiState.value.isDisconnecting) return; _uiState.update { it.copy(isDisconnecting = true) }; sendLeavePacket(); stopRescueSignal(); viewModelScope.launch { delay(200); bleManager.disconnect(); _uiState.update { it.copy(isDisconnecting = false) } } }
-    fun sendLeaveOnShutdown() { if (::protocolCore.isInitialized) sendLeavePacket() }
+    fun sendLeaveOnShutdown() {
+        if (::protocolCore.isInitialized) sendLeavePacket()
+        clearRuntimeCaches("shutdown")
+    }
     fun stopServicesForShutdown() { if (::bleManager.isInitialized) { bleManager.stopAdvertising(); bleManager.disconnect() }; try { app.startService(Intent(app, RescueService::class.java).apply { action = RescueService.ACTION_STOP_RESCUE }) } catch (e: Exception) {} }
     private fun initAudio() { try { audioEngine = AudioEngine() } catch (e: Exception) { _uiEvents.tryEmit(UiEvent.Toast("오디오 에러")) } }
     private fun initBle() { bleManager = BleManager(app, logCallback = { Log.d("Ble", it) }, audioCallback = { pcm -> audioEngine?.playAudio(pcm) }, textCallback = { msg -> addMessage(ChatMessage(text = msg, isMine = false, senderName = "상대방")) }, protocolCallback = { _, _ -> }, connectionCallback = { connected, count -> refreshDirectPeers() }); bleManager.setLocalPeerId(senderId); bleManager.setRssiActiveMode(bleRssiActiveMode); protocolCore.attachTransport(BleTransport(bleManager)); startBleDebugLoop() }
@@ -1158,6 +1161,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSignatureLogs() { signatureLogBuffer.clear(); _uiState.update { it.copy(signatureLogs = emptyList()) } }
     fun clearProfileLogs() { profileLogBuffer.clear(); _uiState.update { it.copy(profileLogs = emptyList()) } }
     fun clearDeviceMonitoring() { if (::bleManager.isInitialized) { bleManager.clearAllConnectionsAndMappings(); _uiEvents.tryEmit(UiEvent.Toast("초기화됨")) } }
+    private fun clearRuntimeCaches(reason: String) {
+        announcedPeerLastSeen.clear()
+        peerNicknames.clear()
+        peerDirectAddresses.clear()
+        peerBatteryLevels.clear()
+        peerPowerSavingModes.clear()
+        discoveredSurvivors.clear()
+        announcedToPeers.clear()
+        meshRegistry.clear()
+        meshGraphRegistry.clear()
+        peerIdentityRegistry.clear()
+        _uiState.update {
+            it.copy(
+                peerNicknames = emptyMap(),
+                peerDirectAddresses = emptyMap(),
+                peerBatteryLevels = emptyMap(),
+                peerPowerSavingModes = emptyMap(),
+                survivors = emptyList()
+            )
+        }
+        ConnectionLog.add("Runtime", "clear caches reason=$reason")
+    }
     private fun appendSignatureLog(e: SignatureLogEntry) { signatureLogBuffer.addLast(e); if (signatureLogBuffer.size > 200) signatureLogBuffer.removeFirst(); _uiState.update { it.copy(signatureLogs = signatureLogBuffer.toList()) } }
     private fun appendProfileLog(e: ProfileSyncLogEntry) { profileLogBuffer.addLast(e); if (profileLogBuffer.size > 200) profileLogBuffer.removeFirst(); _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) } }
     private fun loadOrCreatePeerId(m: SignatureManager): ByteArray { val d = m.getNoisePublicKeyBytes().sha256Bytes().copyOfRange(0, 8); val s = prefs.getString("sender_id", null); if (s != null) { val b = runCatching { hexToBytes(s) }.getOrNull(); if (b != null && b.contentEquals(d)) return b }; prefs.edit().putString("sender_id", bytesToHex(d)).apply(); return d }
