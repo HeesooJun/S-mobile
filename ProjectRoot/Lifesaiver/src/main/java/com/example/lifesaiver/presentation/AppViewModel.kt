@@ -766,6 +766,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     isUwb = peerUwb
                 )
                 refreshSurvivorCapabilities()
+                broadcastCachedProfileIfNeeded(force = true, reason = "call-start")
                 _uiState.update {
                     val inActiveCallWithPeer = it.isCallConnected && it.callPeerId == peerIdHex
                     if (inActiveCallWithPeer) {
