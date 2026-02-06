@@ -509,7 +509,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 version = 2,
                 type = PacketType.MESSAGE,
                 ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
-                flags = 0,
+                flags = getCurrentCapabilityFlags(),
                 length = payload.size,
                 timestamp = now,
                 senderId = senderId
@@ -535,7 +535,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 version = 2,
                 type = PacketType.MESSAGE,
                 ttl = ProtocolConstants.MESSAGE_TTL_HOPS,
-                flags = 0,
+                flags = getCurrentCapabilityFlags(),
                 length = payload.size,
                 timestamp = now,
                 senderId = senderId
@@ -763,7 +763,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     peerIdHex = peerIdHex,
                     isWifiAware = wifiAware,
                     isWifiDirect = wifiDirect,
-                    isUwb = peerUwb
+                    isUwb = peerUwb,
+                    isRescuer = meshRegistry.getPeer(peerIdHex)?.isRescuer ?: false
                 )
                 refreshSurvivorCapabilities()
                 broadcastCachedProfileIfNeeded(force = true, reason = "call-start")
@@ -818,7 +819,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     peerIdHex = peerIdHex,
                     isWifiAware = wifiAware,
                     isWifiDirect = wifiDirect,
-                    isUwb = peerUwb
+                    isUwb = peerUwb,
+                    isRescuer = meshRegistry.getPeer(peerIdHex)?.isRescuer ?: false
                 )
                 refreshSurvivorCapabilities()
                 configureUwbFromHandshake(payload)
@@ -897,7 +899,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     peerIdHex = peerIdHex,
                     isWifiAware = wifiAware,
                     isWifiDirect = wifiDirect,
-                    isUwb = peerUwb
+                    isUwb = peerUwb,
+                    isRescuer = meshRegistry.getPeer(peerIdHex)?.isRescuer ?: false
                 )
                 refreshSurvivorCapabilities()
                 _uiState.update {
@@ -1111,11 +1114,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         neighborsOrNull = neighbors,
                         timestamp = packet.header.timestamp
                     )
+                    val flags = packet.header.flags
+                    val wa = (flags and ProtocolConstants.Capabilities.WIFI_AWARE) != 0
+                    val wd = (flags and ProtocolConstants.Capabilities.WIFI_DIRECT) != 0
+                    val uwb = (flags and ProtocolConstants.Capabilities.UWB) != 0
+                    val isRescuer = (flags and ProtocolConstants.Capabilities.RESCUER) != 0
                     meshRegistry.updatePeer(
                         peerIdHex = peerHex,
-                        isWifiAware = (packet.header.flags and 0x01) != 0,
-                        isWifiDirect = (packet.header.flags and 0x04) != 0,
-                        isUwb = (packet.header.flags and 0x02) != 0
+                        isWifiAware = wa,
+                        isWifiDirect = wd,
+                        isUwb = uwb,
+                        isRescuer = isRescuer
                     )
                     refreshSurvivorCapabilities()
                     updateMeshCount()
@@ -1619,18 +1628,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun isWifiAwareSupportedLocally(): Boolean = if (wifiAwareEnabled) {
-        (getCurrentCapabilityFlags() and 0x01) != 0
+        (getCurrentCapabilityFlags() and ProtocolConstants.Capabilities.WIFI_AWARE) != 0
     } else {
         false
     }
 
     fun isWifiDirectSupportedLocally(): Boolean = if (wifiDirectEnabled) {
-        (getCurrentCapabilityFlags() and 0x04) != 0
+        (getCurrentCapabilityFlags() and ProtocolConstants.Capabilities.WIFI_DIRECT) != 0
     } else {
         false
     }
 
-    fun isUwbSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x02) != 0
+    fun isUwbSupportedLocally(): Boolean =
+        (getCurrentCapabilityFlags() and ProtocolConstants.Capabilities.UWB) != 0
 
     private fun getCurrentCapabilityFlags(): Int {
         var flags = 0
@@ -1643,17 +1653,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 false
             }
         if (wifiAwareEnabled && wifiAwareSupported && wifiManager?.isWifiEnabled == true) {
-            flags = flags or 0x01
+            flags = flags or ProtocolConstants.Capabilities.WIFI_AWARE
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_UWB) &&
             ContextCompat.checkSelfPermission(app, Manifest.permission.UWB_RANGING) ==
             PackageManager.PERMISSION_GRANTED
         ) {
-            flags = flags or 0x02
+            flags = flags or ProtocolConstants.Capabilities.UWB
         }
         if (wifiDirectEnabled && packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) {
-            flags = flags or 0x04
+            flags = flags or ProtocolConstants.Capabilities.WIFI_DIRECT
         }
         return flags
     }
