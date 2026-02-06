@@ -26,19 +26,19 @@ Lifesaivior는 재난 상황에서 인터넷과 기지국이 끊겨도 구조 �
 ### 폴더 구조(요약)
 ```text
 ProjectRoot/
-├── Lifesaiver/
-│   └── src/main/java/com/example/lifesaiver/
+├── Lifesaivior/
+│   └── src/main/java/com/example/lifesaivior/
 │       ├── ui/            # 화면(Compose), 네비게이션, 컴포넌트
 │       ├── presentation/  # ViewModel, 상태, 화면 로직
 │       ├── wakeup/        # 음성/센서/고립 감지 기반 자동 호출
 │       └── core/          # 앱 내부 서비스/DB/프로필
 ├── Rescuer/
-│   └── src/main/java/com/example/lifesaiver/
+│   └── src/main/java/com/example/lifesaivior/
 │       ├── ui/            # 구조자 화면, 탐색/대응 UI
 │       ├── presentation/  # 구조자 ViewModel, 상태/이벤트 관리
 │       └── core/          # 구조자 서비스/DB/로컬 처리
 └── shared/
-    └── src/main/java/com/example/lifesaiver/
+    └── src/main/java/com/example/lifesaivior/
         ├── protocol/      # 패킷, 코덱, 파이프라인, 동기화, 보안
         └── core/          # BLE/UWB/Wi-Fi/오디오/거리 추정 공통 계층
 ```
@@ -46,7 +46,7 @@ ProjectRoot/
 아키텍처 흐름도와 상세 설명은 [`docs/architecture/system_architecture.md`](docs/architecture/system_architecture.md)에 정리했습니다.
 
 ## 모듈 구성
-- `:lifesaiver`: 피구조자 앱(긴급 모드, 자동 호출, 구조 통신 UI)
+- `:lifesaivior`: 피구조자 앱(긴급 모드, 자동 호출, 구조 통신 UI)
 - `:rescuer`: 구조자 앱(탐색, 대응, 원격 제어 UI)
 - `:shared`: 공통 엔진(프로토콜, 전송 파이프라인, 동기화, 보안)
 
@@ -74,7 +74,7 @@ ProjectRoot/
 - Ed25519 기반 핵심 패킷 서명 검증
 
 ## 유저 플로우
-- 피구조자 앱: `:lifesaiver`
+- 피구조자 앱: `:lifesaivior`
 - 구조자 앱: `:rescuer`
 
 1. 피구조자는 SOS 버튼을 누르거나 음성/센서/무응답 타이머 조건으로 긴급 모드를 실행합니다.
@@ -143,13 +143,13 @@ AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](docs/ai/ai_pipeline.md)�
 
 ### Build
 ```powershell
-.\gradlew.bat :lifesaiver:assembleDebug
+.\gradlew.bat :lifesaivior:assembleDebug
 .\gradlew.bat :rescuer:assembleDebug
 ```
 
 ### Test
 ```powershell
-.\gradlew.bat :lifesaiver:testDebugUnitTest
+.\gradlew.bat :lifesaivior:testDebugUnitTest
 .\gradlew.bat :rescuer:testDebugUnitTest
 ```
 

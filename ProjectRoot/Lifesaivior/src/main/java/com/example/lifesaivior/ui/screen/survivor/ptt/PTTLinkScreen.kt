@@ -1,0 +1,321 @@
+package com.example.lifesaivior.ui.screen.survivor.ptt
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.lifesaivior.presentation.BleDebugStats
+import com.example.lifesaivior.presentation.MeshVisualEvent
+import com.example.lifesaivior.protocol.mesh.MeshGraphRegistry
+import com.example.lifesaivior.R
+import com.example.lifesaivior.ui.components.PowerSavingLayer
+import com.example.lifesaivior.ui.components.ScreenScaffold
+import com.example.lifesaivior.ui.components.ptt.PttActionType
+import com.example.lifesaivior.ui.components.ptt.PttActionsBlock
+import com.example.lifesaivior.ui.components.ptt.PttMeshOverlay
+import com.example.lifesaivior.ui.components.ptt.PttTopBar
+import com.example.lifesaivior.ui.theme.AppColors
+import com.example.lifesaivior.ui.theme.LocalAppScale
+import com.example.lifesaivior.ui.theme.scaledDp
+import com.example.lifesaivior.ui.theme.scaledSp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
+
+data class SurvivorCallRequest(
+    val callerName: String,
+    val wifiAware: Boolean,
+    val wifiDirect: Boolean,
+    val useOpus: Boolean
+)
+
+@Suppress("UNUSED_PARAMETER")
+@Composable
+fun PTTLinkScreen(
+    batteryLevel: Int,
+    connectedCount: Int,
+    meshPeerCount: Int,
+    directPeerIds: List<String>,
+    myPeerId: String,
+    myNickname: String,
+    peerNicknames: Map<String, String>,
+    meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot,
+    meshVisualEvents: SharedFlow<MeshVisualEvent>,
+    bleDebugStats: BleDebugStats,
+    isConnected: Boolean,
+    isMicOn: Boolean = false,
+    isCallConnected: Boolean = false,
+    isInCall: Boolean = false,
+    callPeerName: String? = null,
+    pendingCall: SurvivorCallRequest? = null,
+    forceExitPowerSavingToken: Long = 0L,
+    forceSetPowerSavingToken: Long = 0L,
+    forceSetPowerSavingEnabled: Boolean = false,
+    onBack: () -> Unit,
+    onDisconnect: () -> Unit,
+    onProfile: () -> Unit,
+    onPanicClear: () -> Unit,
+    onPowerSavingChanged: (Boolean) -> Unit = {},
+    onSettings: () -> Unit,
+    onAcceptCall: () -> Unit = {},
+    onDeclineCall: () -> Unit = {},
+    onEndCall: () -> Unit = {}
+) {
+    val scale = LocalAppScale.current
+    val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
+    var expandedAction by remember { mutableStateOf<PttActionType?>(null) }
+    var showDoubleTapHint by remember { mutableStateOf(false) }
+    var showMeshMap by remember { mutableStateOf(false) }
+
+    val meshDisplayCount = meshPeerCount.coerceAtLeast(0)
+    val displayConnectedCount = meshDisplayCount
+
+    val meshGraphState = remember(meshGraphSnapshot, myPeerId, myNickname, peerNicknames) {
+        buildPttMeshGraphState(
+            snapshot = meshGraphSnapshot,
+            myPeerId = myPeerId,
+            myNickname = myNickname,
+            peerNicknames = peerNicknames
+        )
+    }
+
+    LaunchedEffect(expandedAction) {
+        if (expandedAction == PttActionType.Disconnect) {
+            showDoubleTapHint = true
+            delay(3500)
+            showDoubleTapHint = false
+        } else {
+            showDoubleTapHint = false
+        }
+    }
+    LaunchedEffect(forceExitPowerSavingToken) {
+        if (forceExitPowerSavingToken > 0L) {
+            setPowerSaving(false)
+        }
+    }
+    LaunchedEffect(forceSetPowerSavingToken) {
+        if (forceSetPowerSavingToken > 0L) {
+            setPowerSaving(forceSetPowerSavingEnabled)
+        }
+    }
+    LaunchedEffect(isPowerSaving) {
+        onPowerSavingChanged(isPowerSaving)
+    }
+
+    ScreenScaffold(
+        gradient = listOf(AppColors.Gray900, AppColors.Black),
+        vignetteColor = AppColors.Black.copy(alpha = 0.7f)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PowerSavingLayer(
+                isPowerSaving = isPowerSaving,
+                isForceExit = !isPowerSaving,
+                onRequestExitPowerSaving = { setPowerSaving(false) }
+            )
+
+            PttTopBar(
+                onPanicClear = onPanicClear,
+                onSettings = onSettings
+            )
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = scaledDp(32, scale))
+                    .offset(y = scaledDp(-18, scale)),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "생존자 네트워크 형성 완료",
+                    color = AppColors.Green,
+                    fontSize = scaledSp(16, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                Text(
+                    text = "구조자 연결 시 자동으로 알림 후 연결화면으로 전환됩니다.",
+                    color = AppColors.Gray500,
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(scaledDp(24, scale)))
+
+                PttActionsBlock(
+                    expandedAction = expandedAction,
+                    batteryLevel = batteryLevel,
+                    survivorCount = displayConnectedCount,
+                    isPowerSaving = isPowerSaving,
+                    showDoubleTapHint = showDoubleTapHint,
+                    onPowerClick = {
+                        setPowerSaving(!isPowerSaving)
+                        expandedAction = PttActionType.Power
+                    },
+                    onDisconnectClick = {
+                        if (expandedAction == PttActionType.Disconnect) {
+                            expandedAction = null
+                            onDisconnect()
+                        } else {
+                            expandedAction = PttActionType.Disconnect
+                        }
+                    },
+                    onUsersClick = {
+                        expandedAction = null
+                        showMeshMap = true
+                    },
+                    modifier = Modifier.offset(y = scaledDp(12, scale))
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = scaledDp(86, scale)),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isInCall) {
+                    CallActiveCard(
+                        isCallConnected = isCallConnected,
+                        callPeerName = callPeerName,
+                        onEndCall = onEndCall
+                    )
+                } else if (pendingCall != null) {
+                    IncomingCallCard(
+                        callerName = pendingCall.callerName,
+                        onDecline = onDeclineCall
+                    )
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(scaledDp(28, scale))
+                            .height(scaledDp(28, scale)),
+                        color = AppColors.Green,
+                        strokeWidth = scaledDp(4, scale)
+                    )
+                    Spacer(modifier = Modifier.width(scaledDp(10, scale)))
+                    Text(
+                        text = "구조자 연결 요청 대기중",
+                        color = AppColors.Gray500,
+                        fontSize = scaledSp(11, scale),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            if (showMeshMap) {
+                PttMeshOverlay(
+                    nodes = meshGraphState.nodes,
+                    edges = meshGraphState.edges,
+                    visualEvents = meshVisualEvents,
+                    connectedCount = connectedCount,
+                    meshDisplayCount = meshDisplayCount,
+                    bleDebugStats = bleDebugStats,
+                    onClose = { showMeshMap = false }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun IncomingCallCard(
+    callerName: String,
+    onDecline: () -> Unit
+) {
+    val scale = LocalAppScale.current
+    Surface(
+        color = AppColors.Gray900,
+        shape = RoundedCornerShape(scaledDp(16, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "$callerName 님이 통화를 요청했습니다",
+                color = AppColors.White,
+                fontSize = scaledSp(13, scale),
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            Text(
+                text = "자동 수락 후 연결 중...",
+                color = AppColors.Gray500,
+                fontSize = scaledSp(11, scale),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            OutlinedButton(onClick = onDecline) {
+                Text("취소")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallActiveCard(
+    isCallConnected: Boolean,
+    callPeerName: String?,
+    onEndCall: () -> Unit
+) {
+    val scale = LocalAppScale.current
+    Surface(
+        color = AppColors.Gray900,
+        shape = RoundedCornerShape(scaledDp(16, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = if (isCallConnected) {
+                    "통화 연결됨${callPeerName?.let { " · $it" } ?: ""}"
+                } else {
+                    "통화 연결 중${callPeerName?.let { " · $it" } ?: ""}"
+                },
+                color = if (isCallConnected) AppColors.Green else AppColors.Yellow,
+                fontSize = scaledSp(13, scale),
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
+            Image(
+                painter = painterResource(id = R.drawable.ic_call_end),
+                contentDescription = "통화 종료",
+                modifier = Modifier
+                    .size(scaledDp(56, scale))
+                    .clickable(onClick = onEndCall),
+                contentScale = ContentScale.Fit
+            )
+        }
+    }
+}
