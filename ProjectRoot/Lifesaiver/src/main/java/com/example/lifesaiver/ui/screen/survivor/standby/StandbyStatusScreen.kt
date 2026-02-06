@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,7 +49,8 @@ import kotlinx.coroutines.delay
 fun StandbyStatusScreen(
     sttResetToken: Long,
     sttEnabled: Boolean,
-    onSos: () -> Unit,
+    onSos: (Boolean) -> Unit,
+    onSettings: () -> Unit,
 ) {
     val scale = LocalAppScale.current
     val context = LocalContext.current
@@ -68,12 +72,14 @@ fun StandbyStatusScreen(
                 hasTriggered = false
                 sttStatus = "🎙️ 대기 중"
                 lastHeardText = ""
+                if (sttEnabled) {
                     delay(30_000)
                     if (!hasTriggered) {
                         hasTriggered = true
                         sttStatus = "⏱️ 시간 초과로 자동 송출"
-                        onSos()
+                        onSos(true)
                     }
+                }
             }
             DisposableEffect(context, sttResetToken, sttEnabled) {
                 if (!sttEnabled) {
@@ -97,7 +103,7 @@ fun StandbyStatusScreen(
                                     if (!hasTriggered) {
                                         hasTriggered = true
                                         detector?.stopListening()
-                                        onSos()
+                                        onSos(true)
                                     }
                                 }
                             }
@@ -220,7 +226,7 @@ fun StandbyStatusScreen(
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .size(scaledDp(52, scale))
-                            .clickable { onSos() }
+                            .clickable { onSos(false) }
                     )
                     Spacer(modifier = Modifier.height(scaledDp(10, scale)))
                     Text(
@@ -234,8 +240,16 @@ fun StandbyStatusScreen(
                 }
             } // End of Column (Content)
 
-
-
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "설정",
+                tint = AppColors.Gray500,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = scaledDp(20, scale), top = scaledDp(18, scale))
+                    .size(scaledDp(24, scale))
+                    .clickable { onSettings() }
+            )
         } // End of Box
     }
 }

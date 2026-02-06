@@ -44,6 +44,7 @@ class RealTimeCallManager(
     private var peerWifiAwareSupported = false
     private var peerWifiDirectSupported = false
     private val wifiAwareEnabled = true
+    private val wifiDirectEnabled = false
     private var awareTemporarilyDisabled = false
     private var activeTransport = CallTransportType.NONE
     private var isServer = true
@@ -114,10 +115,10 @@ class RealTimeCallManager(
 
     fun updateLocalCapabilities(wifiAwareSupported: Boolean, wifiDirectSupported: Boolean) {
         localWifiAwareSupported = wifiAwareSupported
-        localWifiDirectSupported = wifiDirectSupported
+        localWifiDirectSupported = wifiDirectEnabled && wifiDirectSupported
         _debugState.update {
             it.copy(
-                lastDecision = "local: aware=${localWifiAwareSupported} direct=$wifiDirectSupported"
+                lastDecision = "local: aware=${localWifiAwareSupported} direct=$localWifiDirectSupported"
             )
         }
         if (pendingStart) {
@@ -129,13 +130,14 @@ class RealTimeCallManager(
 
     fun updatePeerCapabilities(wifiAwareSupported: Boolean, wifiDirectSupported: Boolean) {
         val awareSupported = wifiAwareSupported
+        val directSupported = wifiDirectEnabled && wifiDirectSupported
         Log.d(
             "RealTimeCall",
-            "Peer capabilities: wifiAware=$awareSupported wifiDirect=$wifiDirectSupported"
+            "Peer capabilities: wifiAware=$awareSupported wifiDirect=$directSupported"
         )
-        ConnectionLog.add("Call", "peer caps aware=$awareSupported direct=$wifiDirectSupported")
+        ConnectionLog.add("Call", "peer caps aware=$awareSupported direct=$directSupported")
         peerWifiAwareSupported = awareSupported
-        peerWifiDirectSupported = wifiDirectSupported
+        peerWifiDirectSupported = directSupported
         if (wifiAwareEnabled) {
             wifiAwareRanger.updatePeerCapability(awareSupported)
         }

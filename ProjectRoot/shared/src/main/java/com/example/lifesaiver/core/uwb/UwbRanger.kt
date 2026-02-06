@@ -98,6 +98,12 @@ class UwbRanger(private val context: Context) {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    fun isRuntimeAvailableCached(): Boolean? {
+        if (!isSupported() || !hasPermission()) return false
+        ensureAvailabilityCallbackRegistered()
+        return runtimeAvailableCache
+    }
+
     fun prepareControllerOfferBlocking(): ControllerOffer? {
         if (!isSupported() || !hasPermission()) return null
         if (!isRuntimeAvailableBlocking()) return null

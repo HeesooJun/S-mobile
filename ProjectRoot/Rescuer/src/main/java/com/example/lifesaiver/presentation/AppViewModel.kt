@@ -110,6 +110,7 @@ data class AppUiState(
     val peerNicknames: Map<String, String> = emptyMap(),
     val peerDirectAddresses: Map<String, String> = emptyMap(),
     val peerBatteryLevels: Map<String, Int> = emptyMap(),
+    val peerPowerSavingModes: Map<String, Boolean> = emptyMap(),
     val meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot = MeshGraphRegistry.GraphSnapshot(emptyList(), emptyList()),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
@@ -145,6 +146,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = getApplication<Application>()
     private val forcePcmCall = false
     private val wifiAwareEnabled = true
+    private val wifiDirectEnabled = false
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
     private val _uiEvents = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
@@ -196,6 +198,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val peerNicknames = mutableMapOf<String, String>()
     private val peerDirectAddresses = ConcurrentHashMap<String, String>()
     private val peerBatteryLevels = ConcurrentHashMap<String, Int>()
+    private val peerPowerSavingModes = ConcurrentHashMap<String, Boolean>()
     private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
@@ -454,6 +457,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun requestUwbSession(targetPeerIdHex: String) {
         if (targetPeerIdHex.isBlank()) return
         if (!isUwbSupportedLocally()) return
+        if (uwbRanger.isRuntimeAvailableCached() == false) return
         val normalizedTarget = targetPeerIdHex.trim().lowercase()
         val now = SystemClock.elapsedRealtime()
         synchronized(uwbSyncRequestLock) {
@@ -781,6 +785,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     announcedPeerLastSeen[peer] = now
                     val directAddress = announcement.wifiDirectAddress?.trim()?.lowercase()?.ifBlank { null }
                     val remoteBattery = announcement.batteryLevel
+                    val remotePowerSaving = announcement.powerSavingEnabled
                     if (announcement.nickname.isNotBlank()) {
                         peerNicknames[peer] = announcement.nickname
                     }
@@ -789,6 +794,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (remoteBattery != null) {
                         peerBatteryLevels[peer] = remoteBattery
+                    }
+                    if (remotePowerSaving != null) {
+                        peerPowerSavingModes[peer] = remotePowerSaving
                     }
                     _uiState.update { state ->
                         val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peer) {
@@ -805,6 +813,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             peerNicknames = peerNicknames.toMap(),
                             peerDirectAddresses = peerDirectAddresses.toMap(),
                             peerBatteryLevels = peerBatteryLevels.toMap(),
+                            peerPowerSavingModes = peerPowerSavingModes.toMap(),
                             incomingCallDirectAddress = incomingDirect,
                             callPeerDirectAddress = callPeerDirect
                         )
@@ -819,10 +828,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     announcedPeerLastSeen.remove(peer)
                     peerDirectAddresses.remove(peer)
                     peerBatteryLevels.remove(peer)
+                    peerPowerSavingModes.remove(peer)
                     _uiState.update {
                         it.copy(
                             peerDirectAddresses = peerDirectAddresses.toMap(),
-                            peerBatteryLevels = peerBatteryLevels.toMap()
+                            peerBatteryLevels = peerBatteryLevels.toMap(),
+                            peerPowerSavingModes = peerPowerSavingModes.toMap()
                         )
                     }
                     refreshSurvivorCapabilities()
@@ -988,11 +999,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             announcedPeerLastSeen.remove(it)
             peerDirectAddresses.remove(it)
             peerBatteryLevels.remove(it)
+            peerPowerSavingModes.remove(it)
         }
         _uiState.update {
             it.copy(
                 peerDirectAddresses = peerDirectAddresses.toMap(),
-                peerBatteryLevels = peerBatteryLevels.toMap()
+                peerBatteryLevels = peerBatteryLevels.toMap(),
+                peerPowerSavingModes = peerPowerSavingModes.toMap()
             )
         }
         refreshSurvivorCapabilities()
@@ -1003,7 +1016,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 wifiAwareRanger.isConnectionReady,
                 wifiDirectRanger.isConnectionReady
             ) { awareReady, directReady ->
-                awareReady || directReady
+                awareReady || (wifiDirectEnabled && directReady)
             }.collect { connected ->
                 _uiState.update { it.copy(isCallConnected = connected) }
             }
@@ -1014,8 +1027,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     } else {
         false
     }
-    fun isWifiDirectSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x04) != 0
+    fun isWifiDirectSupportedLocally(): Boolean = if (wifiDirectEnabled) {
+        (getCurrentCapabilityFlags() and 0x04) != 0
+    } else {
+        false
+    }
     fun isUwbSupportedLocally(): Boolean = (getCurrentCapabilityFlags() and 0x02) != 0
+    fun isUwbRuntimeAvailableLocally(): Boolean {
+        if (!isUwbSupportedLocally()) return false
+        return uwbRanger.isRuntimeAvailableCached() != false
+    }
     private fun getCurrentCapabilityFlags(): Int {
         var f = 0; val pm = app.packageManager; val wifi = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val wa = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) pm.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE) else false
@@ -1026,7 +1047,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ) {
             f = f or 0x02
         }
-        if (pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) f = f or 0x04
+        if (wifiDirectEnabled && pm.hasSystemFeature(PackageManager.FEATURE_WIFI_DIRECT)) f = f or 0x04
         return f
     }
     private fun observeMeshGraph() { viewModelScope.launch { meshGraphRegistry.graphState.collect { snap -> _uiState.update { it.copy(meshGraphSnapshot = snap, meshPeerCount = snap.nodes.size.coerceAtLeast(1)) } } } }

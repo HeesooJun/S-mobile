@@ -7,17 +7,20 @@ data class IdentityAnnouncementPayload(
     val noisePublicKey: ByteArray,
     val signingPublicKey: ByteArray,
     val wifiDirectAddress: String? = null,
-    val batteryLevel: Int? = null
+    val batteryLevel: Int? = null,
+    val powerSavingEnabled: Boolean? = null
 ) {
     fun encode(): ByteArray? {
         val nicknameBytes = nickname.toByteArray(Charsets.UTF_8)
         val directBytes = wifiDirectAddress?.let { macToBytes(it) }
         val batteryBytes = batteryLevel?.coerceIn(0, 100)?.let { byteArrayOf(it.toByte()) }
+        val powerSavingBytes = powerSavingEnabled?.let { byteArrayOf(if (it) 1 else 0) }
         if (nicknameBytes.size > MAX_TLV_LENGTH ||
             noisePublicKey.size > MAX_TLV_LENGTH ||
             signingPublicKey.size > MAX_TLV_LENGTH ||
             (directBytes != null && directBytes.size > MAX_TLV_LENGTH) ||
-            (batteryBytes != null && batteryBytes.size > MAX_TLV_LENGTH)
+            (batteryBytes != null && batteryBytes.size > MAX_TLV_LENGTH) ||
+            (powerSavingBytes != null && powerSavingBytes.size > MAX_TLV_LENGTH)
         ) {
             return null
         }
@@ -32,6 +35,9 @@ data class IdentityAnnouncementPayload(
         if (batteryBytes != null) {
             writeTlv(out, TLV_BATTERY_LEVEL, batteryBytes)
         }
+        if (powerSavingBytes != null) {
+            writeTlv(out, TLV_POWER_SAVING, powerSavingBytes)
+        }
         return out.toByteArray()
     }
 
@@ -41,6 +47,7 @@ data class IdentityAnnouncementPayload(
         private const val TLV_SIGNING_PUBLIC_KEY = 0x03
         private const val TLV_WIFI_DIRECT_ADDRESS = 0x05
         private const val TLV_BATTERY_LEVEL = 0x06
+        private const val TLV_POWER_SAVING = 0x07
         private const val MAX_TLV_LENGTH = 255
 
         fun decode(data: ByteArray): IdentityAnnouncementPayload? {
@@ -50,6 +57,7 @@ data class IdentityAnnouncementPayload(
             var signingPublicKey: ByteArray? = null
             var wifiDirectAddress: String? = null
             var batteryLevel: Int? = null
+            var powerSavingEnabled: Boolean? = null
 
             while (offset + 2 <= data.size) {
                 val type = data[offset].toInt() and 0xFF
@@ -74,6 +82,11 @@ data class IdentityAnnouncementPayload(
                             batteryLevel = (value[0].toInt() and 0xFF).coerceIn(0, 100)
                         }
                     }
+                    TLV_POWER_SAVING -> {
+                        if (value.isNotEmpty()) {
+                            powerSavingEnabled = (value[0].toInt() and 0xFF) != 0
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -84,7 +97,8 @@ data class IdentityAnnouncementPayload(
                 noisePublicKey = noisePublicKey,
                 signingPublicKey = signingPublicKey,
                 wifiDirectAddress = wifiDirectAddress,
-                batteryLevel = batteryLevel
+                batteryLevel = batteryLevel,
+                powerSavingEnabled = powerSavingEnabled
             )
         }
 
