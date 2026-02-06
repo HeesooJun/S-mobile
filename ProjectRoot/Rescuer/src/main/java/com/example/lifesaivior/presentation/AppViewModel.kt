@@ -201,6 +201,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val peerBatteryLevels = ConcurrentHashMap<String, Int>()
     private val peerPowerSavingModes = ConcurrentHashMap<String, Boolean>()
     private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
+    private val announcedProfiles = ConcurrentHashMap<String, SurvivorProfile>()
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
     private val meshGraphRegistry = MeshGraphRegistry()
@@ -862,6 +863,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         peerBatteryLevels.remove(peer)
                         peerPowerSavingModes.remove(peer)
                         discoveredSurvivors.remove(peer)
+                        announcedProfiles.remove(peer)
                         _uiState.update {
                             it.copy(
                                 peerNicknames = peerNicknames.toMap(),
@@ -893,6 +895,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (remotePowerSaving != null) {
                         peerPowerSavingModes[peer] = remotePowerSaving
                     }
+                    updateAnnouncedProfile(peer, announcement)
                     _uiState.update { state ->
                         val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peer) {
                             directAddress
@@ -923,6 +926,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     peerDirectAddresses.remove(peer)
                     peerBatteryLevels.remove(peer)
                     peerPowerSavingModes.remove(peer)
+                    announcedProfiles.remove(peer)
                     _uiState.update {
                         it.copy(
                             peerDirectAddresses = peerDirectAddresses.toMap(),
@@ -1046,12 +1050,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val announceName = cachedNickname
             .ifBlank { _uiState.value.myNickname.trim() }
             .ifBlank { defaultRescuerName() }
+        val profileSnapshot = cachedProfile
         val ann = IdentityAnnouncementPayload(
             nickname = announceName,
             noisePublicKey = signatureManager.getNoisePublicKeyBytes(),
             signingPublicKey = signatureManager.getPublicKeyBytes(),
             wifiDirectAddress = directAddress,
-            batteryLevel = localBattery
+            batteryLevel = localBattery,
+            gender = profileSnapshot.gender,
+            birthDate = profileSnapshot.birthDate,
+            notes = profileSnapshot.notes
         )
         val pay = (ann.encode() ?: return) + GossipTlv.encodeNeighbors(bleManager.getConnectedPeerIds())
         val pkt = Packet(PacketHeader(2, PacketType.ANNOUNCE, ProtocolConstants.MESSAGE_TTL_HOPS, getCurrentCapabilityFlags(), pay.size, System.currentTimeMillis(), senderId), pay)
@@ -1085,14 +1093,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val list = peerIds.mapNotNull { id ->
                 val base = discoveredSurvivors[id]
                     ?: SurvivorProfile(name = peerNicknames[id].orEmpty(), peerId = id)
+                val merged = mergeProfile(base, announcedProfiles[id], peerNicknames[id].orEmpty())
                 val info = meshRegistry.getPeer(id)
-                val displayName = base.name.ifBlank { peerNicknames[id].orEmpty() }
+                val displayName = merged.name
                 if (info?.isRescuer == true || isRescuerDisplayName(displayName)) {
                     return@mapNotNull null
                 }
-                base.copy(
-                    isWifiAware = info?.isWifiAware ?: base.isWifiAware,
-                    isWifiDirect = info?.isWifiDirect ?: base.isWifiDirect,
+                merged.copy(
+                    isWifiAware = info?.isWifiAware ?: merged.isWifiAware,
+                    isWifiDirect = info?.isWifiDirect ?: merged.isWifiDirect,
                     // Prefer live capability from announce/handshake; stale DB values should not force UWB UI.
                     isUwb = info?.isUwb ?: false,
                     peerId = id
@@ -1107,6 +1116,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isBlank()) return false
         return trimmed.startsWith("구조자") || trimmed.startsWith("rescuer", ignoreCase = true)
     }
+
+    private fun updateAnnouncedProfile(peerId: String, announcement: IdentityAnnouncementPayload) {
+        val profile = SurvivorProfile(
+            name = announcement.nickname,
+            gender = announcement.gender.orEmpty(),
+            birthDate = announcement.birthDate.orEmpty(),
+            notes = announcement.notes.orEmpty(),
+            peerId = peerId
+        )
+        announcedProfiles[peerId] = profile
+    }
+
+    private fun mergeProfile(
+        base: SurvivorProfile,
+        announced: SurvivorProfile?,
+        fallbackName: String
+    ): SurvivorProfile {
+        val mergedName = pickNonBlank(base.name, announced?.name).ifBlank { fallbackName }
+        return base.copy(
+            name = mergedName,
+            gender = pickNonBlank(base.gender, announced?.gender),
+            birthDate = pickNonBlank(base.birthDate, announced?.birthDate),
+            notes = pickNonBlank(base.notes, announced?.notes)
+        )
+    }
+
+    private fun pickNonBlank(primary: String, fallback: String?): String {
+        return if (primary.isNotBlank()) primary else fallback?.takeIf { it.isNotBlank() }.orEmpty()
+    }
     private fun pruneAnnouncedPeers(now: Long) {
         val cutoff = now - ProtocolConstants.Mesh.PEER_TIMEOUT_MS
         val stale = announcedPeerLastSeen.filterValues { it < cutoff }.keys
@@ -1116,6 +1154,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             peerDirectAddresses.remove(it)
             peerBatteryLevels.remove(it)
             peerPowerSavingModes.remove(it)
+            announcedProfiles.remove(it)
         }
         _uiState.update {
             it.copy(
@@ -1183,6 +1222,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         peerBatteryLevels.clear()
         peerPowerSavingModes.clear()
         discoveredSurvivors.clear()
+        announcedProfiles.clear()
         announcedToPeers.clear()
         meshRegistry.clear()
         meshGraphRegistry.clear()
