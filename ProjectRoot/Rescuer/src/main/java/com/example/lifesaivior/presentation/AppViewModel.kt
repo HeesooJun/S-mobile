@@ -211,6 +211,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
     @Volatile private var bleRssiActiveMode: Boolean = false
+    private val listDisplayTimeoutMs: Long = 60_000L
     private var lastConnectionAnnounceMs: Long = 0L
     private val connectionAnnounceCooldownMs: Long = 3_000L
     private var lastProfileBroadcastFingerprint: String = ""
@@ -1089,7 +1090,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeProfiles() { viewModelScope.launch { profileDao.getAll().collect { entities -> discoveredSurvivors.clear(); entities.forEach { discoveredSurvivors[it.peerId] = SurvivorProfile(it.name, it.gender, it.birthDate, it.notes, peerId = it.peerId) }; refreshSurvivorCapabilities() } } }
     private fun refreshSurvivorCapabilities() {
         _uiState.update { s ->
-            val peerIds = announcedPeerLastSeen.keys.sorted()
+            val now = System.currentTimeMillis()
+            val peerIds = announcedPeerLastSeen
+                .filterValues { lastSeen -> now - lastSeen <= listDisplayTimeoutMs }
+                .keys
+                .sorted()
             val list = peerIds.mapNotNull { id ->
                 val base = discoveredSurvivors[id]
                     ?: SurvivorProfile(name = peerNicknames[id].orEmpty(), peerId = id)
