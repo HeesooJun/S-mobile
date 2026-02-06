@@ -395,10 +395,10 @@ class RealTimeCallManager(
                     startTransport(CallTransportType.WIFI_AWARE)
                     activeTransport = CallTransportType.WIFI_AWARE
                     awareReady = waitForReady(token, CallTransportType.WIFI_AWARE)
-                    if (awareReady) break
-                    if (!isCallActive || token != attemptToken) return@launch
+                if (awareReady) break
+                if (!isCallActive || token != attemptToken) return@launch
                     if (wifiAwareEnabled) {
-                        wifiAwareRanger.stop()
+                        wifiAwareRanger.resetForCallAttempt("aware retry")
                     }
                     activeTransport = CallTransportType.NONE
                     if (attempt < totalAwareAttempts) {
@@ -475,7 +475,7 @@ class RealTimeCallManager(
     private fun resetTransports(reason: String) {
         ConnectionLog.add("Call", "reset transports ($reason)")
         if (wifiAwareEnabled) {
-            wifiAwareRanger.stop()
+            wifiAwareRanger.resetForCallAttempt(reason)
         }
         wifiDirectRanger.stop()
         activeTransport = CallTransportType.NONE
