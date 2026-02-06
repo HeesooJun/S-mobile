@@ -592,51 +592,54 @@ private fun DistanceStatusCard(
         else -> "거리 유지"
     }
 
-    Surface(
-        color = AppColors.Gray800.copy(alpha = 0.58f),
-        shape = RoundedCornerShape(scaledDp(14, scale)),
+    val cardShape = RoundedCornerShape(scaledDp(14, scale))
+    Column(
         modifier = modifier
+            .background(
+                color = AppColors.Gray900.copy(alpha = 0.82f),
+                shape = cardShape
+            )
+            .border(
+                width = scaledDp(1, scale),
+                color = AppColors.Gray500.copy(alpha = 0.35f),
+                shape = cardShape
+            )
+            .padding(
+                horizontal = scaledDp(14, scale),
+                vertical = scaledDp(10, scale)
+            ),
+        verticalArrangement = Arrangement.spacedBy(scaledDp(4, scale))
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = scaledDp(14, scale),
-                    vertical = scaledDp(10, scale)
-                ),
-            verticalArrangement = Arrangement.spacedBy(scaledDp(4, scale))
+        Text(
+            text = "현재 거리",
+            color = AppColors.Gray500,
+            fontSize = scaledSp(11, scale),
+            fontWeight = FontWeight.Medium
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "현재 거리",
-                color = AppColors.Gray500,
-                fontSize = scaledSp(11, scale),
-                fontWeight = FontWeight.Medium
+                text = distanceText,
+                color = AppColors.White,
+                fontSize = scaledSp(22, scale),
+                fontWeight = FontWeight.ExtraBold
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = distanceText,
-                    color = AppColors.White,
-                    fontSize = scaledSp(22, scale),
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    text = sourceText,
-                    color = AppColors.Gray400,
-                    fontSize = scaledSp(11, scale),
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
             Text(
-                text = trendText,
+                text = sourceText,
                 color = AppColors.Gray400,
                 fontSize = scaledSp(11, scale),
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold
             )
         }
+        Text(
+            text = trendText,
+            color = AppColors.Gray400,
+            fontSize = scaledSp(11, scale),
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 
