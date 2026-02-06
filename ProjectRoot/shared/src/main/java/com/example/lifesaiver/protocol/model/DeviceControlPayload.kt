@@ -5,7 +5,9 @@ enum class DeviceControlCommand(val code: Int) {
     BEEP(2),
     VIBRATE(3),
     HIGH_TONE(4),
-    STOP_ALERTS(5);
+    STOP_ALERTS(5),
+    POWER_SAVE_ON(6),
+    POWER_SAVE_OFF(7);
 
     companion object {
         fun fromCode(code: Int): DeviceControlCommand? {
