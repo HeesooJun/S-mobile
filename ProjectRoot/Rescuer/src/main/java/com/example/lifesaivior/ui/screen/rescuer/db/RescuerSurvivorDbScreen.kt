@@ -155,10 +155,10 @@ fun RescuerSurvivorDbScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "신호 수신 ${survivors.size}명 · 탭하여 자세히 보기",
+                                    text = "생존자 ${survivors.size}명 발견",
                                     color = AppColors.Gray500,
                                     fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                             ActionPill(
