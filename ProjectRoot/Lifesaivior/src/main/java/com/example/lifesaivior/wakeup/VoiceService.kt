@@ -27,6 +27,7 @@ class VoiceService : Service() {
 
     private var isolationDetector: IsolationDetector? = null
     private var isMicActive = false
+    private var isDemoMode = false
 
     override fun onCreate() {
         super.onCreate()
@@ -41,21 +42,29 @@ class VoiceService : Service() {
             onErrorOccurred = { restartVoiceListening() }
         )
 
-        isolationDetector = IsolationDetector(
-            context = this,
-            onIsolated = {
-                Log.w("VoiceService", "📶 통신 고립! 음성 감지 시작")
-                startListening()
-                updateNotification(isIsolated = true)
-            },
-            onRecovered = {
-                Log.d("VoiceService", "📶 통신 복구. 음성 대기 모드")
-                stopListening()
-                updateNotification(isIsolated = false)
-            }
-        )
+        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        isDemoMode = prefs.getBoolean("demo_mode", false)
+        if (isDemoMode) {
+            Log.w("VoiceService", "🎬 시연 모드: 통신 상태와 무관하게 음성 감지 시작")
+            startListening()
+            updateNotification(isIsolated = true)
+        } else {
+            isolationDetector = IsolationDetector(
+                context = this,
+                onIsolated = {
+                    Log.w("VoiceService", "📶 통신 고립! 음성 감지 시작")
+                    startListening()
+                    updateNotification(isIsolated = true)
+                },
+                onRecovered = {
+                    Log.d("VoiceService", "📶 통신 복구. 음성 대기 모드")
+                    stopListening()
+                    updateNotification(isIsolated = false)
+                }
+            )
 
-        isolationDetector?.startMonitoring()
+            isolationDetector?.startMonitoring()
+        }
     }
 
     private fun startListening() {
@@ -111,6 +120,7 @@ class VoiceService : Service() {
         prefs.edit()
             .putBoolean("voice_detection", false)
             .putBoolean("shock_detection", false) // 충격 감지도 끔
+            .putBoolean("demo_mode", false)
             .apply()
 
         // 1. 실행할 Activity Intent 생성

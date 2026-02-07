@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
     // UI 상태 관리
     private val isVoiceOnState = mutableStateOf(false)
     private val isShockOnState = mutableStateOf(false)
+    private val isDemoOnState = mutableStateOf(false)
 
     // 연속 클릭 방지 (시간 단축: 0.5초 -> 0.3초)
     private var lastVoiceToggleTime = 0L
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
             SettingsScreen(
                 isVoiceOn = isVoiceOnState.value,
                 isShockOn = isShockOnState.value,
+                isDemoOn = isDemoOnState.value,
                 onVoiceToggle = { newValue ->
                     // 1. 연타 방지 (300ms)
                     val currentTime = SystemClock.elapsedRealtime()
@@ -94,6 +96,28 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this, "감시가 해제되었습니다.", Toast.LENGTH_SHORT).show()
                     }
                 },
+                onDemoToggle = { enabled ->
+                    isDemoOnState.value = enabled
+                    saveSettings("demo_mode", enabled)
+
+                    if (enabled) {
+                        isVoiceOnState.value = true
+                        isShockOnState.value = true
+                        saveSettings("voice_detection", true)
+                        saveSettings("shock_detection", true)
+                        stopAllServicesAsync()
+                        checkAndRequestPermissions()
+                        startServicesIfEnabled()
+                        Toast.makeText(this, "시연 모드가 켜졌습니다.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        isVoiceOnState.value = false
+                        isShockOnState.value = false
+                        saveSettings("voice_detection", false)
+                        saveSettings("shock_detection", false)
+                        stopAllServicesAsync()
+                        Toast.makeText(this, "시연 모드가 해제되었습니다.", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 onBack = { finish() },
                 onEditProfile = {
                     Toast.makeText(this, "프로필 수정 준비 중", Toast.LENGTH_SHORT).show()
@@ -132,6 +156,15 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         isVoiceOnState.value = prefs.getBoolean("voice_detection", false)
         isShockOnState.value = prefs.getBoolean("shock_detection", false)
+        isDemoOnState.value = prefs.getBoolean("demo_mode", false)
+        if (isDemoOnState.value && (!isVoiceOnState.value || !isShockOnState.value)) {
+            isVoiceOnState.value = true
+            isShockOnState.value = true
+            prefs.edit()
+                .putBoolean("voice_detection", true)
+                .putBoolean("shock_detection", true)
+                .apply()
+        }
     }
 
     private fun saveSettings(key: String, value: Boolean) {
@@ -141,8 +174,9 @@ class MainActivity : ComponentActivity() {
 
     private fun startServicesIfEnabled() {
         val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        val isVoiceOn = prefs.getBoolean("voice_detection", false)
-        val isShockOn = prefs.getBoolean("shock_detection", false)
+        val isDemoOn = prefs.getBoolean("demo_mode", false)
+        val isVoiceOn = prefs.getBoolean("voice_detection", false) || isDemoOn
+        val isShockOn = prefs.getBoolean("shock_detection", false) || isDemoOn
 
         if (isVoiceOn) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
