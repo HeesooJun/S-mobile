@@ -27,6 +27,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import com.example.lifesaivior.core.log.ConnectionLog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.actor
@@ -89,6 +90,9 @@ class BleManager(
     private val addressPeerMap = mutableMapOf<String, String>()
     private val pendingPeerIds = mutableMapOf<String, String>()
     private var gattServer: BluetoothGattServer? = null
+    @Volatile private var lastServerNotifyAtMs: Long = 0L
+    private var gattServerCloseJob: Job? = null
+    private val gattServerCloseDelayMs = 300L
     private var localPeerId: ByteArray? = null
 
     private var currentAdvertisingSet: AdvertisingSet? = null
@@ -100,6 +104,8 @@ class BleManager(
     private var lastScanStartTimeMs: Long = 0L
     @Volatile
     private var isScanning: Boolean = false
+    @Volatile
+    private var scanRestartJob: Job? = null
 
     private val connectionBackoffBaseMs: Long = 5_000L
     private val connectionBackoffMaxMs: Long = 30_000L
@@ -542,7 +548,8 @@ class BleManager(
             val elapsed = now - lastScanStartTimeMs
             if (elapsed in 0 until scanRateLimitMs) {
                 val waitMs = scanRateLimitMs - elapsed
-                scope.launch {
+                scanRestartJob?.cancel()
+                scanRestartJob = scope.launch {
                     delay(waitMs)
                     if (!isScanning) startScan()
                 }
@@ -576,6 +583,8 @@ class BleManager(
         } catch (e: Exception) {
         }
         isScanning = false
+        scanRestartJob?.cancel()
+        scanRestartJob = null
     }
 
     private fun connectToPeer(device: BluetoothDevice) {
@@ -697,6 +706,7 @@ class BleManager(
     }
 
     private fun setupGattServer() {
+        cancelGattServerClose()
         if (gattServer != null) return
         try {
             gattServer = bluetoothManager?.openGattServer(context, gattServerCallback)
@@ -822,6 +832,12 @@ class BleManager(
 
     fun sendProtocolTo(address: String, data: ByteArray): Boolean {
         if (!isConnected) return false
+        if (!isAddressConnected(address)) return false
+        val activeAddresses = getSystemConnectedAddresses()
+        if (!activeAddresses.isNullOrEmpty() && !activeAddresses.contains(address)) {
+            ConnectionLog.add("BleSend", "direct skipped (stale) addr=$address")
+            return false
+        }
         val queued = sendActor.trySend(
             SendRequest.Direct(address, Constants.PROTOCOL_CHAR_UUID, data)
         ).isSuccess
@@ -832,6 +848,16 @@ class BleManager(
         return true
     }
 
+    private fun isAddressConnected(address: String): Boolean {
+        synchronized(connectedPeers) {
+            if (connectedPeers.contains(address)) return true
+        }
+        synchronized(clientConnections) {
+            if (clientConnections.containsKey(address)) return true
+        }
+        return false
+    }
+
     private fun sendPacket(type: Byte, payload: ByteArray) {
         val packet = ByteArray(payload.size + 1)
         packet[0] = type
@@ -840,7 +866,10 @@ class BleManager(
     }
 
     private fun sendRaw(characteristicUuid: UUID, data: ByteArray, excludeAddress: String? = null) {
-        if (!isConnected) return
+        if (!isConnected) {
+            ConnectionLog.add("BleSend", "broadcast skipped (no active link)")
+            return
+        }
         val queued = sendActor.trySend(
             SendRequest.Broadcast(characteristicUuid, data, excludeAddress)
         ).isSuccess
@@ -850,8 +879,10 @@ class BleManager(
     }
 
     private fun sendRawInternal(characteristicUuid: UUID, data: ByteArray, excludeAddress: String?) {
-        val serverAddresses = hostBroadcast(characteristicUuid, data, excludeAddress)
-        clientBroadcast(characteristicUuid, data, excludeAddress, serverAddresses)
+        // Notify connected GATT clients first (server role), then also write via
+        // any active client connections to avoid missing peers when notify fails.
+        hostBroadcast(characteristicUuid, data, excludeAddress)
+        clientBroadcast(characteristicUuid, data, excludeAddress, emptySet())
     }
 
     private fun sendToAddressInternal(address: String, characteristicUuid: UUID, data: ByteArray) {
@@ -878,6 +909,7 @@ class BleManager(
             if (!addresses.contains(dev.address)) continue
             if (excludeAddress != null && dev.address == excludeAddress) continue
             try {
+                lastServerNotifyAtMs = SystemClock.elapsedRealtime()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     gattServer?.notifyCharacteristicChanged(dev, char, false, data)
                 } else {
@@ -935,6 +967,7 @@ class BleManager(
         }
 
         return try {
+            lastServerNotifyAtMs = SystemClock.elapsedRealtime()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gattServer?.notifyCharacteristicChanged(target, char, false, data)
             } else {
@@ -1346,6 +1379,7 @@ class BleManager(
         for (dev in devices) {
             if (dev.address != sender) {
                 try {
+                    lastServerNotifyAtMs = SystemClock.elapsedRealtime()
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         gattServer?.notifyCharacteristicChanged(dev, char, false, data)
                     } else {
@@ -1383,13 +1417,43 @@ class BleManager(
             connectionAttempts.clear()
         }
         clearAllRssiState()
-        gattServer?.close()
-        gattServer = null
+        scheduleGattServerClose()
         isConnected = false
         synchronized(connectedPeers) {
             connectedPeers.clear()
         }
         connectionCallback(false, 0)
+    }
+
+    private fun cancelGattServerClose() {
+        gattServerCloseJob?.cancel()
+        gattServerCloseJob = null
+    }
+
+    private fun scheduleGattServerClose() {
+        val server = gattServer ?: return
+        val now = SystemClock.elapsedRealtime()
+        val elapsed = now - lastServerNotifyAtMs
+        val delayMs = if (elapsed >= gattServerCloseDelayMs) 0L else gattServerCloseDelayMs - elapsed
+        gattServerCloseJob?.cancel()
+        gattServerCloseJob = scope.launch {
+            if (delayMs > 0) {
+                delay(delayMs)
+            }
+            if (gattServer !== server) return@launch
+            val since = SystemClock.elapsedRealtime() - lastServerNotifyAtMs
+            if (since < gattServerCloseDelayMs) {
+                scheduleGattServerClose()
+                return@launch
+            }
+            try {
+                server.close()
+            } catch (_: Exception) {
+            }
+            if (gattServer === server) {
+                gattServer = null
+            }
+        }
     }
 
     // 리소스 정리 함수 (앱 종료 시 호출)

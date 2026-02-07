@@ -61,6 +61,7 @@ fun RescuerSurvivorDbScreen(
     peerBatteryMap: Map<String, Int> = emptyMap(),
     onDisconnectClick: () -> Unit,
     onOpenMeshMap: () -> Unit,
+    isDisconnecting: Boolean = false,
     selectedTargetPeerId: String? = null,
     onSelectTarget: (SurvivorProfile) -> Unit = {},
     isLive: Boolean = true,
@@ -155,16 +156,17 @@ fun RescuerSurvivorDbScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "신호 수신 ${survivors.size}명 · 탭하여 자세히 보기",
+                                    text = "생존자 ${survivors.size}명 발견",
                                     color = AppColors.Gray500,
                                     fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                             ActionPill(
-                                label = "연결 해제",
+                                label = if (isDisconnecting) "연결 해제 중" else "연결 해제",
                                 tint = neonRed,
                                 scale = scale,
+                                enabled = !isDisconnecting,
                                 onClick = onDisconnectClick
                             )
                         }
@@ -355,17 +357,19 @@ private fun ActionPill(
     label: String,
     tint: Color,
     scale: Float,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val resolvedAlpha = if (enabled) 1f else 0.45f
     Surface(
-        color = tint.copy(alpha = 0.12f),
+        color = tint.copy(alpha = 0.12f * resolvedAlpha),
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.4f)),
-        modifier = Modifier.clickable(onClick = onClick)
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.4f * resolvedAlpha)),
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
     ) {
         Text(
             text = label,
-            color = tint,
+            color = tint.copy(alpha = resolvedAlpha),
             fontSize = scaledSp(11, scale),
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = scaledDp(12, scale), vertical = scaledDp(7, scale))
@@ -393,7 +397,6 @@ private fun SurvivorCard(
 ) {
     val rssi = peerRssiMap[survivor.peerId]
     val battery = peerBatteryMap[survivor.peerId]?.coerceIn(0, 100)
-    val rssiText = rssi?.let { "$it dBm" } ?: "-"
     val estimatedDistanceMeters = rssi?.let { estimateDistanceMeters(it) }
     val resolvedDistance = when {
         liveDistanceMeters != null && liveDistanceSource == DistanceMeasurementSource.UWB ->
@@ -419,22 +422,6 @@ private fun SurvivorCard(
         DistanceMeasurementSource.RTT -> "RTT 약 "
         DistanceMeasurementSource.RSSI -> "약 "
         else -> "약 "
-    }
-    val signalChipText = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> "UWB"
-        DistanceMeasurementSource.RTT -> "RTT"
-        DistanceMeasurementSource.RSSI -> "RSSI $rssiText"
-        else -> "RSSI $rssiText"
-    }
-    val signalChipBg = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> neonGreen.copy(alpha = 0.16f)
-        DistanceMeasurementSource.RTT -> neonGreen.copy(alpha = 0.16f)
-        else -> AppColors.Gray700.copy(alpha = 0.5f)
-    }
-    val signalChipFg = when (resolvedDistance?.second) {
-        DistanceMeasurementSource.UWB -> neonGreen
-        DistanceMeasurementSource.RTT -> neonGreen
-        else -> AppColors.Gray400
     }
     val batteryChipText = battery?.let { "배터리 $it%" } ?: "배터리 미수신"
     val batteryChipBg = when {
@@ -462,15 +449,6 @@ private fun SurvivorCard(
         else -> "수신됨"
     }
     var isExpanded by rememberSaveable(survivor.peerId) { mutableStateOf(false) }
-    val summaryText = buildString {
-        append("RSSI $rssiText")
-        append(" · ")
-        append(battery?.let { "배터리 $it%" } ?: "배터리 -")
-        if (distanceText != null) {
-            append(" · ")
-            append("${distancePrefix}${distanceText}m")
-        }
-    }
 
     Surface(
         color = if (isSelected) charcoal.copy(alpha = 0.95f) else charcoal.copy(alpha = 0.82f),
@@ -498,15 +476,6 @@ private fun SurvivorCard(
                         color = AppColors.White,
                         fontSize = scaledSp(16, scale),
                         fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(scaledDp(4, scale)))
-                    Text(
-                        text = summaryText,
-                        color = AppColors.White.copy(alpha = 0.55f),
-                        fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (isCalling) {
@@ -570,12 +539,6 @@ private fun SurvivorCard(
                     )
                     Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                     MiniChip(
-                        text = signalChipText,
-                        bg = signalChipBg,
-                        fg = signalChipFg
-                    )
-                    Spacer(modifier = Modifier.height(scaledDp(6, scale)))
-                    MiniChip(
                         text = batteryChipText,
                         bg = batteryChipBg,
                         fg = batteryChipFg
@@ -597,7 +560,7 @@ private fun SurvivorCard(
                     if (survivor.notes.isNotBlank()) {
                         Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                         MiniChip(
-                            text = survivor.notes,
+                            text = "특이사항 ${survivor.notes}",
                             bg = neonRed.copy(alpha = 0.1f),
                             fg = neonRed
                         )

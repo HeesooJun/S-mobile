@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
                 val uiState by viewModel.uiState.collectAsState()
 
                 LifesaiviorApp(
+                    appViewModel = viewModel,
                     hasPermissions = uiState.hasPermissions,
                     batteryLevel = uiState.batteryLevel,
                     isConnected = uiState.isConnected,
