@@ -629,6 +629,33 @@ fun AppNavHost(
     LaunchedEffect(
         appState.survivors,
         backStackEntry?.destination?.route,
+        selectedTargetPeerId,
+        selectedTargetSurvivor,
+        isInCall,
+        callingTargetPeerId,
+        pendingTarget
+    ) {
+        val currentRoute = backStackEntry?.destination?.route
+        if (currentRoute != AppRoute.RescuerPTT.route) return@LaunchedEffect
+        if (isInCall || callingTargetPeerId != null || pendingTarget != null) return@LaunchedEffect
+
+        val targetPeerId = selectedTargetPeerId ?: selectedTargetSurvivor?.peerId
+        if (targetPeerId.isNullOrBlank()) return@LaunchedEffect
+
+        val activePeerIds = appState.survivors
+            .map { it.peerId }
+            .filter { it.isNotBlank() }
+            .toSet()
+        if (targetPeerId !in activePeerIds) {
+            selectedTargetPeerId = null
+            selectedTargetSurvivor = null
+            navigateSingleRoute(AppRoute.RescuerSurvivorDb.route)
+        }
+    }
+
+    LaunchedEffect(
+        appState.survivors,
+        backStackEntry?.destination?.route,
         isInCall,
         isConnected,
         pendingSosNavigation

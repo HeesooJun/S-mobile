@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.example.lifesaivior.R
 import com.example.lifesaivior.ai.stt.EmergencyIntentClassifierKorean
 import com.example.lifesaivior.ai.stt.VoiceTriggerDetector
+import com.example.lifesaivior.core.settings.AppSettingsRepository
 
 class VoiceService : Service() {
 
@@ -34,6 +35,14 @@ class VoiceService : Service() {
         createNotificationChannel()
         startForegroundNotification(isIsolated = false)
 
+        AppSettingsRepository.init(this)
+        val settings = AppSettingsRepository.snapshot(this)
+        if (settings.isSosBackgroundSuspended) {
+            Log.w("VoiceService", "🛑 SOS 활성화 상태: 음성 감지 중단")
+            stopSelf()
+            return
+        }
+
         intentClassifier = EmergencyIntentClassifierKorean(this)
         voiceDetector = VoiceTriggerDetector(
             context = this,
@@ -42,8 +51,7 @@ class VoiceService : Service() {
             onErrorOccurred = { restartVoiceListening() }
         )
 
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        isDemoMode = prefs.getBoolean("demo_mode", false)
+        isDemoMode = settings.isDemoModeEnabled
         if (isDemoMode) {
             Log.w("VoiceService", "🎬 시연 모드: 통신 상태와 무관하게 음성 감지 시작")
             startListening()
@@ -115,13 +123,18 @@ class VoiceService : Service() {
     }
 
     private fun triggerAlert(reason: String) {
-        // [핵심 1] 두 설정 모두 OFF (음성 + 충격)
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("voice_detection", false)
-            .putBoolean("shock_detection", false) // 충격 감지도 끔
-            .putBoolean("demo_mode", false)
-            .apply()
+        // [핵심 1] SOS 동안 백그라운드 감지 중단 플래그 설정
+        AppSettingsRepository.init(this)
+        val settings = AppSettingsRepository.snapshot(this)
+        if (!settings.isSosBackgroundSuspended) {
+            AppSettingsRepository.setSosBackgroundSuspended(
+                context = this,
+                suspended = true,
+                backupVoice = settings.isVoiceDetectionEnabled,
+                backupShock = settings.isShockDetectionEnabled,
+                backupDemo = settings.isDemoModeEnabled
+            )
+        }
 
         // 1. 실행할 Activity Intent 생성
         val activityIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {

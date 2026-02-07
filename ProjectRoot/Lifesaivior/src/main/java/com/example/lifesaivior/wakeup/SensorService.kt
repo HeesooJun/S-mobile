@@ -17,6 +17,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.lifesaivior.R
+import com.example.lifesaivior.core.settings.AppSettingsRepository
 import kotlin.math.sqrt
 
 class SensorService : Service(), SensorEventListener {
@@ -50,11 +51,19 @@ class SensorService : Service(), SensorEventListener {
         createNotificationChannels()
         startForegroundServiceNotification()
 
+        AppSettingsRepository.init(this)
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val settings = AppSettingsRepository.snapshot(this)
+        if (settings.isSosBackgroundSuspended) {
+            Log.w("SensorService", "🛑 SOS 활성화 상태: 센서 감지 중단")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         // [수정] 서비스가 죽은 상태라면 리스너 등록 안 함
         if (!isDestroyed) {
             accelerometer?.also { sensor ->
@@ -105,13 +114,18 @@ class SensorService : Service(), SensorEventListener {
 
         Log.e("SensorService", "🚨 비상 알림 발동! 원인: $reason")
 
-        // [핵심 1] 두 설정 모두 OFF (충격 + 음성)
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("shock_detection", false)
-            .putBoolean("voice_detection", false) // 음성 감지도 끔
-            .putBoolean("demo_mode", false)
-            .apply()
+        // [핵심 1] SOS 동안 백그라운드 감지 중단 플래그 설정
+        AppSettingsRepository.init(this)
+        val settings = AppSettingsRepository.snapshot(this)
+        if (!settings.isSosBackgroundSuspended) {
+            AppSettingsRepository.setSosBackgroundSuspended(
+                context = this,
+                suspended = true,
+                backupVoice = settings.isVoiceDetectionEnabled,
+                backupShock = settings.isShockDetectionEnabled,
+                backupDemo = settings.isDemoModeEnabled
+            )
+        }
 
         // 1. 센서 해제
         sensorManager.unregisterListener(this)

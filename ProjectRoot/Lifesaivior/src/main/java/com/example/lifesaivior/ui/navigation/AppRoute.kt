@@ -9,4 +9,5 @@ sealed class AppRoute(val route: String) {
     data object SurvivorPTT : AppRoute("survivor_ptt")
     data object SurvivorChat : AppRoute("survivor_chat")
     data object Settings : AppRoute("settings")
+    data object DemoSettings : AppRoute("demo_settings")
 }

@@ -48,6 +48,8 @@ fun SettingsScreen(
     isVoiceOn: Boolean,
     isShockOn: Boolean,
     isDemoOn: Boolean,
+    isSosActive: Boolean = false,
+    isDemoToggleEnabled: Boolean = true,
     profileName: String = "",
     profileGender: String = "",
     profileBirthDate: String = "",
@@ -55,6 +57,7 @@ fun SettingsScreen(
     onVoiceToggle: (Boolean) -> Unit,
     onShockToggle: (Boolean) -> Unit,
     onDemoToggle: (Boolean) -> Unit,
+    onDemoDetails: (() -> Unit)? = null,
     onBack: () -> Unit = {},
     onEditProfile: () -> Unit = {}
 ) {
@@ -112,6 +115,8 @@ fun SettingsScreen(
                 isVoiceOn = isVoiceOn,
                 isShockOn = isShockOn,
                 isDemoOn = isDemoOn,
+                isSosActive = isSosActive,
+                isDemoToggleEnabled = isDemoToggleEnabled,
                 onVoiceToggle = { shouldEnable ->
                     if (shouldEnable) {
                         // '다시 보지 않기'가 체크 안 되어 있으면(false) 팝업 띄움
@@ -143,6 +148,15 @@ fun SettingsScreen(
                     }
                 }
             )
+            if (onDemoDetails != null) {
+                Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                SettingsActionCard(
+                    scale = scale,
+                    label = "시연 모드 상세",
+                    actionLabel = "설정",
+                    onClick = onDemoDetails
+                )
+            }
         }
 
         // --- [Dialog] 음성 감지 설명 팝업 ---
@@ -418,14 +432,61 @@ private fun SettingsControlCard(
     isVoiceOn: Boolean,
     isShockOn: Boolean,
     isDemoOn: Boolean,
+    isSosActive: Boolean,
+    isDemoToggleEnabled: Boolean,
     onVoiceToggle: (Boolean) -> Unit,
     onShockToggle: (Boolean) -> Unit,
     onDemoToggle: (Boolean) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().background(ColorCard, RoundedCornerShape(scaledDp(13, scale))).padding(horizontal = scaledDp(16, scale))) {
-        SettingToggleRow(scale, "음성 감지", isVoiceOn, onVoiceToggle, true, enabled = !isDemoOn)
-        SettingToggleRow(scale, "충격 감지", isShockOn, onShockToggle, true, enabled = !isDemoOn)
-        SettingToggleRow(scale, "시연 모드", isDemoOn, onDemoToggle, false)
+        SettingToggleRow(scale, "음성 감지", isVoiceOn, onVoiceToggle, true, enabled = !isDemoOn && !isSosActive)
+        SettingToggleRow(scale, "충격 감지", isShockOn, onShockToggle, true, enabled = !isDemoOn && !isSosActive)
+        SettingToggleRow(
+            scale,
+            "시연 모드",
+            isDemoOn,
+            onDemoToggle,
+            false,
+            enabled = isDemoToggleEnabled && !isSosActive
+        )
+    }
+}
+
+@Composable
+private fun SettingsActionCard(
+    scale: Float,
+    label: String,
+    actionLabel: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ColorCard, RoundedCornerShape(scaledDp(13, scale)))
+            .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(14, scale))
+            .alpha(if (enabled) 1f else 0.45f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (enabled) Modifier.clickable { onClick() } else Modifier),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = ColorTextMain,
+                fontSize = scaledSp(16, scale),
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = actionLabel,
+                color = ColorTextSub,
+                fontSize = scaledSp(12, scale),
+                fontWeight = FontWeight.Medium
+            )
+        }
     }
 }
 
