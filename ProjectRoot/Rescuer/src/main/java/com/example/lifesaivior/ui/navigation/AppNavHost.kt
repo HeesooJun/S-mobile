@@ -1458,7 +1458,12 @@ fun AppNavHost(
                 }
                 if (resolvedRssiMode == RssiFeedbackMode.OFF) return@LaunchedEffect
                 val distance = displayDistanceMeters ?: return@LaunchedEffect
-                if (displayDistanceSource != DistanceMeasurementSource.RSSI) return@LaunchedEffect
+                if (
+                    displayDistanceSource != DistanceMeasurementSource.RSSI &&
+                    displayDistanceSource != DistanceMeasurementSource.UWB
+                ) {
+                    return@LaunchedEffect
+                }
                 val now = System.currentTimeMillis()
                 val clampedDistance = distance.coerceIn(0f, 10f)
                 val normalizedProximity = (10f - clampedDistance) / 10f
