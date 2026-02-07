@@ -95,6 +95,7 @@ fun AppNavHost(
     meshGraphSnapshot: com.example.lifesaivior.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
+    appViewModel: AppViewModel,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
@@ -126,10 +127,8 @@ fun AppNavHost(
     val scale = LocalAppScale.current
     val context = LocalContext.current
     val appContext = context.applicationContext
-    val appViewModel: AppViewModel = viewModel(
-        viewModelStoreOwner = context as ViewModelStoreOwner
-    )
     val appState by appViewModel.uiState.collectAsState()
+    val autoConnectBlocked = appState.isAutoConnectBlocked
     val audioEngine = remember(appContext) { RealtimeAudioStreamEngine(appContext) }
     val localOpusSupported = remember(audioEngine) { audioEngine.isOpusSupported() }
     val callManager = remember(appViewModel) {
@@ -563,6 +562,7 @@ fun AppNavHost(
                     sttResetToken = sttResetToken,
                     sttEnabled = sttEnabled,
                     onSos = { autoTriggered ->
+                        onStartRescueSignal()
                         if (autoTriggered) {
                             triggerAutoSosFeedback()
                             onPulseRescueSignal()
@@ -626,11 +626,13 @@ fun AppNavHost(
                     navController.popBackStack()
                     Unit
                 }
-                LaunchedEffect(Unit) {
-                    if (!isRescueSignalActive) {
+                LaunchedEffect(autoConnectBlocked, isRescueSignalActive) {
+                    if (!isRescueSignalActive && !autoConnectBlocked) {
                         onStartRescueSignal()
                     }
-                    onStartAutoConnect()
+                    if (!autoConnectBlocked) {
+                        onStartAutoConnect()
+                    }
                 }
                 BackHandler {
                     stopAndBack()
@@ -643,8 +645,10 @@ fun AppNavHost(
             }
 
             composable(AppRoute.SurvivorPTT.route) {
-                LaunchedEffect(Unit) {
-                    onStartAutoConnect()
+                LaunchedEffect(autoConnectBlocked) {
+                    if (!autoConnectBlocked) {
+                        onStartAutoConnect()
+                    }
                 }
                 val pendingRequest = appState.incomingCallPeerId?.let {
                     SurvivorCallRequest(

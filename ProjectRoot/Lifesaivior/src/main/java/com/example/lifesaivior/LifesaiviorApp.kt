@@ -16,6 +16,7 @@ import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.presentation.BleDebugStats
+import com.example.lifesaivior.presentation.AppViewModel
 import com.example.lifesaivior.presentation.screen.BlackSaverScreen
 import com.example.lifesaivior.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaivior.protocol.security.SignatureLogEntry
@@ -42,6 +43,7 @@ fun LifesaiviorApp(
     meshGraphSnapshot: com.example.lifesaivior.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     meshVisualEvents: SharedFlow<MeshVisualEvent>,
     bleDebugStats: BleDebugStats,
+    appViewModel: AppViewModel,
     isMicOn: Boolean,
     isDisconnecting: Boolean,
     isRescueSignalActive: Boolean,
@@ -136,6 +138,7 @@ fun LifesaiviorApp(
                 meshGraphSnapshot = meshGraphSnapshot,
                 meshVisualEvents = meshVisualEvents,
                 bleDebugStats = bleDebugStats,
+                appViewModel = appViewModel,
                 isMicOn = isMicOn,
                 isDisconnecting = isDisconnecting,
                 isRescueSignalActive = isRescueSignalActive,
