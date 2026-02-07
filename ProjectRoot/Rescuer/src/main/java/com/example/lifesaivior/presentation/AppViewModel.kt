@@ -36,6 +36,7 @@ import com.example.lifesaivior.core.wifi.WifiDirectRanger
 import com.example.lifesaivior.protocol.codec.BinaryPacketCodec
 import com.example.lifesaivior.protocol.core.ProtocolConstants
 import com.example.lifesaivior.protocol.core.ProtocolCore
+import com.example.lifesaivior.protocol.mesh.DirectPeerAnnounceTracker
 import com.example.lifesaivior.protocol.mesh.GossipTlv
 import com.example.lifesaivior.protocol.mesh.MeshGraphRegistry
 import com.example.lifesaivior.protocol.mesh.MeshPeerRegistry
@@ -58,6 +59,7 @@ import com.example.lifesaivior.protocol.security.SignatureLogEntry
 import com.example.lifesaivior.protocol.sync.GossipSyncManager
 import com.example.lifesaivior.protocol.util.sha256Bytes
 import com.example.lifesaivior.presentation.packet.ProfilePacketHandler
+import com.example.lifesaivior.presentation.connection.ConnectionLifecycle
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -114,6 +116,7 @@ data class AppUiState(
     val meshGraphSnapshot: MeshGraphRegistry.GraphSnapshot = MeshGraphRegistry.GraphSnapshot(emptyList(), emptyList()),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
+    val isAutoConnectBlocked: Boolean = false,
     val isRescueSignalActive: Boolean = false,
     val messages: List<ChatMessage> = emptyList(),
     val bleDebug: BleDebugStats = BleDebugStats(),
@@ -194,12 +197,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedProfile: SurvivorProfile = SurvivorProfile()
     @Volatile private var cachedNickname: String = ""
-    private val announcedToPeers = mutableSetOf<String>()
+    private val directPeerAnnounceTracker = DirectPeerAnnounceTracker()
     private val peerNicknames = mutableMapOf<String, String>()
     private val peerDirectAddresses = ConcurrentHashMap<String, String>()
     private val peerBatteryLevels = ConcurrentHashMap<String, Int>()
     private val peerPowerSavingModes = ConcurrentHashMap<String, Boolean>()
     private val discoveredSurvivors = mutableMapOf<String, SurvivorProfile>()
+    private val announcedProfiles = ConcurrentHashMap<String, SurvivorProfile>()
     private var voiceRecorder: VoiceRecorder? = null
     private var recordingFile: File? = null
     private val meshGraphRegistry = MeshGraphRegistry()
@@ -209,11 +213,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var meshCleanupJob: kotlinx.coroutines.Job? = null
     private var bleDebugJob: kotlinx.coroutines.Job? = null
     @Volatile private var bleRssiActiveMode: Boolean = false
-    private var lastConnectionAnnounceMs: Long = 0L
-    private val connectionAnnounceCooldownMs: Long = 3_000L
     private var lastProfileBroadcastFingerprint: String = ""
     private var lastProfileBroadcastAtMs: Long = 0L
     private val profileBroadcastCooldownMs: Long = 2_000L
+    private val survivorDisplayTtlMs: Long = 60_000L
+    @Volatile private var autoConnectBlocked: Boolean = false
     private val uwbSyncRequestLock = Any()
     @Volatile private var uwbSyncRequestInFlight = false
     private var lastUwbSyncTargetPeerId: String? = null
@@ -241,6 +245,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startRescueSignal() {
         if (!_uiState.value.hasPermissions) { _uiEvents.tryEmit(UiEvent.Toast("권한이 필요합니다.")); return }
+        autoConnectBlocked = false
+        ConnectionLog.add("Runtime", "auto-connect unblocked (rescue-start)")
+        _uiState.update { it.copy(isAutoConnectBlocked = false) }
         bleManager.startEmergencyAdvertising()
         try {
             val intent = Intent(app, RescueService::class.java).apply { action = RescueService.ACTION_START_RESCUE }
@@ -277,7 +284,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun onStartAutoConnect() { bleManager.startAutoConnect() }
+    fun onStartAutoConnect() {
+        if (autoConnectBlocked) {
+            ConnectionLog.add("Runtime", "auto-connect skipped (manual disconnect)")
+            return
+        }
+        bleManager.startAutoConnect()
+    }
     fun onStopAutoConnect() { bleManager.disconnect() }
     fun setBleRssiActiveMode(active: Boolean) {
         bleRssiActiveMode = active
@@ -805,14 +818,56 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         gossipSyncManager.onPublicPacketSeen(packet); protocolCore.broadcast(packet)
     }
 
-    fun onDisconnect() { if (_uiState.value.isDisconnecting) return; _uiState.update { it.copy(isDisconnecting = true) }; sendLeavePacket(); stopRescueSignal(); viewModelScope.launch { delay(200); bleManager.disconnect(); _uiState.update { it.copy(isDisconnecting = false) } } }
-    fun sendLeaveOnShutdown() { if (::protocolCore.isInitialized) sendLeavePacket() }
+    fun onDisconnect() {
+        if (_uiState.value.isDisconnecting) return
+        autoConnectBlocked = true
+        ConnectionLog.add("Runtime", "auto-connect blocked (manual disconnect)")
+        _uiState.update { it.copy(isAutoConnectBlocked = true) }
+        ConnectionLifecycle.disconnect(
+            sendLeave = { sendLeavePacket() },
+            clearCaches = { clearRuntimeCaches(it) },
+            stopRescueSignal = { stopRescueSignal() },
+            disconnectBle = { if (::bleManager.isInitialized) bleManager.disconnect() },
+            setDisconnecting = { value -> _uiState.update { it.copy(isDisconnecting = value) } },
+            scope = viewModelScope
+        )
+    }
+    fun sendLeaveOnShutdown() {
+        if (!::protocolCore.isInitialized) return
+        ConnectionLifecycle.sendLeaveAndClear(
+            sendLeave = { sendLeavePacket() },
+            clearCaches = { clearRuntimeCaches(it) },
+            reason = "shutdown"
+        )
+    }
     fun stopServicesForShutdown() { if (::bleManager.isInitialized) { bleManager.stopAdvertising(); bleManager.disconnect() }; try { app.startService(Intent(app, RescueService::class.java).apply { action = RescueService.ACTION_STOP_RESCUE }) } catch (e: Exception) {} }
     private fun initAudio() { try { audioEngine = AudioEngine() } catch (e: Exception) { _uiEvents.tryEmit(UiEvent.Toast("오디오 에러")) } }
-    private fun initBle() { bleManager = BleManager(app, logCallback = { Log.d("Ble", it) }, audioCallback = { pcm -> audioEngine?.playAudio(pcm) }, textCallback = { msg -> addMessage(ChatMessage(text = msg, isMine = false, senderName = "상대방")) }, protocolCallback = { _, _ -> }, connectionCallback = { connected, count -> refreshDirectPeers() }); bleManager.setLocalPeerId(senderId); bleManager.setRssiActiveMode(bleRssiActiveMode); protocolCore.attachTransport(BleTransport(bleManager)); startBleDebugLoop() }
+    private fun initBle() {
+        bleManager = BleManager(
+            app,
+            logCallback = { Log.d("Ble", it) },
+            audioCallback = { pcm -> audioEngine?.playAudio(pcm) },
+            textCallback = { msg -> addMessage(ChatMessage(text = msg, isMine = false, senderName = "상대방")) },
+            protocolCallback = { _, _ -> },
+            connectionCallback = { connected, count ->
+                val directPeerIds = bleManager.getConnectedPeerIds()
+                handleDirectPeerUpdate(connected, directPeerIds, count)
+            }
+        )
+        bleManager.setLocalPeerId(senderId)
+        bleManager.setRssiActiveMode(bleRssiActiveMode)
+        protocolCore.attachTransport(BleTransport(bleManager))
+        startBleDebugLoop()
+    }
     private fun initProtocol() {
         val codec = BinaryPacketCodec(); signatureManager = SignatureManager(app, codec, ::appendSignatureLog); senderId = loadOrCreatePeerId(signatureManager)
-        protocolCore = ProtocolCore(encoder = codec, decoder = codec, myPeerId = senderId, signatureManager = signatureManager)
+        protocolCore = ProtocolCore(
+            encoder = codec,
+            decoder = codec,
+            myPeerId = senderId,
+            signatureManager = signatureManager,
+            routePlanner = meshGraphRegistry::shortestPath
+        )
         gossipSyncManager = GossipSyncManager(senderId, viewModelScope, object : GossipSyncManager.Sender { override fun broadcast(p: Packet) = protocolCore.broadcast(p); override fun sendToPeer(id: ByteArray, p: Packet) = protocolCore.send(p) })
         profilePacketHandler = ProfilePacketHandler(profileDao, viewModelScope, ::appendProfileLog, { gossipSyncManager.onPublicPacketSeen(it) })
         protocolCore.setOnPacketReceived { packet, relay ->
@@ -844,6 +899,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         peerBatteryLevels.remove(peer)
                         peerPowerSavingModes.remove(peer)
                         discoveredSurvivors.remove(peer)
+                        announcedProfiles.remove(peer)
                         _uiState.update {
                             it.copy(
                                 peerNicknames = peerNicknames.toMap(),
@@ -875,6 +931,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (remotePowerSaving != null) {
                         peerPowerSavingModes[peer] = remotePowerSaving
                     }
+                    updateAnnouncedProfile(peer, announcement)
                     _uiState.update { state ->
                         val incomingDirect = if (directAddress != null && state.incomingCallPeerId == peer) {
                             directAddress
@@ -905,6 +962,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     peerDirectAddresses.remove(peer)
                     peerBatteryLevels.remove(peer)
                     peerPowerSavingModes.remove(peer)
+                    announcedProfiles.remove(peer)
                     _uiState.update {
                         it.copy(
                             peerDirectAddresses = peerDirectAddresses.toMap(),
@@ -986,11 +1044,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return if (nickname.isNotBlank()) "$nickname[$peerSuffix]" else "구조자[$peerSuffix]"
     }
     private fun emitMeshActivity(id: String) { _meshVisualEvents.tryEmit(MeshVisualEvent.PacketActivity(id)) }
+    private fun handleDirectPeerUpdate(connected: Boolean, directPeerIds: List<String>, connectedCount: Int) {
+        val update = directPeerAnnounceTracker.onConnectionUpdate(connected, directPeerIds)
+        if (update.shouldAnnounce || update.newPeers.isNotEmpty()) {
+            sendAnnounce()
+        }
+        if (update.newPeers.isNotEmpty()) {
+            update.newPeers.forEach { peerId ->
+                sendAnnounceToPeer(peerId)
+                gossipSyncManager.scheduleInitialSyncToPeer(hexToBytes(peerId), 1_000L)
+            }
+        }
+        _uiState.update {
+            val meshCount = meshGraphRegistry.countNodes().coerceAtLeast(1)
+            it.copy(
+                isConnected = connected,
+                connectedCount = connectedCount,
+                meshPeerCount = meshCount,
+                directPeerIds = directPeerIds
+            )
+        }
+    }
     private fun refreshDirectPeers() {
-        val ids = bleManager.getConnectedPeerIds()
+        val directPeerIds = bleManager.getConnectedPeerIds()
         val wasConnected = _uiState.value.directPeerIds.isNotEmpty()
-        val isNowConnected = ids.isNotEmpty()
-        _uiState.update { it.copy(isConnected = isNowConnected, connectedCount = ids.size, directPeerIds = ids) }
+        val isNowConnected = directPeerIds.isNotEmpty()
+        val nickname = cachedNickname.ifBlank { bytesToHex(senderId) }
+        meshGraphRegistry.updateFromAnnouncement(
+            originPeerId = bytesToHex(senderId),
+            originNickname = nickname,
+            neighborsOrNull = directPeerIds,
+            timestamp = System.currentTimeMillis()
+        )
+        handleDirectPeerUpdate(isNowConnected, directPeerIds, directPeerIds.size)
         if (!wasConnected && isNowConnected) {
             broadcastCachedProfileIfNeeded(force = true, reason = "direct-connected")
         }
@@ -1028,16 +1114,55 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val announceName = cachedNickname
             .ifBlank { _uiState.value.myNickname.trim() }
             .ifBlank { defaultRescuerName() }
+        val profileSnapshot = cachedProfile
         val ann = IdentityAnnouncementPayload(
             nickname = announceName,
             noisePublicKey = signatureManager.getNoisePublicKeyBytes(),
             signingPublicKey = signatureManager.getPublicKeyBytes(),
             wifiDirectAddress = directAddress,
-            batteryLevel = localBattery
+            batteryLevel = localBattery,
+            gender = profileSnapshot.gender,
+            birthDate = profileSnapshot.birthDate,
+            notes = profileSnapshot.notes
         )
         val pay = (ann.encode() ?: return) + GossipTlv.encodeNeighbors(bleManager.getConnectedPeerIds())
         val pkt = Packet(PacketHeader(2, PacketType.ANNOUNCE, ProtocolConstants.MESSAGE_TTL_HOPS, getCurrentCapabilityFlags(), pay.size, System.currentTimeMillis(), senderId), pay)
         protocolCore.broadcast(signatureManager.sign(pkt))
+    }
+    private fun sendAnnounceToPeer(peerIdHex: String) {
+        wifiDirectRanger.refreshLocalDeviceAddress()
+        val directAddress = wifiDirectRanger.getLocalDeviceAddress()
+        val localBattery = _uiState.value.batteryLevel.coerceIn(0, 100)
+        val announceName = cachedNickname
+            .ifBlank { _uiState.value.myNickname.trim() }
+            .ifBlank { defaultRescuerName() }
+        val profileSnapshot = cachedProfile
+        val ann = IdentityAnnouncementPayload(
+            nickname = announceName,
+            noisePublicKey = signatureManager.getNoisePublicKeyBytes(),
+            signingPublicKey = signatureManager.getPublicKeyBytes(),
+            wifiDirectAddress = directAddress,
+            batteryLevel = localBattery,
+            gender = profileSnapshot.gender,
+            birthDate = profileSnapshot.birthDate,
+            notes = profileSnapshot.notes
+        )
+        val pay = (ann.encode() ?: return) + GossipTlv.encodeNeighbors(bleManager.getConnectedPeerIds())
+        val recipient = runCatching { hexToBytes(peerIdHex) }.getOrNull() ?: return
+        val pkt = Packet(
+            PacketHeader(
+                2,
+                PacketType.ANNOUNCE,
+                ProtocolConstants.MESSAGE_TTL_HOPS,
+                getCurrentCapabilityFlags(),
+                pay.size,
+                System.currentTimeMillis(),
+                senderId,
+                recipientId = recipient
+            ),
+            pay
+        )
+        protocolCore.send(signatureManager.sign(pkt))
     }
 
     private fun observeProfileState() {
@@ -1063,18 +1188,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeProfiles() { viewModelScope.launch { profileDao.getAll().collect { entities -> discoveredSurvivors.clear(); entities.forEach { discoveredSurvivors[it.peerId] = SurvivorProfile(it.name, it.gender, it.birthDate, it.notes, peerId = it.peerId) }; refreshSurvivorCapabilities() } } }
     private fun refreshSurvivorCapabilities() {
         _uiState.update { s ->
-            val peerIds = announcedPeerLastSeen.keys.sorted()
+            val now = System.currentTimeMillis()
+            val cutoff = now - survivorDisplayTtlMs
+            val peerIds = announcedPeerLastSeen
+                .filterValues { it >= cutoff }
+                .keys
+                .sorted()
             val list = peerIds.mapNotNull { id ->
                 val base = discoveredSurvivors[id]
                     ?: SurvivorProfile(name = peerNicknames[id].orEmpty(), peerId = id)
+                val merged = mergeProfile(base, announcedProfiles[id], peerNicknames[id].orEmpty())
                 val info = meshRegistry.getPeer(id)
-                val displayName = base.name.ifBlank { peerNicknames[id].orEmpty() }
+                val displayName = merged.name
                 if (info?.isRescuer == true || isRescuerDisplayName(displayName)) {
                     return@mapNotNull null
                 }
-                base.copy(
-                    isWifiAware = info?.isWifiAware ?: base.isWifiAware,
-                    isWifiDirect = info?.isWifiDirect ?: base.isWifiDirect,
+                merged.copy(
+                    isWifiAware = info?.isWifiAware ?: merged.isWifiAware,
+                    isWifiDirect = info?.isWifiDirect ?: merged.isWifiDirect,
                     // Prefer live capability from announce/handshake; stale DB values should not force UWB UI.
                     isUwb = info?.isUwb ?: false,
                     peerId = id
@@ -1089,6 +1220,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isBlank()) return false
         return trimmed.startsWith("구조자") || trimmed.startsWith("rescuer", ignoreCase = true)
     }
+
+    private fun updateAnnouncedProfile(peerId: String, announcement: IdentityAnnouncementPayload) {
+        val profile = SurvivorProfile(
+            name = announcement.nickname,
+            gender = announcement.gender.orEmpty(),
+            birthDate = announcement.birthDate.orEmpty(),
+            notes = announcement.notes.orEmpty(),
+            peerId = peerId
+        )
+        announcedProfiles[peerId] = profile
+    }
+
+    private fun mergeProfile(
+        base: SurvivorProfile,
+        announced: SurvivorProfile?,
+        fallbackName: String
+    ): SurvivorProfile {
+        val mergedName = pickNonBlank(base.name, announced?.name).ifBlank { fallbackName }
+        return base.copy(
+            name = mergedName,
+            gender = pickNonBlank(base.gender, announced?.gender),
+            birthDate = pickNonBlank(base.birthDate, announced?.birthDate),
+            notes = pickNonBlank(base.notes, announced?.notes)
+        )
+    }
+
+    private fun pickNonBlank(primary: String, fallback: String?): String {
+        return if (primary.isNotBlank()) primary else fallback?.takeIf { it.isNotBlank() }.orEmpty()
+    }
     private fun pruneAnnouncedPeers(now: Long) {
         val cutoff = now - ProtocolConstants.Mesh.PEER_TIMEOUT_MS
         val stale = announcedPeerLastSeen.filterValues { it < cutoff }.keys
@@ -1098,6 +1258,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             peerDirectAddresses.remove(it)
             peerBatteryLevels.remove(it)
             peerPowerSavingModes.remove(it)
+            announcedProfiles.remove(it)
         }
         _uiState.update {
             it.copy(
@@ -1158,6 +1319,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSignatureLogs() { signatureLogBuffer.clear(); _uiState.update { it.copy(signatureLogs = emptyList()) } }
     fun clearProfileLogs() { profileLogBuffer.clear(); _uiState.update { it.copy(profileLogs = emptyList()) } }
     fun clearDeviceMonitoring() { if (::bleManager.isInitialized) { bleManager.clearAllConnectionsAndMappings(); _uiEvents.tryEmit(UiEvent.Toast("초기화됨")) } }
+    private fun clearRuntimeCaches(reason: String) {
+        if (reason == "disconnect") {
+            // Keep mesh/identity caches for stable reconnection; only reset announce gating.
+            directPeerAnnounceTracker.clear()
+            ConnectionLog.add("Runtime", "skip cache clear on disconnect")
+            return
+        }
+        announcedPeerLastSeen.clear()
+        peerNicknames.clear()
+        peerDirectAddresses.clear()
+        peerBatteryLevels.clear()
+        peerPowerSavingModes.clear()
+        discoveredSurvivors.clear()
+        announcedProfiles.clear()
+        directPeerAnnounceTracker.clear()
+        meshRegistry.clear()
+        meshGraphRegistry.clear()
+        peerIdentityRegistry.clear()
+        _uiState.update {
+            it.copy(
+                peerNicknames = emptyMap(),
+                peerDirectAddresses = emptyMap(),
+                peerBatteryLevels = emptyMap(),
+                peerPowerSavingModes = emptyMap(),
+                survivors = emptyList()
+            )
+        }
+        ConnectionLog.add("Runtime", "clear caches reason=$reason")
+    }
     private fun appendSignatureLog(e: SignatureLogEntry) { signatureLogBuffer.addLast(e); if (signatureLogBuffer.size > 200) signatureLogBuffer.removeFirst(); _uiState.update { it.copy(signatureLogs = signatureLogBuffer.toList()) } }
     private fun appendProfileLog(e: ProfileSyncLogEntry) { profileLogBuffer.addLast(e); if (profileLogBuffer.size > 200) profileLogBuffer.removeFirst(); _uiState.update { it.copy(profileLogs = profileLogBuffer.toList()) } }
     private fun loadOrCreatePeerId(m: SignatureManager): ByteArray { val d = m.getNoisePublicKeyBytes().sha256Bytes().copyOfRange(0, 8); val s = prefs.getString("sender_id", null); if (s != null) { val b = runCatching { hexToBytes(s) }.getOrNull(); if (b != null && b.contentEquals(d)) return b }; prefs.edit().putString("sender_id", bytesToHex(d)).apply(); return d }

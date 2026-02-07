@@ -92,6 +92,68 @@ class MeshGraphRegistry {
         return buildSnapshot()
     }
 
+    @Synchronized
+    fun clear() {
+        nicknames.clear()
+        announcements.clear()
+        lastUpdate.clear()
+        suppressedPeers.clear()
+        publishSnapshot()
+    }
+
+    @Synchronized
+    fun shortestPath(src: String, dst: String): List<String>? {
+        if (src == dst) return listOf(src)
+        val snapshot = buildSnapshot()
+        val neighbors = mutableMapOf<String, MutableSet<String>>()
+
+        snapshot.edges.filter { it.isConfirmed }.forEach { edge ->
+            neighbors.getOrPut(edge.a) { mutableSetOf() }.add(edge.b)
+            neighbors.getOrPut(edge.b) { mutableSetOf() }.add(edge.a)
+        }
+        snapshot.nodes.forEach { node ->
+            neighbors.putIfAbsent(node.peerId, mutableSetOf())
+        }
+
+        if (!neighbors.containsKey(src) || !neighbors.containsKey(dst)) return null
+
+        val dist = mutableMapOf<String, Int>()
+        val prev = mutableMapOf<String, String?>()
+        val queue = java.util.PriorityQueue<Pair<String, Int>>(compareBy { it.second })
+
+        neighbors.keys.forEach { node ->
+            dist[node] = if (node == src) 0 else Int.MAX_VALUE
+            prev[node] = null
+        }
+        queue.add(src to 0)
+
+        while (queue.isNotEmpty()) {
+            val top = queue.poll() ?: break
+            val (u, d) = top
+            if (d > (dist[u] ?: Int.MAX_VALUE)) continue
+            if (u == dst) break
+            neighbors[u]?.forEach { v ->
+                val alt = d + 1
+                if (alt < (dist[v] ?: Int.MAX_VALUE)) {
+                    dist[v] = alt
+                    prev[v] = u
+                    queue.add(v to alt)
+                }
+            }
+        }
+
+        if ((dist[dst] ?: Int.MAX_VALUE) == Int.MAX_VALUE) return null
+
+        val path = mutableListOf<String>()
+        var current: String? = dst
+        while (current != null) {
+            path.add(current)
+            current = prev[current]
+        }
+        path.reverse()
+        return path
+    }
+
     private fun buildSnapshot(): GraphSnapshot {
         val allNodes = mutableSetOf<String>()
         allNodes.addAll(nicknames.keys)

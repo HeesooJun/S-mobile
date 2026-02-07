@@ -44,6 +44,12 @@ class RescueService : Service() {
         return START_STICKY // 앱이 강제 종료되어도 시스템이 다시 살려냄
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        AppShutdownHooks.requestShutdown()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun startForegroundService() {
         val channelId = "rescue_channel"
         val channelName = "구조 신호 알림"

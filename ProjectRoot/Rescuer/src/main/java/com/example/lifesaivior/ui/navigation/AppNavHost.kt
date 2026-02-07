@@ -61,7 +61,6 @@ import com.example.lifesaivior.protocol.profile.ProfileSyncLogEntry
 import com.example.lifesaivior.protocol.security.SignatureLogEntry
 import com.example.lifesaivior.ui.components.PowerSavingLayer
 import com.example.lifesaivior.ui.screen.survivor.ptt.PTTLinkScreen
-import com.example.lifesaivior.ui.screen.rescuer.chat.RescuerChatScreen
 import com.example.lifesaivior.ui.screen.rescuer.db.RescuerSurvivorDbScreen
 import com.example.lifesaivior.ui.screen.rescuer.emergency.EmergencyBeaconScreen as RescuerEmergencyBeaconScreen
 import com.example.lifesaivior.ui.screen.rescuer.mesh.RescuerMeshMapScreen
@@ -85,6 +84,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun AppNavHost(
+    appViewModel: AppViewModel,
     batteryLevel: Int,
     isConnected: Boolean,
     connectedCount: Int,
@@ -123,12 +123,10 @@ fun AppNavHost(
     val context = LocalContext.current
     val activity = context as? Activity
     val appContext = context.applicationContext
-    val appViewModel: AppViewModel = viewModel(
-        viewModelStoreOwner = context as ViewModelStoreOwner
-    )
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     val appState by appViewModel.uiState.collectAsState()
+    val autoConnectBlocked = appState.isAutoConnectBlocked
     var isSurvivorPowerSaving by rememberSaveable { mutableStateOf(false) }
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var pendingSosRoute by remember { mutableStateOf<String?>(null) }
@@ -172,7 +170,6 @@ fun AppNavHost(
     }
     val pendingTarget by callViewModel.pendingTarget.collectAsState()
     var selectedTargetPeerId by rememberSaveable { mutableStateOf<String?>(null) }
-    var directChatPeerId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedTargetSurvivor by remember { mutableStateOf<SurvivorProfile?>(null) }
     var knownSurvivorPeerIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var survivorSignalTrackingReady by remember { mutableStateOf(false) }
@@ -489,7 +486,6 @@ fun AppNavHost(
         if (isRescueSignalActive && !isConnected) {
             val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
                 currentRoute == AppRoute.RescuerPTT.route ||
-                currentRoute == AppRoute.RescuerChat.route ||
                 currentRoute == AppRoute.RescuerEmergency.route ||
                 currentRoute == AppRoute.RescuerSurvivorDb.route ||
                 currentRoute == AppRoute.RescuerMeshMap.route
@@ -531,7 +527,6 @@ fun AppNavHost(
         val hasIncomingCall = appState.incomingCallPeerId != null
         val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
             currentRoute == AppRoute.RescuerPTT.route ||
-            currentRoute == AppRoute.RescuerChat.route ||
             currentRoute == AppRoute.RescuerEmergency.route ||
             currentRoute == AppRoute.RescuerSurvivorDb.route ||
             currentRoute == AppRoute.RescuerMeshMap.route
@@ -631,7 +626,13 @@ fun AppNavHost(
         }
     }
 
-    LaunchedEffect(appState.survivors, backStackEntry?.destination?.route, isInCall) {
+    LaunchedEffect(
+        appState.survivors,
+        backStackEntry?.destination?.route,
+        isInCall,
+        isConnected,
+        pendingSosNavigation
+    ) {
         val peerIds = appState.survivors
             .map { it.peerId }
             .filter { it.isNotBlank() }
@@ -641,9 +642,9 @@ fun AppNavHost(
             survivorSignalTrackingReady = true
             return@LaunchedEffect
         }
-        val hasNewSurvivorSignal = (peerIds - knownSurvivorPeerIds).isNotEmpty()
+        val hasAnySurvivorSignal = peerIds.isNotEmpty()
         knownSurvivorPeerIds = peerIds
-        if (!hasNewSurvivorSignal || isInCall) return@LaunchedEffect
+        if (!hasAnySurvivorSignal || isInCall || !isConnected || pendingSosNavigation) return@LaunchedEffect
         val currentRoute = backStackEntry?.destination?.route
         val shouldAutoOpenDb =
             currentRoute == AppRoute.RescuerStandby.route ||
@@ -943,6 +944,7 @@ fun AppNavHost(
                 onPrev = { navController.popBackStack() },
                 onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
                 onSos = {
+                    onStartRescueSignal()
                     pendingSosNavigation = true
                     pendingSosRoute = AppRoute.SurvivorPTT.route
                     sosStartedAt = System.currentTimeMillis()
@@ -979,11 +981,13 @@ fun AppNavHost(
                 navController.popBackStack()
                 Unit
             }
-            LaunchedEffect(Unit) {
-                if (!isRescueSignalActive) {
+            LaunchedEffect(autoConnectBlocked, isRescueSignalActive) {
+                if (!isRescueSignalActive && !autoConnectBlocked) {
                     onStartRescueSignal()
                 }
-                onStartAutoConnect()
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             BackHandler {
                 stopAndBack()
@@ -996,8 +1000,10 @@ fun AppNavHost(
         }
 
         composable(AppRoute.SurvivorPTT.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
+            LaunchedEffect(autoConnectBlocked) {
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             val pendingRequest = if (autoAcceptCalls) {
                 null
@@ -1173,15 +1179,20 @@ fun AppNavHost(
                 isConnected = isConnected,
                 connectedCount = connectedCount,
                 meshPeerCount = meshPeerCount,
-                bleDebugStats = bleDebugStats,
                 onPrev = { activity?.finish() },
                 onGoPTT = { navigateSingleRoute(AppRoute.RescuerPTT.route) },
-                onSos = { navigateSingleRoute(AppRoute.RescuerEmergency.route) }
+                onSos = {
+                    onStartRescueSignal()
+                    pendingSosNavigation = true
+                    pendingSosRoute = AppRoute.RescuerSurvivorDb.route
+                    sosStartedAt = System.currentTimeMillis()
+                    navigateSingleRoute(AppRoute.RescuerEmergency.route)
+                }
             )
         }
 
         composable(AppRoute.RescuerPTT.route) {
-            LaunchedEffect(Unit) {
+            LaunchedEffect(autoConnectBlocked) {
                 Log.i(
                     "NavHostPTT",
                     "PTT enter selected=$selectedTargetPeerId callPeer=${appState.callPeerId} inCall=$isInCall"
@@ -1190,7 +1201,9 @@ fun AppNavHost(
                 lastUwbProbePeerId = null
                 uwbProbeStartedAtMs = 0L
                 allowRttFallbackForUwbTarget = false
-                onStartAutoConnect()
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             val distanceState by distanceViewModel.uiState.collectAsState()
             val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
@@ -1397,6 +1410,8 @@ fun AppNavHost(
                             ?.trim()
                             ?.ifBlank { null }
                 }
+            val hasPttTarget = !pttTargetPeerId.isNullOrBlank()
+            val isTargetDirect = hasPttTarget && appState.directPeerIds.contains(pttTargetPeerId)
             val pttChatMessages = messages.filter { it.recipientPeerId == null }
             val pttChatRoomTitle = "전체 채팅"
             LaunchedEffect(
@@ -1464,9 +1479,6 @@ fun AppNavHost(
                 peerNicknames = peerNicknames,
                 meshGraphSnapshot = meshGraphSnapshot,
                 meshVisualEvents = meshVisualEvents,
-                bleDebugStats = bleDebugStats,
-                callStatusLabel = callStatusLabel,
-                callDecisionLabel = callDebugState.lastDecision,
                 isInCall = isInCall,
                 isCalling = isCallingOnPtt,
                 isMicOn = isMicOn,
@@ -1476,6 +1488,8 @@ fun AppNavHost(
                 distanceTrend = distanceState.trend,
                 distanceSource = displayDistanceSource,
                 targetDisplayName = pttTargetName,
+                hasTarget = hasPttTarget,
+                isTargetDirect = isTargetDirect,
                 chatRoomTitle = pttChatRoomTitle,
                 chatMessages = pttChatMessages,
                 onRequestCall = {
@@ -1585,8 +1599,10 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerSurvivorDb.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
+            LaunchedEffect(autoConnectBlocked) {
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             val dbDistanceState by distanceViewModel.uiState.collectAsState()
             val dbDistanceTargetPeerId = selectedTargetPeerId ?: targetSurvivor?.peerId ?: appState.callPeerId
@@ -1619,6 +1635,7 @@ fun AppNavHost(
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
                 onOpenMeshMap = { navigateSingleRoute(AppRoute.RescuerMeshMap.route) },
+                isDisconnecting = appState.isDisconnecting,
                 selectedTargetPeerId = selectedTargetPeerId,
                 onSelectTarget = { survivor ->
                     selectedTargetPeerId = survivor.peerId
@@ -1670,45 +1687,6 @@ fun AppNavHost(
             )
         }
 
-        composable(AppRoute.RescuerChat.route) {
-            val directPeerId = directChatPeerId
-            val isDirectRoom = !directPeerId.isNullOrBlank()
-            val directPeerName = appState.survivors
-                .firstOrNull { it.peerId == directPeerId }
-                ?.name
-                ?.ifBlank { null }
-                ?: directPeerId?.let { peerNicknames[it]?.ifBlank { null } }
-                ?: "대상"
-            val chatMessages = if (isDirectRoom) {
-                messages.filter { message ->
-                    (message.isMine && message.recipientPeerId == directPeerId) ||
-                        (!message.isMine &&
-                            message.senderPeerId == directPeerId &&
-                            message.recipientPeerId == myPeerId)
-                }
-            } else {
-                messages.filter { it.recipientPeerId == null }
-            }
-            RescuerChatScreen(
-                roomTitle = if (isDirectRoom) "1:1 채팅 · $directPeerName" else "전체 채팅",
-                meshPeerCount = meshPeerCount,
-                messages = chatMessages,
-                signatureLogs = signatureLogs,
-                profileLogs = profileLogs,
-                onClearSignatureLogs = onClearSignatureLogs,
-                onClearProfileLogs = onClearProfileLogs,
-                onSendProfileTest = onSendProfileTest,
-                onPrev = { navController.popBackStack() },
-                onSend = { text ->
-                    if (isDirectRoom && !directPeerId.isNullOrBlank()) {
-                        appViewModel.onSendDirectMessage(directPeerId, text)
-                    } else {
-                        onSendMessage(text)
-                    }
-                }
-            )
-        }
-
         composable(AppRoute.RescuerEmergency.route) {
             val stopAndBack = {
                 onStopAutoConnect()
@@ -1716,11 +1694,13 @@ fun AppNavHost(
                 navController.popBackStack()
                 Unit
             }
-            LaunchedEffect(Unit) {
-                if (!isRescueSignalActive) {
+            LaunchedEffect(autoConnectBlocked, isRescueSignalActive) {
+                if (!isRescueSignalActive && !autoConnectBlocked) {
                     onStartRescueSignal()
                 }
-                onStartAutoConnect()
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             BackHandler {
                 stopAndBack()

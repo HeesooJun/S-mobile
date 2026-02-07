@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
@@ -38,7 +39,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,14 +53,13 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.lifesaivior.R
-import com.example.lifesaivior.core.log.ConnectionLog
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.presentation.MeshVisualEvent
-import com.example.lifesaivior.presentation.BleDebugStats
 import com.example.lifesaivior.core.location.DistanceMeasurementSource
 import com.example.lifesaivior.core.location.DistanceTrend
 import com.example.lifesaivior.ui.components.MeshEdge
@@ -78,6 +77,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.Locale
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.scale
 
 enum class RssiFeedbackMode(val label: String) {
     OFF("알림 끔"),
@@ -102,9 +107,6 @@ fun RescuerPTTLinkScreen(
     peerNicknames: Map<String, String>,
     meshGraphSnapshot: com.example.lifesaivior.protocol.mesh.MeshGraphRegistry.GraphSnapshot,
     meshVisualEvents: SharedFlow<MeshVisualEvent>,
-    bleDebugStats: BleDebugStats,
-    callStatusLabel: String,
-    callDecisionLabel: String? = null,
     isInCall: Boolean,
     isCalling: Boolean = false,
     isMicOn: Boolean = false,
@@ -114,6 +116,8 @@ fun RescuerPTTLinkScreen(
     distanceTrend: DistanceTrend,
     distanceSource: DistanceMeasurementSource,
     targetDisplayName: String? = null,
+    hasTarget: Boolean,
+    isTargetDirect: Boolean,
     chatRoomTitle: String = "전체 채팅",
     chatMessages: List<ChatMessage> = emptyList(),
     onRequestCall: () -> Unit,
@@ -140,7 +144,6 @@ fun RescuerPTTLinkScreen(
 ) {
     val scale = LocalAppScale.current
     val (isPowerSaving, setPowerSaving) = remember { mutableStateOf(false) }
-    var showDebugModal by remember { mutableStateOf(false) }
     var showControlModal by remember { mutableStateOf(false) }
     var stickyBeep by remember { mutableStateOf(false) }
     var stickyVibrate by remember { mutableStateOf(false) }
@@ -148,7 +151,6 @@ fun RescuerPTTLinkScreen(
     var isBeepRepeating by remember { mutableStateOf(false) }
     var isVibrateRepeating by remember { mutableStateOf(false) }
     var isHighToneRepeating by remember { mutableStateOf(false) }
-    val connectionLogs by ConnectionLog.logs.collectAsState()
     val meshDisplayCount = (meshPeerCount - 1).coerceAtLeast(0)
     val hasMeshPeers = meshDisplayCount > 0
     val isLinkActive = isConnected || hasMeshPeers
@@ -222,16 +224,6 @@ fun RescuerPTTLinkScreen(
                     .padding(start = scaledDp(60, scale), top = scaledDp(18, scale))
                     .quintupleClickable(onQuintupleClick = onPanicClear)
             )
-            Text(
-                text = "디버그",
-                color = AppColors.Gray400,
-                fontSize = scaledSp(11, scale),
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = scaledDp(20, scale), top = scaledDp(16, scale))
-                    .clickable { showDebugModal = true }
-            )
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
@@ -268,12 +260,13 @@ fun RescuerPTTLinkScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(scaledDp(26, scale)))
+                val callEnabled = isInCall || (!isCalling && isTargetDirect && hasTarget)
                 Box(contentAlignment = Alignment.Center) {
                     FilledIconButton(
                         onClick = {
                             if (isInCall) onEndCall() else onRequestCall()
                         },
-                        enabled = isInCall || !isCalling,
+                        enabled = callEnabled,
                         modifier = Modifier.size(scaledDp(86, scale)),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = if (isInCall) AppColors.Red else AppColors.Green,
@@ -297,20 +290,33 @@ fun RescuerPTTLinkScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(scaledDp(14, scale)))
-                Text(
-                    text = when {
-                        isCalling && !isInCall -> "통화 연결 대기 중... (최대 15초)"
-                        isInCall -> "통화 중 · 버튼을 눌러 종료"
-                        else -> "통화 요청"
-                    },
-                    color = when {
-                        isCalling && !isInCall -> AppColors.Green
-                        isInCall -> AppColors.Red
-                        else -> AppColors.Green
-                    },
-                    fontSize = scaledSp(13, scale),
-                    fontWeight = FontWeight.Bold
-                )
+                if (isCalling && !isInCall) {
+                    Text(
+                        text = "통화 연결 대기 중... (최대 15초)",
+                        color = AppColors.Green,
+                        fontSize = scaledSp(13, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else if (isInCall) {
+                    Text(
+                        text = "통화 중 · 버튼을 눌러 종료",
+                        color = AppColors.Red,
+                        fontSize = scaledSp(13, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else if (!isTargetDirect && hasTarget) {
+                    ProximityCallHint(
+                        textPrimary = "생존자 근처로 이동하면 통화가 가능합니다",
+                        textSecondary = "조금 더 가까이 이동해 주세요"
+                    )
+                } else {
+                    Text(
+                        text = "통화 요청",
+                        color = AppColors.Green,
+                        fontSize = scaledSp(13, scale),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 if (isInCall) {
                     Spacer(modifier = Modifier.height(scaledDp(10, scale)))
                     OutlinedButton(onClick = onToggleSpeakerphone) {
@@ -337,94 +343,6 @@ fun RescuerPTTLinkScreen(
                 )
                 Spacer(modifier = Modifier.height(scaledDp(8, scale)))
             }
-            }
-            if (showDebugModal) {
-                Dialog(onDismissRequest = { showDebugModal = false }) {
-                    Surface(
-                        color = AppColors.Gray900,
-                        shape = RoundedCornerShape(scaledDp(18, scale)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = scaledDp(24, scale))
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(scaledDp(18, scale)),
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Text(
-                                text = "디버그",
-                                color = AppColors.White,
-                                fontSize = scaledSp(16, scale),
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(scaledDp(10, scale)))
-                            Text(
-                                text = "직접 ${connectedCount}명 · 메쉬 ${meshDisplayCount}명",
-                                color = AppColors.Gray400,
-                                fontSize = scaledSp(12, scale)
-                            )
-                            val scanAvg = bleDebugStats.scanRssiAvg?.let { "$it dBm" } ?: "-"
-                            val connAvg = bleDebugStats.connectionRssiAvg?.let { "$it dBm" } ?: "-"
-                            Text(
-                                text = "RSSI scan $scanAvg (${bleDebugStats.scanRssiCount}) · conn $connAvg (${bleDebugStats.connectionRssiCount})",
-                                color = AppColors.Gray500,
-                                fontSize = scaledSp(11, scale),
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "통화 상태: $callStatusLabel",
-                                color = AppColors.Gray400,
-                                fontSize = scaledSp(11, scale),
-                                fontWeight = FontWeight.Medium
-                            )
-                            if (!callDecisionLabel.isNullOrBlank()) {
-                                Text(
-                                    text = "결정: $callDecisionLabel",
-                                    color = AppColors.Gray500,
-                                    fontSize = scaledSp(10, scale)
-                                )
-                            }
-                            Text(
-                                text = "pending ${bleDebugStats.pendingCount} · attempts ${bleDebugStats.attemptTracked}/${bleDebugStats.maxAttempts}",
-                                color = AppColors.Gray500,
-                                fontSize = scaledSp(10, scale)
-                            )
-                            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
-                            Text(
-                                text = "통신 로그",
-                                color = AppColors.White,
-                                fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.Bold
-                            )
-                            val displayedLogs = connectionLogs.takeLast(12)
-                            if (displayedLogs.isEmpty()) {
-                                Text(
-                                    text = "로그 없음",
-                                    color = AppColors.Gray500,
-                                    fontSize = scaledSp(10, scale)
-                                )
-                            } else {
-                                displayedLogs.forEach { line ->
-                                    Text(
-                                        text = line,
-                                        color = AppColors.Gray400,
-                                        fontSize = scaledSp(10, scale)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(scaledDp(16, scale)))
-                            Text(
-                                text = "닫기",
-                                color = AppColors.Green,
-                                fontSize = scaledSp(12, scale),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .align(Alignment.End)
-                                    .clickable { showDebugModal = false }
-                            )
-                        }
-                    }
-                }
             }
             if (showControlModal) {
                 Dialog(onDismissRequest = { showControlModal = false }) {
@@ -698,51 +616,121 @@ private fun DistanceStatusCard(
         else -> "거리 유지"
     }
 
-    Surface(
-        color = AppColors.Gray800.copy(alpha = 0.58f),
-        shape = RoundedCornerShape(scaledDp(14, scale)),
+    val cardShape = RoundedCornerShape(scaledDp(14, scale))
+    Column(
         modifier = modifier
+            .background(
+                color = AppColors.Gray900.copy(alpha = 0.82f),
+                shape = cardShape
+            )
+            .border(
+                width = scaledDp(1, scale),
+                color = AppColors.Gray500.copy(alpha = 0.35f),
+                shape = cardShape
+            )
+            .padding(
+                horizontal = scaledDp(14, scale),
+                vertical = scaledDp(10, scale)
+            ),
+        verticalArrangement = Arrangement.spacedBy(scaledDp(4, scale))
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = scaledDp(14, scale),
-                    vertical = scaledDp(10, scale)
-                ),
-            verticalArrangement = Arrangement.spacedBy(scaledDp(4, scale))
+        Text(
+            text = "현재 거리",
+            color = AppColors.Gray500,
+            fontSize = scaledSp(11, scale),
+            fontWeight = FontWeight.Medium
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "현재 거리",
-                color = AppColors.Gray500,
-                fontSize = scaledSp(11, scale),
-                fontWeight = FontWeight.Medium
+                text = distanceText,
+                color = AppColors.White,
+                fontSize = scaledSp(22, scale),
+                fontWeight = FontWeight.ExtraBold
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = distanceText,
-                    color = AppColors.White,
-                    fontSize = scaledSp(22, scale),
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    text = sourceText,
-                    color = AppColors.Gray400,
-                    fontSize = scaledSp(11, scale),
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
             Text(
-                text = trendText,
+                text = sourceText,
                 color = AppColors.Gray400,
                 fontSize = scaledSp(11, scale),
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold
             )
         }
+        Text(
+            text = trendText,
+            color = AppColors.Gray400,
+            fontSize = scaledSp(11, scale),
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun ProximityCallHint(
+    textPrimary: String,
+    textSecondary: String
+) {
+    val scale = LocalAppScale.current
+    val pulse = rememberInfiniteTransition(label = "proximity-pulse")
+    val ringAlpha by pulse.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing)
+        ),
+        label = "ring-alpha"
+    )
+    val ringScale by pulse.animateFloat(
+        initialValue = 0.86f,
+        targetValue = 1.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing)
+        ),
+        label = "ring-scale"
+    )
+    val baseColor = AppColors.Green.copy(alpha = 0.88f)
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier.size(scaledDp(54, scale)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(scaledDp(54, scale))
+                    .scale(ringScale)
+                    .background(baseColor.copy(alpha = ringAlpha), shape = CircleShape)
+            )
+            Box(
+                modifier = Modifier
+                    .size(scaledDp(38, scale))
+                    .background(baseColor.copy(alpha = 0.18f), shape = CircleShape)
+            )
+            Icon(
+                imageVector = Icons.Filled.Person,
+                contentDescription = "접근 필요",
+                tint = baseColor,
+                modifier = Modifier.size(scaledDp(22, scale))
+            )
+        }
+        Spacer(modifier = Modifier.height(scaledDp(8, scale)))
+        Text(
+            text = textPrimary,
+            color = baseColor,
+            fontSize = scaledSp(12, scale),
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(scaledDp(2, scale)))
+        Text(
+            text = textSecondary,
+            color = AppColors.Gray400,
+            fontSize = scaledSp(11, scale),
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
+        )
     }
 }
 

@@ -85,7 +85,7 @@ class ProfilePacketHandler(
                 val entity = ProfileEntity(
                     peerId = peerHex,
                     name = decoded.name.orEmpty(),
-                    gender = decoded.gender?.toString().orEmpty(),
+                    gender = mapGender(decoded.gender),
                     birthDate = decoded.birthDate.orEmpty(),
                     notes = decoded.notes.orEmpty(),
                     updatedAt = updatedAt,
@@ -141,5 +141,13 @@ class ProfilePacketHandler(
 
     private fun bytesToHex(bytes: ByteArray): String {
         return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun mapGender(raw: Char?): String {
+        return when (raw) {
+            'M', 'm' -> "남성"
+            'F', 'f' -> "여성"
+            else -> ""
+        }
     }
 }
