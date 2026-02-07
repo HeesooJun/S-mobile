@@ -1,5 +1,6 @@
 package com.example.lifesaivior.protocol.core
 
+import com.example.lifesaivior.core.log.ConnectionLog
 import com.example.lifesaivior.protocol.codec.PacketDecoder
 import com.example.lifesaivior.protocol.codec.PacketEncoder
 import com.example.lifesaivior.protocol.core.ProtocolConstants
@@ -29,14 +30,17 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.actor
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.max
 
 class ProtocolCore(
     private val encoder: PacketEncoder,
     private val decoder: PacketDecoder,
     private val pipeline: PacketPipeline = PacketPipeline(encoder, decoder),
     private val myPeerId: ByteArray,
-    private val signatureManager: SignatureManager? = null
+    private val signatureManager: SignatureManager? = null,
+    private val routePlanner: ((String, String) -> List<String>?)? = null
 ) {
+    private val myPeerIdHex = myPeerId.toHexString()
     private var transport: Transport? = null
     private var onPacket: ((Packet, String?) -> Unit)? = null
     private val peerDirectory = PeerDirectory()
@@ -84,46 +88,48 @@ class ProtocolCore(
     }
 
     fun send(packet: Packet) {
-        val signedPacket = signIfNeeded(packet)
-        val recipientId = signedPacket.header.recipientId
+        val recipientId = packet.header.recipientId
         if (recipientId != null) {
-            val peerId = recipientId.toHexString()
-            if (signedPacket.header.type == PacketType.FILE_ACK) {
-                storeForwardScope.launch { sendPacketToPeer(peerId, signedPacket) }
+            val recipientHex = recipientId.toHexString()
+            if (packet.header.type == PacketType.FILE_ACK) {
+                storeForwardScope.launch {
+                    sendAddressedPacket(recipientHex, packet, allowBroadcastFallback = true)
+                }
                 return
             }
-            if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
+            if (packet.header.type == PacketType.FILE_TRANSFER) {
                 storeForwardScope.launch {
-                    val delivered = sendFileTransferWithAck(peerId, signedPacket)
+                    val delivered = sendFileTransferWithAck(recipientHex, packet)
                     if (!delivered) {
-                        storeForwardManager.cache(signedPacket)
+                        storeForwardManager.cache(packet)
                     }
                 }
                 return
             }
             storeForwardScope.launch {
-                val delivered = sendPacketToPeer(peerId, signedPacket)
+                val delivered = sendAddressedPacket(recipientHex, packet, allowBroadcastFallback = true)
                 if (!delivered) {
-                    storeForwardManager.cache(signedPacket)
+                    storeForwardManager.cache(packet)
                 }
             }
             return
         }
-        if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
-            sendFileTransfer(signedPacket, isBroadcast = false)
+        val prepared = prepareOutbound(packet)
+        if (prepared.header.type == PacketType.FILE_TRANSFER) {
+            sendFileTransfer(prepared, isBroadcast = false)
             return
         }
-        val packets = pipeline.prepareOutbound(signedPacket)
+        val packets = pipeline.prepareOutbound(prepared)
         packets.forEach { transport?.send(encoder.encode(it)) }
     }
 
     fun broadcast(packet: Packet) {
-        val signedPacket = signIfNeeded(packet)
-        if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
-            sendFileTransfer(signedPacket, isBroadcast = true)
+        val prepared = prepareOutbound(packet)
+        if (prepared.header.type == PacketType.FILE_TRANSFER) {
+            sendFileTransfer(prepared, isBroadcast = true)
             return
         }
-        val packets = pipeline.prepareOutbound(signedPacket)
+        val packets = pipeline.prepareOutbound(prepared)
         packets.forEach { transport?.broadcast(encoder.encode(it)) }
     }
 
@@ -180,7 +186,7 @@ class ProtocolCore(
     }
 
     private fun sendFileTransfer(packet: Packet, isBroadcast: Boolean) {
-        val signedPacket = signIfNeeded(packet)
+        val signedPacket = prepareOutbound(packet)
         val transferId = signedPacket.payload.sha256Hex()
         fileTransferJobs.remove(transferId)?.cancel()
         val job = fileTransferScope.launch {
@@ -202,7 +208,7 @@ class ProtocolCore(
 
     private suspend fun sendPacketToPeer(peerId: String, packet: Packet): Boolean {
         val address = peerDirectory.getAddress(peerId) ?: return false
-        val signedPacket = signIfNeeded(packet)
+        val signedPacket = prepareOutbound(packet)
         if (signedPacket.header.type == PacketType.FILE_TRANSFER) {
             val delayMs = ProtocolConstants.FileTransfer.FRAGMENT_DELAY_MS
             return sendFragments(signedPacket, delayMs) { fragment ->
@@ -229,7 +235,7 @@ class ProtocolCore(
             val refreshed = packet.copy(
                 header = packet.header.copy(timestamp = System.currentTimeMillis())
             )
-            val delivered = sendPacketToPeer(peerId, refreshed)
+            val delivered = sendAddressedPacket(peerId, refreshed, allowBroadcastFallback = true)
             if (!delivered) {
                 fileAckWaiters.remove(ackKey)
                 return false
@@ -270,13 +276,85 @@ class ProtocolCore(
             payload = payload
         )
         val peerId = recipientId.toHexString()
-        storeForwardScope.launch { sendPacketToPeer(peerId, packet) }
+        storeForwardScope.launch { sendAddressedPacket(peerId, packet, allowBroadcastFallback = true) }
     }
 
-    private fun signIfNeeded(packet: Packet): Packet {
+    private fun prepareOutbound(packet: Packet): Packet {
+        val routed = attachRouteIfNeeded(packet)
+        return signForSend(routed)
+    }
+
+    private fun attachRouteIfNeeded(packet: Packet): Packet {
+        val recipientId = packet.header.recipientId ?: return packet
+        if (packet.header.route != null) return packet
+        val planner = routePlanner ?: return packet
+        val recipientHex = recipientId.toHexString()
+        val path = planner.invoke(myPeerIdHex, recipientHex) ?: return packet
+        if (path.size < 3) return packet
+        val intermediates = path.subList(1, path.size - 1)
+        if (intermediates.isEmpty()) return packet
+        val hops = intermediates.map { hexToBytesFixed(it, myPeerId.size) }
+        val nextVersion = max(packet.header.version, 2)
+        return packet.copy(header = packet.header.copy(route = hops, version = nextVersion))
+    }
+
+    private suspend fun sendAddressedPacket(
+        recipientPeerId: String,
+        packet: Packet,
+        allowBroadcastFallback: Boolean
+    ): Boolean {
+        val prepared = prepareOutbound(packet)
+        val deliveryPeerId = resolveDeliveryPeerId(prepared, recipientPeerId)
+        var delivered = sendPacketToPeer(deliveryPeerId, prepared)
+        if (!delivered && allowBroadcastFallback) {
+            val networkSize = transport?.getNetworkSize() ?: 0
+            if (networkSize > 0) {
+                ConnectionLog.add(
+                    "Send",
+                    "direct failed -> broadcast fallback peer=$recipientPeerId link=$networkSize"
+                )
+                broadcastRouted(prepared)
+                delivered = true
+            } else {
+                ConnectionLog.add(
+                    "Send",
+                    "direct failed -> no link (cache) peer=$recipientPeerId"
+                )
+            }
+        }
+        return delivered
+    }
+
+    private fun resolveDeliveryPeerId(packet: Packet, recipientPeerId: String): String {
+        val route = packet.header.route
+        return if (!route.isNullOrEmpty()) {
+            route.first().toHexString()
+        } else {
+            recipientPeerId
+        }
+    }
+
+    private fun broadcastRouted(packet: Packet) {
+        val packets = pipeline.prepareOutbound(packet)
+        packets.forEach { transport?.broadcast(encoder.encode(it)) }
+    }
+
+    private fun signForSend(packet: Packet): Packet {
         val manager = signatureManager ?: return packet
-        if (packet.header.signature != null) return packet
         return manager.sign(packet)
+    }
+
+    private fun hexToBytesFixed(hex: String, size: Int): ByteArray {
+        val clean = hex.lowercase().filter { it in '0'..'9' || it in 'a'..'f' }
+        val result = ByteArray(size)
+        var idx = 0
+        var out = 0
+        while (idx + 1 < clean.length && out < size) {
+            val byteStr = clean.substring(idx, idx + 2)
+            result[out++] = byteStr.toIntOrNull(16)?.toByte() ?: 0
+            idx += 2
+        }
+        return result
     }
 
     private fun verifyIfNeeded(packet: Packet, relayAddress: String?): Boolean {
