@@ -110,6 +110,7 @@ data class AppUiState(
     ),
     val isMicOn: Boolean = false,
     val isDisconnecting: Boolean = false,
+    val isAutoConnectBlocked: Boolean = false,
     val isRescueSignalActive: Boolean = false,
     // [추가] 설정 상태 관리
     val isVoiceDetectionEnabled: Boolean = false,
@@ -210,6 +211,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val profileStore = ProfileStore(app)
     @Volatile private var cachedProfile: SurvivorProfile = SurvivorProfile()
     @Volatile private var cachedNickname: String = ""
+    @Volatile private var autoConnectBlocked: Boolean = false
     private val directPeerAnnounceTracker = DirectPeerAnnounceTracker()
     private val peerNicknames = mutableMapOf<String, String>()
 
@@ -325,6 +327,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _uiEvents.tryEmit(UiEvent.Toast("블루투스 및 서비스 권한이 필요합니다."))
             return
         }
+        autoConnectBlocked = false
+        ConnectionLog.add("Runtime", "auto-connect unblocked (rescue-start)")
+        _uiState.update { it.copy(isAutoConnectBlocked = false) }
         bleManager.startEmergencyAdvertising()
         try {
             val intent = Intent(app, RescueService::class.java).apply {
@@ -397,6 +402,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onStartAutoConnect() {
+        if (autoConnectBlocked) {
+            ConnectionLog.add("Runtime", "auto-connect skipped (manual disconnect)")
+            return
+        }
         bleManager.startAutoConnect()
     }
 
@@ -921,15 +930,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onDisconnect() {
         if (_uiState.value.isDisconnecting) return
-        _uiState.update { it.copy(isDisconnecting = true) }
+        autoConnectBlocked = true
+        ConnectionLog.add("Runtime", "auto-connect blocked (manual disconnect)")
+        _uiState.update { it.copy(isDisconnecting = true, isAutoConnectBlocked = true) }
         stopAllRemoteAlerts()
 
         sendLeavePacket()
         stopRescueSignal()
 
+        if (::bleManager.isInitialized) {
+            bleManager.disconnect()
+        }
         viewModelScope.launch {
             delay(200)
-            bleManager.disconnect()
             _uiState.update { it.copy(isDisconnecting = false) }
         }
     }

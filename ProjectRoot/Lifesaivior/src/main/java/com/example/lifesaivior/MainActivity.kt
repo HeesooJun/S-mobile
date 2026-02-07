@@ -128,6 +128,7 @@ class MainActivity : ComponentActivity() {
                         meshGraphSnapshot = uiState.meshGraphSnapshot,
                         meshVisualEvents = viewModel.meshVisualEvents,
                         bleDebugStats = uiState.bleDebug,
+                        appViewModel = viewModel,
                         isMicOn = uiState.isMicOn,
                         isDisconnecting = uiState.isDisconnecting,
                         isRescueSignalActive = uiState.isRescueSignalActive,
