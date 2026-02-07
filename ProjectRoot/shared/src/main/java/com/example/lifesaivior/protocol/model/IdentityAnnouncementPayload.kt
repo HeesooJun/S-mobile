@@ -8,13 +8,19 @@ data class IdentityAnnouncementPayload(
     val signingPublicKey: ByteArray,
     val wifiDirectAddress: String? = null,
     val batteryLevel: Int? = null,
-    val powerSavingEnabled: Boolean? = null
+    val powerSavingEnabled: Boolean? = null,
+    val gender: String? = null,
+    val birthDate: String? = null,
+    val notes: String? = null
 ) {
     fun encode(): ByteArray? {
         val nicknameBytes = nickname.toByteArray(Charsets.UTF_8)
         val directBytes = wifiDirectAddress?.let { macToBytes(it) }
         val batteryBytes = batteryLevel?.coerceIn(0, 100)?.let { byteArrayOf(it.toByte()) }
         val powerSavingBytes = powerSavingEnabled?.let { byteArrayOf(if (it) 1 else 0) }
+        val genderBytes = toOptionalTlvBytes(gender)
+        val birthDateBytes = toOptionalTlvBytes(birthDate)
+        val notesBytes = toOptionalTlvBytes(notes)
         if (nicknameBytes.size > MAX_TLV_LENGTH ||
             noisePublicKey.size > MAX_TLV_LENGTH ||
             signingPublicKey.size > MAX_TLV_LENGTH ||
@@ -38,6 +44,15 @@ data class IdentityAnnouncementPayload(
         if (powerSavingBytes != null) {
             writeTlv(out, TLV_POWER_SAVING, powerSavingBytes)
         }
+        if (genderBytes != null) {
+            writeTlv(out, TLV_GENDER, genderBytes)
+        }
+        if (birthDateBytes != null) {
+            writeTlv(out, TLV_BIRTH_DATE, birthDateBytes)
+        }
+        if (notesBytes != null) {
+            writeTlv(out, TLV_NOTES, notesBytes)
+        }
         return out.toByteArray()
     }
 
@@ -48,6 +63,9 @@ data class IdentityAnnouncementPayload(
         private const val TLV_WIFI_DIRECT_ADDRESS = 0x05
         private const val TLV_BATTERY_LEVEL = 0x06
         private const val TLV_POWER_SAVING = 0x07
+        private const val TLV_GENDER = 0x08
+        private const val TLV_BIRTH_DATE = 0x09
+        private const val TLV_NOTES = 0x0A
         private const val MAX_TLV_LENGTH = 255
 
         fun decode(data: ByteArray): IdentityAnnouncementPayload? {
@@ -58,6 +76,9 @@ data class IdentityAnnouncementPayload(
             var wifiDirectAddress: String? = null
             var batteryLevel: Int? = null
             var powerSavingEnabled: Boolean? = null
+            var gender: String? = null
+            var birthDate: String? = null
+            var notes: String? = null
 
             while (offset + 2 <= data.size) {
                 val type = data[offset].toInt() and 0xFF
@@ -87,6 +108,15 @@ data class IdentityAnnouncementPayload(
                             powerSavingEnabled = (value[0].toInt() and 0xFF) != 0
                         }
                     }
+                    TLV_GENDER -> {
+                        gender = value.toString(Charsets.UTF_8)
+                    }
+                    TLV_BIRTH_DATE -> {
+                        birthDate = value.toString(Charsets.UTF_8)
+                    }
+                    TLV_NOTES -> {
+                        notes = value.toString(Charsets.UTF_8)
+                    }
                     else -> Unit
                 }
             }
@@ -98,7 +128,10 @@ data class IdentityAnnouncementPayload(
                 signingPublicKey = signingPublicKey,
                 wifiDirectAddress = wifiDirectAddress,
                 batteryLevel = batteryLevel,
-                powerSavingEnabled = powerSavingEnabled
+                powerSavingEnabled = powerSavingEnabled,
+                gender = gender,
+                birthDate = birthDate,
+                notes = notes
             )
         }
 
@@ -106,6 +139,12 @@ data class IdentityAnnouncementPayload(
             out.write(type)
             out.write(value.size)
             out.write(value)
+        }
+
+        private fun toOptionalTlvBytes(raw: String?): ByteArray? {
+            val trimmed = raw?.trim()?.ifBlank { null } ?: return null
+            val bytes = trimmed.toByteArray(Charsets.UTF_8)
+            return if (bytes.size <= MAX_TLV_LENGTH) bytes else bytes.copyOf(MAX_TLV_LENGTH)
         }
 
         private fun macToBytes(address: String): ByteArray? {
