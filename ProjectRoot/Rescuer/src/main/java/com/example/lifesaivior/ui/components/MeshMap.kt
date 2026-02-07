@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -212,6 +213,8 @@ fun MeshMap(
     val simulation = remember { Simulation() }
     val selfNodeIcon = ImageBitmap.imageResource(id = R.drawable.ic_mesh_node_icon_principal)
     val userNodeIcon = ImageBitmap.imageResource(id = R.drawable.ic_mesh_node_icon_user)
+    val selfNodeTint = ColorFilter.tint(AppColors.Green)
+    val userNodeTint = ColorFilter.tint(AppColors.White)
     var tick by remember { mutableStateOf(0L) }
 
     LaunchedEffect(nodes, edges) {
@@ -353,11 +356,13 @@ fun MeshMap(
                 }
 
                 val icon = if (node.isSelf) selfNodeIcon else userNodeIcon
+                val iconTint = if (node.isSelf) selfNodeTint else userNodeTint
                 val iconSize = (radius * 2f).toInt().coerceAtLeast(1)
                 drawImage(
                     image = icon,
                     dstOffset = IntOffset((center.x - radius).toInt(), (center.y - radius).toInt()),
-                    dstSize = IntSize(iconSize, iconSize)
+                    dstSize = IntSize(iconSize, iconSize),
+                    colorFilter = iconTint
                 )
 
                 val labelColor = if (node.isSelf) AppColors.Green else AppColors.Gray400
