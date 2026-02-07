@@ -135,6 +135,13 @@ class VoiceService : Service() {
                 backupDemo = settings.isDemoModeEnabled
             )
         }
+        if (!settings.isDemoModeEnabled) {
+            val voiceEnabled = settings.isVoiceDetectionEnabled
+            val shockEnabled = settings.isShockDetectionEnabled
+            if (voiceEnabled && !shockEnabled) {
+                AppSettingsRepository.setVoiceDetection(this, false)
+            }
+        }
 
         // 1. 실행할 Activity Intent 생성
         val activityIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {

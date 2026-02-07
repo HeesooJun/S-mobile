@@ -126,6 +126,13 @@ class SensorService : Service(), SensorEventListener {
                 backupDemo = settings.isDemoModeEnabled
             )
         }
+        if (!settings.isDemoModeEnabled) {
+            val voiceEnabled = settings.isVoiceDetectionEnabled
+            val shockEnabled = settings.isShockDetectionEnabled
+            if (shockEnabled && !voiceEnabled) {
+                AppSettingsRepository.setShockDetection(this, false)
+            }
+        }
 
         // 1. 센서 해제
         sensorManager.unregisterListener(this)
