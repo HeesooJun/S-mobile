@@ -7,6 +7,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -15,6 +19,8 @@ import com.example.lifesaivior.R
 import com.example.lifesaivior.ai.stt.EmergencyIntentClassifierKorean
 import com.example.lifesaivior.ai.stt.VoiceTriggerDetector
 import com.example.lifesaivior.core.settings.AppSettingsRepository
+import kotlin.math.PI
+import kotlin.math.sin
 
 class VoiceService : Service() {
 
@@ -142,6 +148,7 @@ class VoiceService : Service() {
                 AppSettingsRepository.setVoiceDetection(this, false)
             }
         }
+        playEasAlertAsync()
 
         // 1. 실행할 Activity Intent 생성
         val activityIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
@@ -241,6 +248,88 @@ class VoiceService : Service() {
         isolationDetector?.stopMonitoring()
 
         Log.d("VoiceService", "🔴 음성 서비스 종료 (AI 해제는 백그라운드에서 진행)")
+    }
+
+    private fun playEasAlertAsync() {
+        Thread {
+            try {
+                AppSettingsRepository.init(this)
+                val settings = AppSettingsRepository.snapshot(this)
+                val level = if (settings.isDemoModeEnabled) settings.demoEasLevel else 100
+                if (level <= 0) return@Thread
+
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val stream = AudioManager.STREAM_ALARM
+                val originalVolume = audioManager.getStreamVolume(stream)
+                val maxVolume = audioManager.getStreamMaxVolume(stream)
+                audioManager.setStreamVolume(stream, maxVolume, 0)
+
+                val freq1 = 853.0
+                val freq2 = 960.0
+                val durationSeconds = 5
+                val sampleRate = 44_100
+                val gain = (level / 100.0).coerceIn(0.0, 1.0)
+
+                val numSamples = durationSeconds * sampleRate
+                val generatedSnd = ByteArray(2 * numSamples)
+
+                try {
+                    for (i in 0 until numSamples) {
+                        val time = i.toDouble() / sampleRate
+                        val wave1 = sin(2.0 * PI * freq1 * time)
+                        val wave2 = sin(2.0 * PI * freq2 * time)
+                        val mixed = (wave1 + wave2) * 0.5 * gain
+                        val maxVal = Short.MAX_VALUE.toInt()
+                        val value = (mixed * maxVal).toInt()
+                        generatedSnd[2 * i] = (value and 0x00FF).toByte()
+                        generatedSnd[2 * i + 1] = ((value and 0xFF00) shr 8).toByte()
+                    }
+
+                    val audioTrack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        AudioTrack.Builder()
+                            .setAudioAttributes(
+                                AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_ALARM)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                    .build()
+                            )
+                            .setAudioFormat(
+                                AudioFormat.Builder()
+                                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                    .setSampleRate(sampleRate)
+                                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                    .build()
+                            )
+                            .setBufferSizeInBytes(generatedSnd.size)
+                            .setTransferMode(AudioTrack.MODE_STATIC)
+                            .build()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        AudioTrack(
+                            AudioManager.STREAM_ALARM,
+                            sampleRate,
+                            AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                            generatedSnd.size,
+                            AudioTrack.MODE_STATIC
+                        )
+                    }
+
+                    try {
+                        audioTrack.write(generatedSnd, 0, generatedSnd.size)
+                        audioTrack.play()
+                        Thread.sleep(durationSeconds * 1000L + 50L)
+                    } finally {
+                        runCatching { audioTrack.stop() }
+                        runCatching { audioTrack.release() }
+                    }
+                } finally {
+                    audioManager.setStreamVolume(stream, originalVolume, 0)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -124,6 +124,7 @@ data class AppUiState(
     val demoBeepLevel: Int = 100,
     val demoHighToneLevel: Int = 100,
     val demoVibrateLevel: Int = 100,
+    val demoEasLevel: Int = 100,
     val messages: List<ChatMessage> = emptyList(),
     val bleDebug: BleDebugStats = BleDebugStats(),
     val signatureLogs: List<SignatureLogEntry> = emptyList(),
@@ -295,7 +296,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 isDemoModeEnabled = settings.isDemoModeEnabled,
                 demoBeepLevel = settings.demoBeepLevel,
                 demoHighToneLevel = settings.demoHighToneLevel,
-                demoVibrateLevel = settings.demoVibrateLevel
+                demoVibrateLevel = settings.demoVibrateLevel,
+                demoEasLevel = settings.demoEasLevel
             )
         }
 
@@ -310,7 +312,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         isDemoModeEnabled = latest.isDemoModeEnabled,
                         demoBeepLevel = latest.demoBeepLevel,
                         demoHighToneLevel = latest.demoHighToneLevel,
-                        demoVibrateLevel = latest.demoVibrateLevel
+                        demoVibrateLevel = latest.demoVibrateLevel,
+                        demoEasLevel = latest.demoEasLevel
                     )
                 }
             }
@@ -408,6 +411,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val safe = level.coerceIn(0, 100)
         AppSettingsRepository.setDemoVibrateLevel(app, safe)
         _uiState.update { it.copy(demoVibrateLevel = safe) }
+    }
+
+    fun setDemoEasLevel(level: Int) {
+        val safe = level.coerceIn(0, 100)
+        AppSettingsRepository.setDemoEasLevel(app, safe)
+        _uiState.update { it.copy(demoEasLevel = safe) }
     }
 
     private fun suspendBackgroundForSos() {
