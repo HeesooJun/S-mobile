@@ -1,7 +1,6 @@
 package com.example.lifesaivior.wakeup
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -20,7 +19,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope // [추가] 비동기 작업을 위해 필요
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import com.example.lifesaivior.core.settings.AppSettingsRepository
+import com.example.lifesaivior.ui.screen.settings.DemoSettingsScreen
 import com.example.lifesaivior.ui.screen.settings.SettingsScreen
 
 class MainActivity : ComponentActivity() {
@@ -29,6 +31,11 @@ class MainActivity : ComponentActivity() {
     private val isVoiceOnState = mutableStateOf(false)
     private val isShockOnState = mutableStateOf(false)
     private val isDemoOnState = mutableStateOf(false)
+    private val isSosSuspendedState = mutableStateOf(false)
+    private val showDemoDetailsState = mutableStateOf(false)
+    private val demoBeepLevelState = mutableStateOf(100)
+    private val demoHighToneLevelState = mutableStateOf(100)
+    private val demoVibrateLevelState = mutableStateOf(100)
 
     // 연속 클릭 방지 (시간 단축: 0.5초 -> 0.3초)
     private var lastVoiceToggleTime = 0L
@@ -48,81 +55,101 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        AppSettingsRepository.init(this)
         loadSettings()
+        lifecycleScope.launch {
+            AppSettingsRepository.state.collect { settings ->
+                isVoiceOnState.value = settings.isVoiceDetectionEnabled
+                isShockOnState.value = settings.isShockDetectionEnabled
+                isDemoOnState.value = settings.isDemoModeEnabled
+                isSosSuspendedState.value = settings.isSosBackgroundSuspended
+                demoBeepLevelState.value = settings.demoBeepLevel
+                demoHighToneLevelState.value = settings.demoHighToneLevel
+                demoVibrateLevelState.value = settings.demoVibrateLevel
+            }
+        }
 
         setContent {
-            SettingsScreen(
-                isVoiceOn = isVoiceOnState.value,
-                isShockOn = isShockOnState.value,
-                isDemoOn = isDemoOnState.value,
-                onVoiceToggle = { newValue ->
-                    // 1. 연타 방지 (300ms)
-                    val currentTime = SystemClock.elapsedRealtime()
-                    if (currentTime - lastVoiceToggleTime < CLICK_DELAY_MS) {
-                        return@SettingsScreen
-                    }
-                    lastVoiceToggleTime = currentTime
+            if (showDemoDetailsState.value) {
+                DemoSettingsScreen(
+                    isDemoOn = isDemoOnState.value,
+                    beepLevel = demoBeepLevelState.value,
+                    highToneLevel = demoHighToneLevelState.value,
+                    vibrateLevel = demoVibrateLevelState.value,
+                    onBeepLevelChange = { level ->
+                        demoBeepLevelState.value = level
+                        AppSettingsRepository.setDemoBeepLevel(this, level)
+                    },
+                    onHighToneLevelChange = { level ->
+                        demoHighToneLevelState.value = level
+                        AppSettingsRepository.setDemoHighToneLevel(this, level)
+                    },
+                    onVibrateLevelChange = { level ->
+                        demoVibrateLevelState.value = level
+                        AppSettingsRepository.setDemoVibrateLevel(this, level)
+                    },
+                    onBack = { showDemoDetailsState.value = false }
+                )
+            } else {
+                SettingsScreen(
+                    isVoiceOn = isVoiceOnState.value,
+                    isShockOn = isShockOnState.value,
+                    isDemoOn = isDemoOnState.value,
+                    isSosActive = isSosSuspendedState.value,
+                    isDemoToggleEnabled = false,
+                    onVoiceToggle = { newValue ->
+                        // 1. 연타 방지 (300ms)
+                        val currentTime = SystemClock.elapsedRealtime()
+                        if (currentTime - lastVoiceToggleTime < CLICK_DELAY_MS) {
+                            return@SettingsScreen
+                        }
+                        lastVoiceToggleTime = currentTime
 
-                    // 2. UI 즉시 반영 (여기가 중요! 렉 없이 스위치부터 움직임)
-                    isVoiceOnState.value = newValue
-                    saveSettings("voice_detection", newValue)
+                        // 2. UI 즉시 반영 (여기가 중요! 렉 없이 스위치부터 움직임)
+                        isVoiceOnState.value = newValue
+                        AppSettingsRepository.setVoiceDetection(this, newValue)
 
-                    if (newValue) {
-                        // 켜기: 준비 과정 수행
-                        stopAllServicesAsync() // 기존 서비스 정리
-                        checkAndRequestPermissions()
-                        Toast.makeText(this, "준비됨. 화면을 끄면 시작됩니다.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        // 끄기: 비동기로 서비스 종료 (UI 버벅임 방지)
-                        stopAllServicesAsync()
-                        Toast.makeText(this, "감시가 해제되었습니다.", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onShockToggle = { newValue ->
-                    val currentTime = SystemClock.elapsedRealtime()
-                    if (currentTime - lastShockToggleTime < CLICK_DELAY_MS) {
-                        return@SettingsScreen
-                    }
-                    lastShockToggleTime = currentTime
+                        if (newValue) {
+                            // 켜기: 준비 과정 수행
+                            stopAllServicesAsync() // 기존 서비스 정리
+                            checkAndRequestPermissions()
+                            Toast.makeText(this, "준비됨. 화면을 끄면 시작됩니다.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            // 끄기: 비동기로 서비스 종료 (UI 버벅임 방지)
+                            stopAllServicesAsync()
+                            Toast.makeText(this, "감시가 해제되었습니다.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onShockToggle = { newValue ->
+                        val currentTime = SystemClock.elapsedRealtime()
+                        if (currentTime - lastShockToggleTime < CLICK_DELAY_MS) {
+                            return@SettingsScreen
+                        }
+                        lastShockToggleTime = currentTime
 
-                    isShockOnState.value = newValue
-                    saveSettings("shock_detection", newValue)
+                        isShockOnState.value = newValue
+                        AppSettingsRepository.setShockDetection(this, newValue)
 
-                    if (newValue) {
-                        stopAllServicesAsync()
-                        Toast.makeText(this, "준비됨. 화면을 끄면 시작됩니다.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        stopAllServicesAsync()
-                        Toast.makeText(this, "감시가 해제되었습니다.", Toast.LENGTH_SHORT).show()
+                        if (newValue) {
+                            stopAllServicesAsync()
+                            Toast.makeText(this, "준비됨. 화면을 끄면 시작됩니다.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            stopAllServicesAsync()
+                            Toast.makeText(this, "감시가 해제되었습니다.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onDemoToggle = { enabled ->
+                        if (enabled != isDemoOnState.value) {
+                            Toast.makeText(this, "시연 모드는 스탠바이 설정에서 변경하세요.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onDemoDetails = { showDemoDetailsState.value = true },
+                    onBack = { finish() },
+                    onEditProfile = {
+                        Toast.makeText(this, "프로필 수정 준비 중", Toast.LENGTH_SHORT).show()
                     }
-                },
-                onDemoToggle = { enabled ->
-                    isDemoOnState.value = enabled
-                    saveSettings("demo_mode", enabled)
-
-                    if (enabled) {
-                        isVoiceOnState.value = true
-                        isShockOnState.value = true
-                        saveSettings("voice_detection", true)
-                        saveSettings("shock_detection", true)
-                        stopAllServicesAsync()
-                        checkAndRequestPermissions()
-                        startServicesIfEnabled()
-                        Toast.makeText(this, "시연 모드가 켜졌습니다.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        isVoiceOnState.value = false
-                        isShockOnState.value = false
-                        saveSettings("voice_detection", false)
-                        saveSettings("shock_detection", false)
-                        stopAllServicesAsync()
-                        Toast.makeText(this, "시연 모드가 해제되었습니다.", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onBack = { finish() },
-                onEditProfile = {
-                    Toast.makeText(this, "프로필 수정 준비 중", Toast.LENGTH_SHORT).show()
-                }
-            )
+                )
+            }
         }
 
         checkOverlayPermission()
@@ -153,30 +180,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadSettings() {
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        isVoiceOnState.value = prefs.getBoolean("voice_detection", false)
-        isShockOnState.value = prefs.getBoolean("shock_detection", false)
-        isDemoOnState.value = prefs.getBoolean("demo_mode", false)
-        if (isDemoOnState.value && (!isVoiceOnState.value || !isShockOnState.value)) {
-            isVoiceOnState.value = true
-            isShockOnState.value = true
-            prefs.edit()
-                .putBoolean("voice_detection", true)
-                .putBoolean("shock_detection", true)
-                .apply()
-        }
-    }
-
-    private fun saveSettings(key: String, value: Boolean) {
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(key, value).apply()
+        val settings = AppSettingsRepository.snapshot(this)
+        isVoiceOnState.value = settings.isVoiceDetectionEnabled
+        isShockOnState.value = settings.isShockDetectionEnabled
+        isDemoOnState.value = settings.isDemoModeEnabled
+        isSosSuspendedState.value = settings.isSosBackgroundSuspended
+        demoBeepLevelState.value = settings.demoBeepLevel
+        demoHighToneLevelState.value = settings.demoHighToneLevel
+        demoVibrateLevelState.value = settings.demoVibrateLevel
     }
 
     private fun startServicesIfEnabled() {
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        val isDemoOn = prefs.getBoolean("demo_mode", false)
-        val isVoiceOn = prefs.getBoolean("voice_detection", false) || isDemoOn
-        val isShockOn = prefs.getBoolean("shock_detection", false) || isDemoOn
+        val settings = AppSettingsRepository.snapshot(this)
+        if (settings.isSosBackgroundSuspended) return
+        val isDemoOn = settings.isDemoModeEnabled
+        val isVoiceOn = settings.isVoiceDetectionEnabled || isDemoOn
+        val isShockOn = settings.isShockDetectionEnabled || isDemoOn
 
         if (isVoiceOn) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {

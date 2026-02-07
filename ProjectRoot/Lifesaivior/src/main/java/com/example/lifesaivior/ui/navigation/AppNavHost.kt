@@ -63,6 +63,7 @@ import com.example.lifesaivior.protocol.security.SignatureLogEntry
 import com.example.lifesaivior.ui.components.PowerSavingLayer
 import com.example.lifesaivior.ui.components.ptt.PttBottomBar
 import com.example.lifesaivior.ui.components.ptt.PttBottomTab
+import com.example.lifesaivior.ui.screen.settings.DemoSettingsScreen
 import com.example.lifesaivior.ui.screen.survivor.ptt.PTTLinkScreen
 import com.example.lifesaivior.ui.screen.survivor.ptt.SurvivorCallRequest
 import com.example.lifesaivior.ui.screen.survivor.standby.StandbyStatusScreen
@@ -196,12 +197,13 @@ fun AppNavHost(
         appState.survivors
     ) {
         if (isInCall) return@LaunchedEffect
-        val routeAllowsAwareProbe =
-            currentRoute == AppRoute.SurvivorStandby.route ||
-                currentRoute == AppRoute.SurvivorStandbySettings.route ||
-                currentRoute == AppRoute.SurvivorPTT.route ||
-                currentRoute == AppRoute.SurvivorChat.route ||
-                currentRoute == AppRoute.Settings.route
+          val routeAllowsAwareProbe =
+              currentRoute == AppRoute.SurvivorStandby.route ||
+                  currentRoute == AppRoute.SurvivorStandbySettings.route ||
+                  currentRoute == AppRoute.SurvivorPTT.route ||
+                  currentRoute == AppRoute.SurvivorChat.route ||
+                  currentRoute == AppRoute.Settings.route ||
+                  currentRoute == AppRoute.DemoSettings.route
         // Keep survivor Aware probing active on core tabs so rescuer can discover reliably.
         appViewModel.wifiAwareRanger.updatePeerCapability(routeAllowsAwareProbe)
     }
@@ -596,6 +598,8 @@ fun AppNavHost(
                     isVoiceOn = isVoiceDetectionEnabled,
                     isShockOn = isShockDetectionEnabled,
                     isDemoOn = isDemoModeEnabled,
+                    isSosActive = isRescueSignalActive,
+                    isDemoToggleEnabled = true,
                     profileName = profileState.name,
                     profileGender = profileState.gender,
                     profileBirthDate = profileState.birthDate,
@@ -603,6 +607,11 @@ fun AppNavHost(
                     onVoiceToggle = onSetVoiceDetection,
                     onShockToggle = onSetShockDetection,
                     onDemoToggle = onSetDemoMode,
+                    onDemoDetails = {
+                        navController.navigate(AppRoute.DemoSettings.route) {
+                            launchSingleTop = true
+                        }
+                    },
                     onBack = { navController.popBackStack() },
                     onEditProfile = {
                         navController.navigate(AppRoute.SurvivorProfile.route)
@@ -764,6 +773,8 @@ fun AppNavHost(
                     isVoiceOn = isVoiceDetectionEnabled,
                     isShockOn = isShockDetectionEnabled,
                     isDemoOn = isDemoModeEnabled,
+                    isSosActive = isRescueSignalActive,
+                    isDemoToggleEnabled = true,
                     profileName = profileState.name,
                     profileGender = profileState.gender,
                     profileBirthDate = profileState.birthDate,
@@ -771,10 +782,27 @@ fun AppNavHost(
                     onVoiceToggle = onSetVoiceDetection,
                     onShockToggle = onSetShockDetection,
                     onDemoToggle = onSetDemoMode,
+                    onDemoDetails = {
+                        navController.navigate(AppRoute.DemoSettings.route) {
+                            launchSingleTop = true
+                        }
+                    },
                     onBack = { navController.popBackStack() },
                     onEditProfile = {
                         navController.navigate(AppRoute.SurvivorProfile.route)
                     }
+                )
+            }
+            composable(AppRoute.DemoSettings.route) {
+                DemoSettingsScreen(
+                    isDemoOn = appState.isDemoModeEnabled,
+                    beepLevel = appState.demoBeepLevel,
+                    highToneLevel = appState.demoHighToneLevel,
+                    vibrateLevel = appState.demoVibrateLevel,
+                    onBeepLevelChange = { appViewModel.setDemoBeepLevel(it) },
+                    onHighToneLevelChange = { appViewModel.setDemoHighToneLevel(it) },
+                    onVibrateLevelChange = { appViewModel.setDemoVibrateLevel(it) },
+                    onBack = { navController.popBackStack() }
                 )
             }
 
