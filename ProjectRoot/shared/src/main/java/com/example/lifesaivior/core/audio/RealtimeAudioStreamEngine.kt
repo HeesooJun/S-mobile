@@ -33,6 +33,10 @@ import java.nio.ByteOrder
 import kotlin.apply
 import kotlin.code
 import kotlin.collections.copyOfRange
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.ranges.rangeTo
 import kotlin.run
@@ -98,7 +102,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private var lastPlaybackRms = 0.0
     private var lastPlaybackAt = 0L
     private val debugLogIntervalMs = 10_000L
-    private val silenceGateEnabled = false
+    private val silenceGateEnabled = true
     private val silenceGateRmsThreshold = 3.0
     private val silenceGateWarmupFrames = 50
     private val transmitGain = 0.7
@@ -109,6 +113,22 @@ class RealtimeAudioStreamEngine(private val context: Context) {
     private val echoMitigationPlaybackRmsThresholdEarpiece = 280.0
     private val echoMitigationMaxRatioSpeaker = 1.25
     private val echoMitigationMaxRatioEarpiece = 1.60
+    private val howlingSuppressEnabled = true
+    private val howlingDetectIntervalFrames = 5
+    private val howlingHoldMs = 600L
+    private val howlingMinCaptureRms = 90.0
+    private val howlingMinPlaybackRmsSpeaker = 550.0
+    private val howlingMinPlaybackRmsEarpiece = 220.0
+    private val howlingPeakRatioThreshold = 7.0
+    private val howlingNotchMix = 0.65
+    private val howlingNotchQ = if (aggressiveSpeakerEchoProfile) 18.0 else 22.0
+    private val howlingCandidateHz = intArrayOf(
+        500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000
+    )
+    private var howlingNotchFilter: NotchFilter? = null
+    private var howlingNotchHz = 0.0
+    private var howlingNotchActiveUntilMs = 0L
+    private var lastHowlingDetectAt = 0L
     private var captureFrameCount = 0
     private var smoothedTransmitGain = transmitGain
     @Volatile private var micRouteSettleMuteUntilMs = 0L
@@ -275,6 +295,7 @@ class RealtimeAudioStreamEngine(private val context: Context) {
                             if (effectiveGain in 0.0..0.999) {
                                 applyGainPcm16(buffer, readResult, effectiveGain)
                             }
+                            maybeApplyHowlingSuppression(buffer, readResult, rms)
                             if (useOpus) {
                                 var offset = 0
                                 while (offset < readResult) {
@@ -799,6 +820,21 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         )
     }
 
+    private fun maybeLogHowlingDetected(freqHz: Double, captureRms: Double, playbackRms: Double) {
+        val now = System.currentTimeMillis()
+        if (!shouldLog(now, lastHowlingDetectAt)) return
+        lastHowlingDetectAt = now
+        Log.w(
+            "AudioPipe",
+            "HOWLING_DETECT freq=%.0fHz capture=%.1f playback=%.1f speaker=%s".format(
+                freqHz,
+                captureRms,
+                playbackRms,
+                preferSpeakerphone
+            )
+        )
+    }
+
     private fun maybeLogPcmSend(size: Int) {
         val now = System.currentTimeMillis()
         if (!shouldLog(now, lastEncodeLogAt)) return
@@ -935,6 +971,100 @@ class RealtimeAudioStreamEngine(private val context: Context) {
         return smoothedTransmitGain.coerceIn(0.0, 1.0)
     }
 
+    private fun maybeApplyHowlingSuppression(buffer: ByteArray, size: Int, captureRms: Double) {
+        if (!howlingSuppressEnabled) return
+        if (!preferSpeakerphone) return
+        if (size < 2) return
+        val now = System.currentTimeMillis()
+        val playbackRms = lastPlaybackRms
+        val playbackThreshold = if (preferSpeakerphone) {
+            if (aggressiveSpeakerEchoProfile) 680.0 else howlingMinPlaybackRmsSpeaker
+        } else {
+            howlingMinPlaybackRmsEarpiece
+        }
+        val hasRecentPlayback = now - lastPlaybackAt <= echoMitigationWindowMs
+        if (!hasRecentPlayback || playbackRms < playbackThreshold || captureRms < howlingMinCaptureRms) {
+            if (now > howlingNotchActiveUntilMs) return
+        }
+        val needsDetection =
+            now > howlingNotchActiveUntilMs &&
+                captureFrameCount % howlingDetectIntervalFrames == 0
+        if (needsDetection) {
+            val detectedHz = detectHowlingFrequency(buffer, size)
+            if (detectedHz != null) {
+                updateHowlingNotch(detectedHz)
+                howlingNotchActiveUntilMs = now + howlingHoldMs
+                maybeLogHowlingDetected(detectedHz, captureRms, playbackRms)
+            }
+        }
+        if (now <= howlingNotchActiveUntilMs) {
+            howlingNotchFilter?.process(buffer, size, howlingNotchMix)
+        }
+    }
+
+    private fun detectHowlingFrequency(buffer: ByteArray, size: Int): Double? {
+        val sampleCount = size / 2
+        if (sampleCount < 200) return null
+        val samples = ShortArray(sampleCount)
+        var si = 0
+        var bi = 0
+        while (si < sampleCount) {
+            val lo = buffer[bi].toInt() and 0xFF
+            val hi = buffer[bi + 1].toInt()
+            val value = (hi shl 8) or lo
+            samples[si] = value.toShort()
+            si++
+            bi += 2
+        }
+        var maxPower = 0.0
+        var sumPower = 0.0
+        var maxFreq = 0.0
+        for (freq in howlingCandidateHz) {
+            val power = goertzelPower(samples, freq.toDouble())
+            sumPower += power
+            if (power > maxPower) {
+                maxPower = power
+                maxFreq = freq.toDouble()
+            }
+        }
+        if (sumPower <= 0.0) return null
+        val avgPower = sumPower / howlingCandidateHz.size
+        if (avgPower <= 0.0) return null
+        val ratio = maxPower / avgPower
+        if (ratio < howlingPeakRatioThreshold) return null
+        return maxFreq
+    }
+
+    private fun goertzelPower(samples: ShortArray, targetHz: Double): Double {
+        val n = samples.size
+        val k = ((0.5 + (n * targetHz) / sampleRate)).toInt().coerceIn(1, n / 2)
+        val w = 2.0 * PI * k / n
+        val cosine = cos(w)
+        val sine = sin(w)
+        var q0 = 0.0
+        var q1 = 0.0
+        var q2 = 0.0
+        for (sample in samples) {
+            q0 = 2.0 * cosine * q1 - q2 + sample
+            q2 = q1
+            q1 = q0
+        }
+        val real = q1 - q2 * cosine
+        val imag = q2 * sine
+        return (real * real) + (imag * imag)
+    }
+
+    private fun updateHowlingNotch(freqHz: Double) {
+        if (freqHz <= 0.0) return
+        val shouldUpdate = howlingNotchFilter == null || abs(freqHz - howlingNotchHz) >= 80.0
+        if (!shouldUpdate) return
+        howlingNotchHz = freqHz
+        if (howlingNotchFilter == null) {
+            howlingNotchFilter = NotchFilter(sampleRate.toDouble())
+        }
+        howlingNotchFilter?.setNotch(freqHz, howlingNotchQ)
+    }
+
     private fun shouldEnableAgc(): Boolean {
         return !(aggressiveSpeakerEchoProfile && preferSpeakerphone)
     }
@@ -967,6 +1097,56 @@ class RealtimeAudioStreamEngine(private val context: Context) {
             buffer[i] = (scaled and 0xFF).toByte()
             buffer[i + 1] = ((scaled shr 8) and 0xFF).toByte()
             i += 2
+        }
+    }
+
+    private class NotchFilter(private val sampleRate: Double) {
+        private var b0 = 1.0
+        private var b1 = 0.0
+        private var b2 = 0.0
+        private var a1 = 0.0
+        private var a2 = 0.0
+        private var x1 = 0.0
+        private var x2 = 0.0
+        private var y1 = 0.0
+        private var y2 = 0.0
+
+        fun setNotch(freqHz: Double, q: Double) {
+            val w0 = 2.0 * PI * freqHz / sampleRate
+            val alpha = sin(w0) / (2.0 * q)
+            val cosW0 = cos(w0)
+            val a0 = 1.0 + alpha
+            b0 = 1.0 / a0
+            b1 = (-2.0 * cosW0) / a0
+            b2 = 1.0 / a0
+            a1 = (-2.0 * cosW0) / a0
+            a2 = (1.0 - alpha) / a0
+            x1 = 0.0
+            x2 = 0.0
+            y1 = 0.0
+            y2 = 0.0
+        }
+
+        fun process(buffer: ByteArray, size: Int, mix: Double) {
+            if (size < 2) return
+            val dry = 1.0 - mix
+            var i = 0
+            while (i + 1 < size) {
+                val lo = buffer[i].toInt() and 0xFF
+                val hi = buffer[i + 1].toInt()
+                val sample = ((hi shl 8) or lo).toShort().toInt()
+                val x0 = sample.toDouble()
+                val y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+                x2 = x1
+                x1 = x0
+                y2 = y1
+                y1 = y0
+                val mixed = (x0 * dry) + (y0 * mix)
+                val out = mixed.coerceIn(-32768.0, 32767.0).toInt()
+                buffer[i] = (out and 0xFF).toByte()
+                buffer[i + 1] = ((out shr 8) and 0xFF).toByte()
+                i += 2
+            }
         }
     }
 }
