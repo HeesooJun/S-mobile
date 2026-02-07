@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
 
         // [핵심] 앱 켜자마자 권한 체크 시작 (PermissionViewModel UI 없음)
         checkAllPermissions()
+        handleAutoSosIntent(intent)
 
         setContent {
             LifesaiviorTheme(darkTheme = true, dynamicColor = false) {
@@ -153,8 +154,10 @@ class MainActivity : ComponentActivity() {
                         onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() },
                         isVoiceDetectionEnabled = uiState.isVoiceDetectionEnabled,
                         isShockDetectionEnabled = uiState.isShockDetectionEnabled,
+                        isDemoModeEnabled = uiState.isDemoModeEnabled,
                         onSetVoiceDetection = { enabled -> viewModel.setVoiceDetection(enabled) },
-                        onSetShockDetection = { enabled -> viewModel.setShockDetection(enabled) }
+                        onSetShockDetection = { enabled -> viewModel.setShockDetection(enabled) },
+                        onSetDemoMode = { enabled -> viewModel.setDemoMode(enabled) }
                     )
                 } else {
                     // [로딩 화면] 체크하는 동안 검은 화면에 로딩바 (이 위로 팝업들이 뜸)
@@ -177,6 +180,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAutoSosIntent(intent)
     }
 
     override fun onResume() {
@@ -212,6 +221,12 @@ class MainActivity : ComponentActivity() {
             viewModel.onPermissionsResult(true)
             checkOverlayPermission()
         }
+    }
+
+    private fun handleAutoSosIntent(intent: Intent?) {
+        if (intent?.action != SensorService.ACTION_SENSOR_TRIGGERED) return
+        val reason = intent.getStringExtra("triggerReason")
+        viewModel.onAutoSosTriggered(reason)
     }
 
     // 2단계: 오버레이 권한 체크
@@ -265,8 +280,9 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshServices() {
         val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        val isVoiceOn = prefs.getBoolean("voice_detection", false)
-        val isShockOn = prefs.getBoolean("shock_detection", false)
+        val isDemoOn = prefs.getBoolean("demo_mode", false)
+        val isVoiceOn = prefs.getBoolean("voice_detection", false) || isDemoOn
+        val isShockOn = prefs.getBoolean("shock_detection", false) || isDemoOn
 
         if (isVoiceOn) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {

@@ -67,8 +67,10 @@ fun LifesaiviorApp(
     onClearDeviceMonitoring: () -> Unit,
     isVoiceDetectionEnabled: Boolean,
     isShockDetectionEnabled: Boolean,
+    isDemoModeEnabled: Boolean,
     onSetVoiceDetection: (Boolean) -> Unit,
-    onSetShockDetection: (Boolean) -> Unit
+    onSetShockDetection: (Boolean) -> Unit,
+    onSetDemoMode: (Boolean) -> Unit
 ) {
     val scale = rememberAppScale()
 
@@ -161,8 +163,10 @@ fun LifesaiviorApp(
                 onClearDeviceMonitoring = onClearDeviceMonitoring,
                 isVoiceDetectionEnabled = isVoiceDetectionEnabled,
                 isShockDetectionEnabled = isShockDetectionEnabled,
+                isDemoModeEnabled = isDemoModeEnabled,
                 onSetVoiceDetection = onSetVoiceDetection,
                 onSetShockDetection = onSetShockDetection,
+                onSetDemoMode = onSetDemoMode,
                 onRouteChanged = { route -> currentRoute = route }
             )
 

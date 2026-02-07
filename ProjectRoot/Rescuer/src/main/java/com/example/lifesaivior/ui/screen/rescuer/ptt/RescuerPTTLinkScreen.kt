@@ -531,7 +531,7 @@ fun RescuerPTTLinkScreen(
                                 text = if (repeatingItems.isNotEmpty()) {
                                     "반복 송출 중: ${repeatingItems.joinToString(", ")} · [송출 중지]로 해제"
                                 } else {
-                                    "안내: 비프음/저주파/고주파를 3초 길게 누르면 반복 고정"
+                                    "안내: 비프음/저주파/고주파를 1초 길게 누르면 반복 고정"
                                 },
                                 color = if (repeatingItems.isNotEmpty()) AppColors.Green else AppColors.Gray500,
                                 fontSize = scaledSp(10, modalScale),
@@ -1143,7 +1143,7 @@ private fun RepeatActionButton(
             currentActiveStateChanged(false)
             return@LaunchedEffect
         }
-        delay(3_000L)
+        delay(1_000L)
         if (!isPressed || isStickyActive) return@LaunchedEffect
         // Consume release click once so sticky mode does not immediately toggle off.
         suppressTap = true

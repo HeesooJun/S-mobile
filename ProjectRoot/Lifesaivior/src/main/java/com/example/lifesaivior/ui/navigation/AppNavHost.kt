@@ -118,8 +118,10 @@ fun AppNavHost(
     onClearDeviceMonitoring: () -> Unit,
     isVoiceDetectionEnabled: Boolean,
     isShockDetectionEnabled: Boolean,
+    isDemoModeEnabled: Boolean,
     onSetVoiceDetection: (Boolean) -> Unit,
     onSetShockDetection: (Boolean) -> Unit,
+    onSetDemoMode: (Boolean) -> Unit,
     onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
@@ -169,6 +171,7 @@ fun AppNavHost(
     var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
+    val pendingAutoSos by appViewModel.pendingAutoSos.collectAsState()
     val minSosDurationMs = 1_000L
     var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
     var connectingTargetPeerId by remember { mutableStateOf<String?>(null) }
@@ -256,14 +259,8 @@ fun AppNavHost(
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 if (intent?.action != SensorService.ACTION_SENSOR_TRIGGERED) return
-                sttEnabled = true
-                sttResetToken = System.currentTimeMillis()
-                val currentRoute = navController.currentBackStackEntry?.destination?.route
-                if (currentRoute != AppRoute.SurvivorStandby.route) {
-                    navController.navigate(AppRoute.SurvivorStandby.route) {
-                        launchSingleTop = true
-                    }
-                }
+                val reason = intent.getStringExtra("triggerReason")
+                appViewModel.onAutoSosTriggered(reason)
             }
         }
         val filter = IntentFilter(SensorService.ACTION_SENSOR_TRIGGERED)
@@ -273,6 +270,19 @@ fun AppNavHost(
                 context.unregisterReceiver(receiver)
             } catch (_: Exception) { }
         }
+    }
+
+    LaunchedEffect(pendingAutoSos) {
+        val trigger = pendingAutoSos ?: return@LaunchedEffect
+        sttEnabled = true
+        sttResetToken = trigger.triggeredAtMs
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        if (currentRoute != AppRoute.SurvivorStandby.route) {
+            navController.navigate(AppRoute.SurvivorStandby.route) {
+                launchSingleTop = true
+            }
+        }
+        appViewModel.consumeAutoSosTrigger()
     }
 
     LaunchedEffect(backStackEntry) {
@@ -585,12 +595,14 @@ fun AppNavHost(
                 SettingsScreen(
                     isVoiceOn = isVoiceDetectionEnabled,
                     isShockOn = isShockDetectionEnabled,
+                    isDemoOn = isDemoModeEnabled,
                     profileName = profileState.name,
                     profileGender = profileState.gender,
                     profileBirthDate = profileState.birthDate,
                     profileNotes = profileState.notes,
                     onVoiceToggle = onSetVoiceDetection,
                     onShockToggle = onSetShockDetection,
+                    onDemoToggle = onSetDemoMode,
                     onBack = { navController.popBackStack() },
                     onEditProfile = {
                         navController.navigate(AppRoute.SurvivorProfile.route)
@@ -751,12 +763,14 @@ fun AppNavHost(
                 SettingsScreen(
                     isVoiceOn = isVoiceDetectionEnabled,
                     isShockOn = isShockDetectionEnabled,
+                    isDemoOn = isDemoModeEnabled,
                     profileName = profileState.name,
                     profileGender = profileState.gender,
                     profileBirthDate = profileState.birthDate,
                     profileNotes = profileState.notes,
                     onVoiceToggle = onSetVoiceDetection,
                     onShockToggle = onSetShockDetection,
+                    onDemoToggle = onSetDemoMode,
                     onBack = { navController.popBackStack() },
                     onEditProfile = {
                         navController.navigate(AppRoute.SurvivorProfile.route)
