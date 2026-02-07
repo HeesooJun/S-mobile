@@ -380,7 +380,7 @@ fun RescuerPTTLinkScreen(
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
-                                text = "RSSI 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
+                                text = "거리 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
                                 color = AppColors.Gray400,
                                 fontSize = scaledSp(11, modalScale),
                                 fontWeight = FontWeight.Medium
