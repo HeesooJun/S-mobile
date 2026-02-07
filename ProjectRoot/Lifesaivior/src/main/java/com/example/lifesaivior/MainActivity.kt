@@ -3,7 +3,6 @@ package com.example.lifesaivior
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -33,6 +32,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.lifesaivior.core.service.RescueService
+import com.example.lifesaivior.core.settings.AppSettingsRepository
 import com.example.lifesaivior.presentation.AppViewModel
 import com.example.lifesaivior.presentation.UiEvent
 import com.example.lifesaivior.ui.theme.LifesaiviorTheme
@@ -279,10 +279,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshServices() {
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        val isDemoOn = prefs.getBoolean("demo_mode", false)
-        val isVoiceOn = prefs.getBoolean("voice_detection", false) || isDemoOn
-        val isShockOn = prefs.getBoolean("shock_detection", false) || isDemoOn
+        AppSettingsRepository.init(this)
+        val settings = AppSettingsRepository.snapshot(this)
+        if (settings.isSosBackgroundSuspended) {
+            stopService(Intent(this, VoiceService::class.java))
+            stopService(Intent(this, SensorService::class.java))
+            return
+        }
+        val isDemoOn = settings.isDemoModeEnabled
+        val isVoiceOn = settings.isVoiceDetectionEnabled || isDemoOn
+        val isShockOn = settings.isShockDetectionEnabled || isDemoOn
 
         if (isVoiceOn) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
