@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private val demoBeepLevelState = mutableStateOf(100)
     private val demoHighToneLevelState = mutableStateOf(100)
     private val demoVibrateLevelState = mutableStateOf(100)
+    private val demoEasLevelState = mutableStateOf(100)
 
     // 연속 클릭 방지 (시간 단축: 0.5초 -> 0.3초)
     private var lastVoiceToggleTime = 0L
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
                 demoBeepLevelState.value = settings.demoBeepLevel
                 demoHighToneLevelState.value = settings.demoHighToneLevel
                 demoVibrateLevelState.value = settings.demoVibrateLevel
+                demoEasLevelState.value = settings.demoEasLevel
             }
         }
 
@@ -76,6 +78,7 @@ class MainActivity : ComponentActivity() {
                     beepLevel = demoBeepLevelState.value,
                     highToneLevel = demoHighToneLevelState.value,
                     vibrateLevel = demoVibrateLevelState.value,
+                    easLevel = demoEasLevelState.value,
                     onBeepLevelChange = { level ->
                         demoBeepLevelState.value = level
                         AppSettingsRepository.setDemoBeepLevel(this, level)
@@ -87,6 +90,10 @@ class MainActivity : ComponentActivity() {
                     onVibrateLevelChange = { level ->
                         demoVibrateLevelState.value = level
                         AppSettingsRepository.setDemoVibrateLevel(this, level)
+                    },
+                    onEasLevelChange = { level ->
+                        demoEasLevelState.value = level
+                        AppSettingsRepository.setDemoEasLevel(this, level)
                     },
                     onBack = { showDemoDetailsState.value = false }
                 )
@@ -188,6 +195,7 @@ class MainActivity : ComponentActivity() {
         demoBeepLevelState.value = settings.demoBeepLevel
         demoHighToneLevelState.value = settings.demoHighToneLevel
         demoVibrateLevelState.value = settings.demoVibrateLevel
+        demoEasLevelState.value = settings.demoEasLevel
     }
 
     private fun startServicesIfEnabled() {

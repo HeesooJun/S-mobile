@@ -43,9 +43,11 @@ fun DemoSettingsScreen(
     beepLevel: Int,
     highToneLevel: Int,
     vibrateLevel: Int,
+    easLevel: Int,
     onBeepLevelChange: (Int) -> Unit,
     onHighToneLevelChange: (Int) -> Unit,
     onVibrateLevelChange: (Int) -> Unit,
+    onEasLevelChange: (Int) -> Unit,
     onBack: () -> Unit
 ) {
     val scale = LocalAppScale.current
@@ -98,6 +100,14 @@ fun DemoSettingsScreen(
                 label = "진동",
                 value = vibrateLevel,
                 onValueChange = onVibrateLevelChange,
+                enabled = enabled
+            )
+            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+            DemoLevelCard(
+                scale = scale,
+                label = "재난음",
+                value = easLevel,
+                onValueChange = onEasLevelChange,
                 enabled = enabled
             )
         }

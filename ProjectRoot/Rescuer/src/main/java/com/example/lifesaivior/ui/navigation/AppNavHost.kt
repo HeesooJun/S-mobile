@@ -315,6 +315,10 @@ fun AppNavHost(
         resetRssiFeedbackDefaults()
     }
     fun requestRescuerCall(survivor: SurvivorProfile) {
+        if (appState.directPeerIds.isEmpty()) {
+            Toast.makeText(context, "BLE mesh 연결이 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (callingTargetPeerId != null) {
             val pendingPeerId = callingTargetPeerId.orEmpty()
             if (pendingPeerId == survivor.peerId) {
