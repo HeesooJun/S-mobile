@@ -18,9 +18,9 @@ object ConnectionLifecycle {
         sendLeave()
         clearCaches("disconnect")
         stopRescueSignal()
+        disconnectBle()
         scope.launch {
             delay(delayMs)
-            disconnectBle()
             setDisconnecting(false)
         }
     }

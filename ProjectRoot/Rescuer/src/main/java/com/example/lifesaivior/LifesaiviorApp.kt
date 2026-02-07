@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.lifesaivior.core.model.ChatMessage
+import com.example.lifesaivior.presentation.AppViewModel
 import com.example.lifesaivior.presentation.BleDebugStats
 import com.example.lifesaivior.presentation.screen.BlackSaverScreen
 import com.example.lifesaivior.presentation.screen.PermissionViewModel
@@ -43,6 +44,7 @@ import kotlinx.coroutines.flow.SharedFlow
 
 @Composable
 fun LifesaiviorApp(
+    appViewModel: AppViewModel,
     hasPermissions: Boolean,
     batteryLevel: Int,
     isConnected: Boolean,
@@ -150,6 +152,7 @@ fun LifesaiviorApp(
         ) {
             // 1. 메인 앱 화면
             AppNavHost(
+                appViewModel = appViewModel,
                 batteryLevel = batteryLevel,
                 isConnected = isConnected,
                 connectedCount = connectedCount,

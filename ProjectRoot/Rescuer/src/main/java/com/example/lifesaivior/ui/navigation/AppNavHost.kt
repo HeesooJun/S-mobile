@@ -84,6 +84,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun AppNavHost(
+    appViewModel: AppViewModel,
     batteryLevel: Int,
     isConnected: Boolean,
     connectedCount: Int,
@@ -122,12 +123,10 @@ fun AppNavHost(
     val context = LocalContext.current
     val activity = context as? Activity
     val appContext = context.applicationContext
-    val appViewModel: AppViewModel = viewModel(
-        viewModelStoreOwner = context as ViewModelStoreOwner
-    )
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     val appState by appViewModel.uiState.collectAsState()
+    val autoConnectBlocked = appState.isAutoConnectBlocked
     var isSurvivorPowerSaving by rememberSaveable { mutableStateOf(false) }
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var pendingSosRoute by remember { mutableStateOf<String?>(null) }
@@ -627,7 +626,13 @@ fun AppNavHost(
         }
     }
 
-    LaunchedEffect(appState.survivors, backStackEntry?.destination?.route, isInCall) {
+    LaunchedEffect(
+        appState.survivors,
+        backStackEntry?.destination?.route,
+        isInCall,
+        isConnected,
+        pendingSosNavigation
+    ) {
         val peerIds = appState.survivors
             .map { it.peerId }
             .filter { it.isNotBlank() }
@@ -637,9 +642,9 @@ fun AppNavHost(
             survivorSignalTrackingReady = true
             return@LaunchedEffect
         }
-        val hasNewSurvivorSignal = (peerIds - knownSurvivorPeerIds).isNotEmpty()
+        val hasAnySurvivorSignal = peerIds.isNotEmpty()
         knownSurvivorPeerIds = peerIds
-        if (!hasNewSurvivorSignal || isInCall) return@LaunchedEffect
+        if (!hasAnySurvivorSignal || isInCall || !isConnected || pendingSosNavigation) return@LaunchedEffect
         val currentRoute = backStackEntry?.destination?.route
         val shouldAutoOpenDb =
             currentRoute == AppRoute.RescuerStandby.route ||
@@ -939,6 +944,7 @@ fun AppNavHost(
                 onPrev = { navController.popBackStack() },
                 onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
                 onSos = {
+                    onStartRescueSignal()
                     pendingSosNavigation = true
                     pendingSosRoute = AppRoute.SurvivorPTT.route
                     sosStartedAt = System.currentTimeMillis()
@@ -975,11 +981,13 @@ fun AppNavHost(
                 navController.popBackStack()
                 Unit
             }
-            LaunchedEffect(Unit) {
-                if (!isRescueSignalActive) {
+            LaunchedEffect(autoConnectBlocked, isRescueSignalActive) {
+                if (!isRescueSignalActive && !autoConnectBlocked) {
                     onStartRescueSignal()
                 }
-                onStartAutoConnect()
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             BackHandler {
                 stopAndBack()
@@ -992,8 +1000,10 @@ fun AppNavHost(
         }
 
         composable(AppRoute.SurvivorPTT.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
+            LaunchedEffect(autoConnectBlocked) {
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             val pendingRequest = if (autoAcceptCalls) {
                 null
@@ -1171,12 +1181,18 @@ fun AppNavHost(
                 meshPeerCount = meshPeerCount,
                 onPrev = { activity?.finish() },
                 onGoPTT = { navigateSingleRoute(AppRoute.RescuerPTT.route) },
-                onSos = { navigateSingleRoute(AppRoute.RescuerEmergency.route) }
+                onSos = {
+                    onStartRescueSignal()
+                    pendingSosNavigation = true
+                    pendingSosRoute = AppRoute.RescuerSurvivorDb.route
+                    sosStartedAt = System.currentTimeMillis()
+                    navigateSingleRoute(AppRoute.RescuerEmergency.route)
+                }
             )
         }
 
         composable(AppRoute.RescuerPTT.route) {
-            LaunchedEffect(Unit) {
+            LaunchedEffect(autoConnectBlocked) {
                 Log.i(
                     "NavHostPTT",
                     "PTT enter selected=$selectedTargetPeerId callPeer=${appState.callPeerId} inCall=$isInCall"
@@ -1185,7 +1201,9 @@ fun AppNavHost(
                 lastUwbProbePeerId = null
                 uwbProbeStartedAtMs = 0L
                 allowRttFallbackForUwbTarget = false
-                onStartAutoConnect()
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             val distanceState by distanceViewModel.uiState.collectAsState()
             val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
@@ -1581,8 +1599,10 @@ fun AppNavHost(
         }
 
         composable(AppRoute.RescuerSurvivorDb.route) {
-            LaunchedEffect(Unit) {
-                onStartAutoConnect()
+            LaunchedEffect(autoConnectBlocked) {
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             val dbDistanceState by distanceViewModel.uiState.collectAsState()
             val dbDistanceTargetPeerId = selectedTargetPeerId ?: targetSurvivor?.peerId ?: appState.callPeerId
@@ -1615,6 +1635,7 @@ fun AppNavHost(
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
                 onOpenMeshMap = { navigateSingleRoute(AppRoute.RescuerMeshMap.route) },
+                isDisconnecting = appState.isDisconnecting,
                 selectedTargetPeerId = selectedTargetPeerId,
                 onSelectTarget = { survivor ->
                     selectedTargetPeerId = survivor.peerId
@@ -1673,11 +1694,13 @@ fun AppNavHost(
                 navController.popBackStack()
                 Unit
             }
-            LaunchedEffect(Unit) {
-                if (!isRescueSignalActive) {
+            LaunchedEffect(autoConnectBlocked, isRescueSignalActive) {
+                if (!isRescueSignalActive && !autoConnectBlocked) {
                     onStartRescueSignal()
                 }
-                onStartAutoConnect()
+                if (!autoConnectBlocked) {
+                    onStartAutoConnect()
+                }
             }
             BackHandler {
                 stopAndBack()
