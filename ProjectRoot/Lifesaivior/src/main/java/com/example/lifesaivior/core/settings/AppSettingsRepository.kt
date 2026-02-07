@@ -15,6 +15,7 @@ data class AppSettingsState(
     val demoBeepLevel: Int = DEFAULT_DEMO_LEVEL,
     val demoHighToneLevel: Int = DEFAULT_DEMO_LEVEL,
     val demoVibrateLevel: Int = DEFAULT_DEMO_LEVEL,
+    val demoEasLevel: Int = DEFAULT_DEMO_LEVEL,
     val isSosBackgroundSuspended: Boolean = false,
     val sosBackupVoiceDetection: Boolean = false,
     val sosBackupShockDetection: Boolean = false,
@@ -87,6 +88,14 @@ object AppSettingsRepository {
         updateState(sharedPrefs)
     }
 
+    fun setDemoEasLevel(context: Context, level: Int) {
+        val sharedPrefs = ensurePrefs(context)
+        sharedPrefs.edit()
+            .putInt(KEY_DEMO_EAS_LEVEL, level.coerceIn(0, 100))
+            .apply()
+        updateState(sharedPrefs)
+    }
+
     fun setSosBackgroundSuspended(
         context: Context,
         suspended: Boolean,
@@ -148,6 +157,7 @@ object AppSettingsRepository {
             demoBeepLevel = sharedPrefs.getInt(KEY_DEMO_BEEP_LEVEL, DEFAULT_DEMO_LEVEL).coerceIn(0, 100),
             demoHighToneLevel = sharedPrefs.getInt(KEY_DEMO_HIGH_TONE_LEVEL, DEFAULT_DEMO_LEVEL).coerceIn(0, 100),
             demoVibrateLevel = sharedPrefs.getInt(KEY_DEMO_VIBRATE_LEVEL, DEFAULT_DEMO_LEVEL).coerceIn(0, 100),
+            demoEasLevel = sharedPrefs.getInt(KEY_DEMO_EAS_LEVEL, DEFAULT_DEMO_LEVEL).coerceIn(0, 100),
             isSosBackgroundSuspended = sharedPrefs.getBoolean(KEY_SOS_BG_SUSPENDED, false),
             sosBackupVoiceDetection = sharedPrefs.getBoolean(KEY_SOS_BACKUP_VOICE, false),
             sosBackupShockDetection = sharedPrefs.getBoolean(KEY_SOS_BACKUP_SHOCK, false),
@@ -161,6 +171,7 @@ object AppSettingsRepository {
     const val KEY_DEMO_BEEP_LEVEL = "demo_beep_level"
     const val KEY_DEMO_HIGH_TONE_LEVEL = "demo_high_tone_level"
     const val KEY_DEMO_VIBRATE_LEVEL = "demo_vibrate_level"
+    const val KEY_DEMO_EAS_LEVEL = "demo_eas_level"
     const val KEY_SOS_BG_SUSPENDED = "sos_background_suspended"
     const val KEY_SOS_BACKUP_VOICE = "sos_backup_voice_detection"
     const val KEY_SOS_BACKUP_SHOCK = "sos_backup_shock_detection"

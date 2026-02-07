@@ -799,9 +799,11 @@ fun AppNavHost(
                     beepLevel = appState.demoBeepLevel,
                     highToneLevel = appState.demoHighToneLevel,
                     vibrateLevel = appState.demoVibrateLevel,
+                    easLevel = appState.demoEasLevel,
                     onBeepLevelChange = { appViewModel.setDemoBeepLevel(it) },
                     onHighToneLevelChange = { appViewModel.setDemoHighToneLevel(it) },
                     onVibrateLevelChange = { appViewModel.setDemoVibrateLevel(it) },
+                    onEasLevelChange = { appViewModel.setDemoEasLevel(it) },
                     onBack = { navController.popBackStack() }
                 )
             }
