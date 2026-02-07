@@ -110,6 +110,7 @@ class SensorService : Service(), SensorEventListener {
         prefs.edit()
             .putBoolean("shock_detection", false)
             .putBoolean("voice_detection", false) // 음성 감지도 끔
+            .putBoolean("demo_mode", false)
             .apply()
 
         // 1. 센서 해제
