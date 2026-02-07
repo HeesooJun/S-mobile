@@ -61,6 +61,7 @@ fun RescuerSurvivorDbScreen(
     peerBatteryMap: Map<String, Int> = emptyMap(),
     onDisconnectClick: () -> Unit,
     onOpenMeshMap: () -> Unit,
+    isDisconnecting: Boolean = false,
     selectedTargetPeerId: String? = null,
     onSelectTarget: (SurvivorProfile) -> Unit = {},
     isLive: Boolean = true,
@@ -162,9 +163,10 @@ fun RescuerSurvivorDbScreen(
                                 )
                             }
                             ActionPill(
-                                label = "연결 해제",
+                                label = if (isDisconnecting) "연결 해제 중" else "연결 해제",
                                 tint = neonRed,
                                 scale = scale,
+                                enabled = !isDisconnecting,
                                 onClick = onDisconnectClick
                             )
                         }
@@ -355,17 +357,19 @@ private fun ActionPill(
     label: String,
     tint: Color,
     scale: Float,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val resolvedAlpha = if (enabled) 1f else 0.45f
     Surface(
-        color = tint.copy(alpha = 0.12f),
+        color = tint.copy(alpha = 0.12f * resolvedAlpha),
         shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.4f)),
-        modifier = Modifier.clickable(onClick = onClick)
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.4f * resolvedAlpha)),
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
     ) {
         Text(
             text = label,
-            color = tint,
+            color = tint.copy(alpha = resolvedAlpha),
             fontSize = scaledSp(11, scale),
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = scaledDp(12, scale), vertical = scaledDp(7, scale))
