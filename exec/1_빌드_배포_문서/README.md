@@ -32,9 +32,15 @@ adb install -r .\lifesaivior.apk
 adb install -r .\rescuer.apk
 ```
 
-ADB가 인식되지 않으면 SDK 폴더의 `platform-tools` 경로에서 실행:
+ADB가 인식되지 않으면 Android SDK의 `platform-tools` 경로에서 실행:
 ```powershell
-C:\Users\Jun\AppData\Local\Android\Sdk\platform-tools\adb.exe devices
+# Windows (기본 경로)
+$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe devices
+
+# 환경 변수 사용 시
+$env:ANDROID_HOME\platform-tools\adb.exe devices
+# 또는
+$env:ANDROID_SDK_ROOT\platform-tools\adb.exe devices
 ```
 
 ## 빌드 환경 및 버전 (프로젝트 기준)
