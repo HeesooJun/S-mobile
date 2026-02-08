@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.lifesaivior.R
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.ui.components.chat.AutoScrollChatList
@@ -36,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val AUTO_RECORDING_DURATION_MS = 9000L
+private const val VOICE_PREFIX = "[voice] "
 
 @Composable
 fun RescueChatContent(
@@ -61,6 +63,58 @@ fun RescueChatContent(
 
     var debugClickCount by remember { mutableStateOf(0) }
     var isDebugMode by remember { mutableStateOf(false) }
+    val baselineMessageKeys = remember { mutableSetOf<String>() }
+    val playedVoiceKeys = remember { mutableSetOf<String>() }
+    val pendingAutoPlayKeys = remember { ArrayDeque<String>() }
+    var autoPlayKey by remember { mutableStateOf<String?>(null) }
+    var baselineInitialized by remember { mutableStateOf(false) }
+
+    fun advanceAutoPlayQueue() {
+        if (autoPlayKey != null) return
+        if (pendingAutoPlayKeys.isNotEmpty()) {
+            autoPlayKey = pendingAutoPlayKeys.removeFirst()
+        }
+    }
+
+    fun onAutoPlayComplete(messageKey: String) {
+        if (autoPlayKey != messageKey) return
+        playedVoiceKeys.add(messageKey)
+        autoPlayKey = null
+        advanceAutoPlayQueue()
+    }
+
+    LaunchedEffect(messages) {
+        if (!baselineInitialized) {
+            messages.forEach { message ->
+                val key = buildMessageKey(message)
+                baselineMessageKeys.add(key)
+                if (!message.isMine && isVoiceMessage(message)) {
+                    playedVoiceKeys.add(key)
+                }
+            }
+            baselineInitialized = true
+        }
+        messages.forEach { message ->
+            if (message.isMine) return@forEach
+            if (!isVoiceMessage(message)) return@forEach
+            val key = buildMessageKey(message)
+            if (playedVoiceKeys.contains(key)) return@forEach
+            if (autoPlayKey == key) return@forEach
+            if (pendingAutoPlayKeys.contains(key)) return@forEach
+            pendingAutoPlayKeys.addLast(key)
+        }
+        advanceAutoPlayQueue()
+    }
+
+    val newIncomingCount = remember(messages, baselineInitialized) {
+        if (!baselineInitialized) {
+            0
+        } else {
+            messages.count { message ->
+                !message.isMine && !baselineMessageKeys.contains(buildMessageKey(message))
+            }
+        }
+    }
 
     // 메인 컨텐츠 영역
     Row(
@@ -72,57 +126,70 @@ fun RescueChatContent(
         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header - 타이틀과 인원 아이콘 정렬, 설정 버튼 제거
-                Row(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.Center
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = roomTitle,
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                debugClickCount++
-                                if (debugClickCount >= 5) isDebugMode = true
-                            }
-                        )
-                        AnimatedVisibility(
-                            visible = isDebugMode,
-                            enter = expandVertically(),
-                            exit = shrinkVertically()
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            Row(
-                                modifier = Modifier.padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Text(
+                                text = roomTitle,
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    debugClickCount++
+                                    if (debugClickCount >= 5) isDebugMode = true
+                                }
+                            )
+                            AnimatedVisibility(
+                                visible = isDebugMode,
+                                enter = expandVertically(),
+                                exit = shrinkVertically()
                             ) {
-                                DebugBadge(text = "보안", onClick = onShowSignatureLog)
-                                DebugBadge(text = "DB", onClick = onShowDbLog)
-                                DebugBadge(text = "TLV", onClick = onSendProfileTest)
+                                Row(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    DebugBadge(text = "보안", onClick = onShowSignatureLog)
+                                    DebugBadge(text = "DB", onClick = onShowDbLog)
+                                    DebugBadge(text = "TLV", onClick = onSendProfileTest)
+                                }
                             }
                         }
+
+                        // 인원 아이콘 (높이 타이틀에 맞춤)
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "People",
+                            tint = if (showInwon) Color(0xFF3BBF8C) else Color.White,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { showInwon = !showInwon }
+                        )
                     }
 
-                    // 인원 아이콘 (높이 타이틀에 맞춤)
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "People",
-                        tint = if (showInwon) Color(0xFF3BBF8C) else Color.White,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { showInwon = !showInwon }
-                    )
+                    if (newIncomingCount > 0) {
+                        ChatUnreadBadge(
+                            count = newIncomingCount,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .zIndex(2f)
+                        )
+                    }
                 }
 
                 // Chat List - 배경 클릭 시 모달 닫기 기능 추가
@@ -143,9 +210,15 @@ fun RescueChatContent(
                             .padding(horizontal = 16.dp),
                         verticalSpacing = 8.dp
                     ) { message ->
+                        val messageKey = remember(message) { buildMessageKey(message) }
                         // 메시지 버블 클릭 시에는 닫히지 않도록
                         Box(modifier = Modifier.clickable(enabled = false) { }) {
-                            ChatMessageBubble(message = message)
+                            ChatMessageBubble(
+                                message = message,
+                                messageKey = messageKey,
+                                autoPlayTargetKey = autoPlayKey,
+                                onAutoPlayComplete = { onAutoPlayComplete(it) }
+                            )
                         }
                     }
                 }
@@ -293,4 +366,35 @@ private fun DebugBadge(text: String, onClick: () -> Unit) {
     ) {
         Text(text = text, color = Color.Gray, fontSize = 9.sp)
     }
+}
+
+@Composable
+private fun ChatUnreadBadge(count: Int, modifier: Modifier = Modifier) {
+    val safeCount = count.coerceAtMost(99)
+    val label = if (count > 99) "99+" else safeCount.toString()
+    Box(
+        modifier = modifier
+            .padding(top = 2.dp, end = 2.dp)
+            .size(20.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFE53935)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+private fun buildMessageKey(message: ChatMessage): String {
+    val sender = message.senderPeerId.orEmpty()
+    val recipient = message.recipientPeerId.orEmpty()
+    return "${message.timestamp}-$sender-$recipient-${message.text.hashCode()}"
+}
+
+private fun isVoiceMessage(message: ChatMessage): Boolean {
+    return message.text.startsWith(VOICE_PREFIX)
 }

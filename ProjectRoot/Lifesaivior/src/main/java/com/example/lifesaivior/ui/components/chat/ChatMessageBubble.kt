@@ -35,7 +35,13 @@ import kotlinx.coroutines.delay
 private const val VOICE_PREFIX = "[voice] "
 
 @Composable
-fun ChatMessageBubble(message: ChatMessage, senderName: String? = null) {
+fun ChatMessageBubble(
+    message: ChatMessage,
+    messageKey: String,
+    senderName: String? = null,
+    autoPlayTargetKey: String? = null,
+    onAutoPlayComplete: (String) -> Unit = {}
+) {
     val isMine = message.isMine
 
     // 피그마 디자인 색상 반영
@@ -68,7 +74,14 @@ fun ChatMessageBubble(message: ChatMessage, senderName: String? = null) {
             horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
         ) {
             if (voicePath != null && voicePath.isNotBlank()) {
-                AudioMessageBubble(path = voicePath, isMine = isMine, backgroundColor = bubbleColor)
+                val shouldAutoPlay = !isMine && autoPlayTargetKey == messageKey
+                AudioMessageBubble(
+                    path = voicePath,
+                    isMine = isMine,
+                    backgroundColor = bubbleColor,
+                    autoPlay = shouldAutoPlay,
+                    onAutoPlayComplete = { onAutoPlayComplete(messageKey) }
+                )
             } else {
                 Box(
                     modifier = Modifier
@@ -95,11 +108,18 @@ fun ChatMessageBubble(message: ChatMessage, senderName: String? = null) {
 }
 
 @Composable
-private fun AudioMessageBubble(path: String, isMine: Boolean, backgroundColor: Color) {
+private fun AudioMessageBubble(
+    path: String,
+    isMine: Boolean,
+    backgroundColor: Color,
+    autoPlay: Boolean,
+    onAutoPlayComplete: () -> Unit
+) {
     var isReady by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var durationMs by remember { mutableStateOf(0) }
     var positionMs by remember { mutableStateOf(0) }
+    var autoPlayActive by remember { mutableStateOf(false) }
 
     val mediaPlayer = remember(path) {
         MediaPlayer().apply {
@@ -122,6 +142,10 @@ private fun AudioMessageBubble(path: String, isMine: Boolean, backgroundColor: C
             } catch (_: Exception) {
             }
             isPlaying = false
+            if (autoPlayActive) {
+                autoPlayActive = false
+                onAutoPlayComplete()
+            }
         }
     }
 
@@ -130,6 +154,10 @@ private fun AudioMessageBubble(path: String, isMine: Boolean, backgroundColor: C
             isPlaying = false
             positionMs = durationMs
             VoicePlaybackController.clear(stopSelf)
+            if (autoPlayActive) {
+                autoPlayActive = false
+                onAutoPlayComplete()
+            }
         }
         onDispose {
             VoicePlaybackController.clear(stopSelf)
@@ -146,6 +174,19 @@ private fun AudioMessageBubble(path: String, isMine: Boolean, backgroundColor: C
             positionMs = mediaPlayer.currentPosition
             delay(200)
         }
+    }
+    LaunchedEffect(autoPlay, isReady) {
+        if (!autoPlay) return@LaunchedEffect
+        if (!isReady) {
+            onAutoPlayComplete()
+            return@LaunchedEffect
+        }
+        if (isPlaying) return@LaunchedEffect
+        VoicePlaybackController.requestPlay(stopSelf)
+        runCatching { mediaPlayer.seekTo(0) }
+        mediaPlayer.start()
+        autoPlayActive = true
+        isPlaying = true
     }
 
     Box(
