@@ -20,6 +20,7 @@ import com.example.lifesaivior.ai.stt.EmergencyIntentClassifierKorean
 import com.example.lifesaivior.ai.stt.VoiceTriggerDetector
 import com.example.lifesaivior.core.settings.AppSettingsRepository
 import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 class VoiceService : Service() {
@@ -250,6 +251,11 @@ class VoiceService : Service() {
         Log.d("VoiceService", "🔴 음성 서비스 종료 (AI 해제는 백그라운드에서 진행)")
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        BackgroundMonitorReceiver.schedule(this)
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun playEasAlertAsync() {
         Thread {
             try {
@@ -262,7 +268,8 @@ class VoiceService : Service() {
                 val stream = AudioManager.STREAM_ALARM
                 val originalVolume = audioManager.getStreamVolume(stream)
                 val maxVolume = audioManager.getStreamMaxVolume(stream)
-                audioManager.setStreamVolume(stream, maxVolume, 0)
+                val targetVolume = ((level / 100.0) * maxVolume).roundToInt().coerceIn(0, maxVolume)
+                audioManager.setStreamVolume(stream, targetVolume, 0)
 
                 val freq1 = 853.0
                 val freq2 = 960.0

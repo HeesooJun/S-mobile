@@ -213,6 +213,9 @@ class RealTimeCallManager(
             ConnectionLog.add("Call", "no transport selected")
             return CallTransportType.NONE
         }
+        if (wifiAwareEnabled) {
+            wifiAwareRanger.setRttEnabled(possible == CallTransportType.WIFI_AWARE)
+        }
         startCallAttemptSequence()
         return possible
     }
@@ -245,6 +248,9 @@ class RealTimeCallManager(
                     wifiDirectRanger.stop()
                 }
             }
+        }
+        if (wifiAwareEnabled) {
+            wifiAwareRanger.setRttEnabled(false)
         }
         if (wifiAwareEnabled) {
             wifiAwareRanger.configureCallContext(null, null)
