@@ -23,6 +23,7 @@ import androidx.core.app.NotificationCompat
 import com.example.lifesaivior.R
 import com.example.lifesaivior.core.settings.AppSettingsRepository
 import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -262,6 +263,11 @@ class SensorService : Service(), SensorEventListener {
         Log.d("SensorService", "🔴 센서 서비스 종료")
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        BackgroundMonitorReceiver.schedule(this)
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun startMonitoringSensors() {
         if (isDestroyed || isMonitoringActive) return
         accelerometer?.also { sensor ->
@@ -292,7 +298,8 @@ class SensorService : Service(), SensorEventListener {
                 val stream = AudioManager.STREAM_ALARM
                 val originalVolume = audioManager.getStreamVolume(stream)
                 val maxVolume = audioManager.getStreamMaxVolume(stream)
-                audioManager.setStreamVolume(stream, maxVolume, 0)
+                val targetVolume = ((level / 100.0) * maxVolume).roundToInt().coerceIn(0, maxVolume)
+                audioManager.setStreamVolume(stream, targetVolume, 0)
 
                 val freq1 = 853.0
                 val freq2 = 960.0

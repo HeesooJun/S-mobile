@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
                         AppSettingsRepository.setVoiceDetection(this, newValue)
 
                         if (newValue) {
+                            clearSosSuspensionIfNeeded()
                             // 켜기: 준비 과정 수행
                             stopAllServicesAsync() // 기존 서비스 정리
                             checkAndRequestPermissions()
@@ -138,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         AppSettingsRepository.setShockDetection(this, newValue)
 
                         if (newValue) {
+                            clearSosSuspensionIfNeeded()
                             stopAllServicesAsync()
                             Toast.makeText(this, "준비됨. 화면을 끄면 시작됩니다.", Toast.LENGTH_SHORT).show()
                         } else {
@@ -238,6 +240,13 @@ class MainActivity : ComponentActivity() {
         } else {
             startService(intent)
         }
+    }
+
+    private fun clearSosSuspensionIfNeeded() {
+        val settings = AppSettingsRepository.snapshot(this)
+        if (!settings.isSosBackgroundSuspended) return
+        AppSettingsRepository.setSosBackgroundSuspended(this, false)
+        AppSettingsRepository.clearSosBackup(this)
     }
 
     private fun checkOverlayPermission() {
