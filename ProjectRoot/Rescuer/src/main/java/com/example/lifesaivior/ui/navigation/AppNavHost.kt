@@ -1243,25 +1243,10 @@ fun AppNavHost(
                 ?: targetSurvivor?.peerId
                 ?: appState.callPeerId
             val pttTargetSupportsUwb = resolvePeerSupportsUwb(pttTargetPeerId)
-            val localSupportsUwb = appViewModel.isUwbSupportedLocally()
             val canAttemptUwbOnDetail =
                 appViewModel.isUwbRuntimeAvailableLocally() &&
+                    pttTargetSupportsUwb &&
                     !pttTargetPeerId.isNullOrBlank()
-            LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, localSupportsUwb, pttTargetSupportsUwb) {
-                val hasTarget = !pttTargetPeerId.isNullOrBlank()
-                if (canAttemptUwbOnDetail && hasTarget) {
-                    // 상세 화면에서는 UWB 지원 여부가 아직 확인되지 않아도 세션을 시도하도록 강제한다.
-                    distanceViewModel.setUwbCapability(
-                        localSupported = localSupportsUwb,
-                        peerSupported = true
-                    )
-                } else {
-                    distanceViewModel.setUwbCapability(
-                        localSupported = localSupportsUwb,
-                        peerSupported = hasTarget && pttTargetSupportsUwb
-                    )
-                }
-            }
             LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, isInCall) {
                 Log.i(
                     "NavHostPTT",
