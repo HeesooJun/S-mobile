@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -41,6 +43,7 @@ fun EmergencyBeaconScreen(
     batteryLevel: Int,
     uiState: EmergencyBeaconUiState,
     onPrev: () -> Unit,
+    onRequestPowerSaveScreen: () -> Unit
 ) {
     val scale = LocalAppScale.current
 
@@ -132,7 +135,24 @@ fun EmergencyBeaconScreen(
                 fontSize = scaledSp(12, scale)
             )
 
-            Spacer(modifier = Modifier.height(scaledDp(36, scale)))
+            Spacer(modifier = Modifier.height(scaledDp(28, scale)))
+
+            Button(
+                onClick = { onRequestPowerSaveScreen() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AppColors.Gray800,
+                    contentColor = AppColors.White
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "절전 화면 전환",
+                    fontSize = scaledSp(11, scale),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(scaledDp(18, scale)))
             Spacer(modifier = Modifier.weight(1f))
 
             // [추가됨] 좌측 하단 뒤로가기 버튼

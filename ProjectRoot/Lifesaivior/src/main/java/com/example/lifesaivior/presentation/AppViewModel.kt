@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.location.LocationManager
 import android.net.wifi.WifiManager
 import android.media.AudioManager
@@ -209,6 +211,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             add(Manifest.permission.UWB_RANGING)
         }
+        add(Manifest.permission.CAMERA)
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         add(Manifest.permission.RECORD_AUDIO)
@@ -229,6 +232,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val profileDao by lazy { AppDatabase.getInstance(app).profileDao() }
 
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val cameraManager = app.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
     private val alarmVolumeLock = Any()
     @Volatile private var alarmVolumeBackup: Int? = null
@@ -239,6 +243,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var lastBeepEnqueueAtMs: Long = 0L
     @Volatile private var lastHighEnqueueAtMs: Long = 0L
     private var alertPlaybackJob: Job? = null
+    private var torchCameraId: String? = null
+    private var torchSosJob: Job? = null
+    @Volatile private var isTorchSosEnabled: Boolean = false
 
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
 
@@ -1979,6 +1986,84 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun ensureTorchReady(): String? {
+        val manager = cameraManager ?: run {
+            _uiEvents.tryEmit(UiEvent.Toast("손전등을 사용할 수 없습니다."))
+            return null
+        }
+        if (ContextCompat.checkSelfPermission(app, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            _uiEvents.tryEmit(UiEvent.Toast("손전등 사용을 위해 카메라 권한이 필요합니다."))
+            return null
+        }
+        val cameraId = resolveTorchCameraId(manager) ?: run {
+            _uiEvents.tryEmit(UiEvent.Toast("플래시가 없는 기기입니다."))
+            return null
+        }
+        return cameraId
+    }
+
+    private fun resolveTorchCameraId(manager: CameraManager): String? {
+        torchCameraId?.let { return it }
+        val cameraId = runCatching {
+            manager.cameraIdList.firstOrNull { id ->
+                manager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        }.getOrNull()
+        torchCameraId = cameraId
+        return cameraId
+    }
+
+    private fun setTorchEnabledInternal(cameraId: String, enabled: Boolean): Boolean {
+        return runCatching {
+            cameraManager?.setTorchMode(cameraId, enabled)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun disableTorchSilently() {
+        val manager = cameraManager ?: return
+        val cameraId = torchCameraId ?: resolveTorchCameraId(manager) ?: return
+        runCatching { manager.setTorchMode(cameraId, false) }
+    }
+
+    private fun startTorchSos(): Boolean {
+        val cameraId = ensureTorchReady() ?: return false
+        stopTorchSosInternal(turnOff = true)
+        torchSosJob = viewModelScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                playTorchSosSequence(cameraId)
+            }
+        }
+        isTorchSosEnabled = true
+        return true
+    }
+
+    private fun stopTorchSosInternal(turnOff: Boolean) {
+        torchSosJob?.cancel()
+        torchSosJob = null
+        isTorchSosEnabled = false
+        if (turnOff) {
+            disableTorchSilently()
+        }
+    }
+
+    private suspend fun playTorchSosSequence(cameraId: String) {
+        suspend fun blink(onMs: Long, offMs: Long) {
+            setTorchEnabledInternal(cameraId, true)
+            delay(onMs)
+            setTorchEnabledInternal(cameraId, false)
+            delay(offMs)
+        }
+
+        repeat(2) { blink(TORCH_SOS_DOT_MS, TORCH_SOS_GAP_MS) }
+        blink(TORCH_SOS_DOT_MS, TORCH_SOS_LETTER_GAP_MS)
+        repeat(2) { blink(TORCH_SOS_DASH_MS, TORCH_SOS_GAP_MS) }
+        blink(TORCH_SOS_DASH_MS, TORCH_SOS_LETTER_GAP_MS)
+        repeat(2) { blink(TORCH_SOS_DOT_MS, TORCH_SOS_GAP_MS) }
+        blink(TORCH_SOS_DOT_MS, TORCH_SOS_WORD_GAP_MS)
+    }
+
     private fun getVibrator(): Vibrator? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val manager = app.getSystemService(VibratorManager::class.java)
@@ -2247,6 +2332,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun triggerLocalBeep(durationMs: Int = 1_500, intensity: Int = 2) {
+        enqueueAlertTone(
+            AlertToneRequest(
+                command = DeviceControlCommand.BEEP,
+                durationMs = durationMs,
+                intensity = intensity
+            )
+        )
+    }
+
+    fun triggerLocalVibrate(durationMs: Int = 1_500, intensity: Int = 2) {
+        triggerLocalVibration(durationMs, intensity)
+    }
+
+    fun triggerLocalHighTone(
+        durationMs: Int = 1_500,
+        intensity: Int = 2,
+        frequencyHz: Int? = null
+    ) {
+        enqueueAlertTone(
+            AlertToneRequest(
+                command = DeviceControlCommand.HIGH_TONE,
+                durationMs = durationMs,
+                intensity = intensity,
+                frequencyHz = frequencyHz ?: DEFAULT_HIGH_TONE_HZ
+            )
+        )
+    }
+
+    fun stopLocalAlerts() {
+        stopAllRemoteAlerts()
+    }
+
+    fun setTorchSosEnabled(enabled: Boolean): Boolean {
+        return if (enabled) {
+            startTorchSos()
+        } else {
+            stopTorchSosInternal(turnOff = true)
+            true
+        }
+    }
+
+    fun isTorchSosEnabled(): Boolean = isTorchSosEnabled
+
     fun updateLocalPowerSavingState(enabled: Boolean) {
         if (localPowerSavingEnabled == enabled) return
         localPowerSavingEnabled = enabled
@@ -2360,6 +2489,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         const val ALERT_GAP_MS = 150L
         const val MAX_ALERT_QUEUE_SIZE = 10
         const val ALERT_REPEAT_WINDOW_MS = 4_000L
+        const val TORCH_SOS_DOT_MS = 150L
+        const val TORCH_SOS_DASH_MS = 450L
+        const val TORCH_SOS_GAP_MS = 150L
+        const val TORCH_SOS_LETTER_GAP_MS = 450L
+        const val TORCH_SOS_WORD_GAP_MS = 1_050L
     }
 
     override fun onCleared() {
@@ -2367,6 +2501,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         stopAllRemoteAlerts()
+        stopTorchSosInternal(turnOff = true)
         toneGenerator.release()
         if (wifiAwareEnabled) {
             wifiAwareRanger.stop()
