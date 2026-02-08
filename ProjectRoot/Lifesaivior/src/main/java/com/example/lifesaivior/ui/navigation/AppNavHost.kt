@@ -15,7 +15,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,8 +35,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStoreOwner
@@ -129,6 +132,10 @@ fun AppNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scale = LocalAppScale.current
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val bottomBarHeight = scaledDp(58, scale)
+    val bottomBarHeightPx = with(density) { bottomBarHeight.toPx() }
+    val minSwipeDistancePx = with(density) { scaledDp(72, scale).toPx() }
     val appContext = context.applicationContext
     val appState by appViewModel.uiState.collectAsState()
     val autoConnectBlocked = appState.isAutoConnectBlocked
@@ -160,15 +167,20 @@ fun AppNavHost(
     }
     val liveAwareRttMeters by appViewModel.wifiAwareRanger.rttDistance.collectAsState()
     val awareLinkReady by appViewModel.wifiAwareRanger.isConnectionReady.collectAsState()
-    LaunchedEffect(isInCall) {
-        // Disable RTT during call to avoid NDP/RTT interference.
-        appViewModel.wifiAwareRanger.setRttEnabled(!isInCall)
+    LaunchedEffect(isInCall, callDebugState.activeTransport, callDebugState.wifiAware.isReady) {
+        val enableRtt =
+            isInCall &&
+                callDebugState.activeTransport == CallTransportType.WIFI_AWARE &&
+                !callDebugState.wifiAware.isReady
+        appViewModel.wifiAwareRanger.setRttEnabled(enableRtt)
     }
 
     val profileStore = remember(context) { ProfileStore(context) }
     val profileState by profileStore.profileFlow.collectAsState(initial = SurvivorProfile())
     var isPowerSaving by rememberSaveable { mutableStateOf(false) }
-    var pendingSosNavigation by remember { mutableStateOf(false) }
+    var pendingSosNavigation by rememberSaveable { mutableStateOf(false) }
+    var pendingEmergencyNavigation by remember { mutableStateOf(false) }
+    var autoSosStandbyFlow by remember { mutableStateOf(false) }
     var sosStartedAt by remember { mutableStateOf(0L) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
@@ -235,6 +247,10 @@ fun AppNavHost(
         val targetRoute = swipeRoutes.getOrNull(currentIndex + delta) ?: return@swipe
         navigateBottomTab(targetRoute)
     }
+    fun requestEmergencyNavigation() {
+        if (pendingEmergencyNavigation) return
+        pendingEmergencyNavigation = true
+    }
     fun triggerAutoSosFeedback() {
         runCatching {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -278,13 +294,27 @@ fun AppNavHost(
         val trigger = pendingAutoSos ?: return@LaunchedEffect
         sttEnabled = true
         sttResetToken = trigger.triggeredAtMs
-        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        autoSosStandbyFlow = true
+        pendingSosNavigation = false
+        sosStartedAt = 0L
+        val currentRoute = backStackEntry?.destination?.route
         if (currentRoute != AppRoute.SurvivorStandby.route) {
             navController.navigate(AppRoute.SurvivorStandby.route) {
                 launchSingleTop = true
             }
         }
         appViewModel.consumeAutoSosTrigger()
+    }
+
+    LaunchedEffect(pendingEmergencyNavigation, backStackEntry) {
+        if (!pendingEmergencyNavigation) return@LaunchedEffect
+        val currentRoute = backStackEntry?.destination?.route
+        if (currentRoute != AppRoute.SurvivorEmergency.route) {
+            navController.navigate(AppRoute.SurvivorEmergency.route) {
+                launchSingleTop = true
+            }
+        }
+        pendingEmergencyNavigation = false
     }
 
     LaunchedEffect(backStackEntry) {
@@ -317,33 +347,39 @@ fun AppNavHost(
                 delay(minSosDurationMs - elapsed)
             }
             pendingSosNavigation = false
+            autoSosStandbyFlow = false
             navController.navigate(AppRoute.SurvivorPTT.route)
         }
     }
 
     LaunchedEffect(isConnected, isRescueSignalActive, backStackEntry) {
-        val currentRoute = backStackEntry?.destination?.route
-        if (isRescueSignalActive && !isConnected) {
-            val targetRoute = AppRoute.SurvivorEmergency.route
+        val current = backStackEntry?.destination?.route
+        if (!isRescueSignalActive) {
+            autoSosStandbyFlow = false
+            return@LaunchedEffect
+        }
+        if (autoSosStandbyFlow) return@LaunchedEffect
+        if (!isConnected) {
             if (!pendingSosNavigation) {
                 pendingSosNavigation = true
-                sosStartedAt = System.currentTimeMillis()
-            }
-            if (currentRoute != targetRoute) {
-                navController.navigate(targetRoute) {
-                    if (currentRoute == AppRoute.SurvivorPTT.route) {
-                        popUpTo(currentRoute) { inclusive = true }
-                    } else {
-                        launchSingleTop = true
-                    }
+                if (sosStartedAt == 0L) {
+                    sosStartedAt = System.currentTimeMillis()
                 }
+            }
+            requestEmergencyNavigation()
+            return@LaunchedEffect
+        }
+        if (current !in footerEnabledRoutes && !pendingSosNavigation) {
+            pendingSosNavigation = true
+            if (sosStartedAt == 0L) {
+                sosStartedAt = System.currentTimeMillis()
             }
         }
     }
 
     LaunchedEffect(appState.incomingCallPeerId, isInCall, backStackEntry) {
         val current = backStackEntry?.destination?.route
-        if (appState.incomingCallPeerId != null && !isInCall && current != AppRoute.SurvivorPTT.route) {
+        if (appState.incomingCallPeerId != null && !isInCall && current !in footerEnabledRoutes) {
             navController.navigate(AppRoute.SurvivorPTT.route) {
                 launchSingleTop = true
             }
@@ -540,6 +576,34 @@ fun AppNavHost(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .pointerInput(shouldShowFooter, currentRoute, bottomBarHeightPx, minSwipeDistancePx) {
+                if (!shouldShowFooter) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (down.position.y > size.height - bottomBarHeightPx) return@awaitEachGesture
+                    val pointerId = down.id
+                    var totalDragX = 0f
+                    var totalDragY = 0f
+                    var pressed = true
+                    while (pressed) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                        val dx = change.position.x - change.previousPosition.x
+                        val dy = change.position.y - change.previousPosition.y
+                        totalDragX += dx
+                        totalDragY += dy
+                        pressed = change.pressed
+                    }
+                    val threshold = kotlin.math.max(size.width * 0.12f, minSwipeDistancePx)
+                    if (kotlin.math.abs(totalDragX) <= threshold) return@awaitEachGesture
+                    if (kotlin.math.abs(totalDragX) <= kotlin.math.abs(totalDragY)) return@awaitEachGesture
+                    if (totalDragX < 0) {
+                        navigateBySwipe(+1)
+                    } else {
+                        navigateBySwipe(-1)
+                    }
+                }
+            }
     ) {
         NavHost(
             navController = navController,
@@ -550,30 +614,17 @@ fun AppNavHost(
             popExitTransition = { ExitTransition.None },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = if (shouldShowFooter) scaledDp(58, scale) else scaledDp(0, scale))
-                .pointerInput(shouldShowFooter, currentRoute) {
-                    if (!shouldShowFooter) return@pointerInput
-                    var totalDragX = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { totalDragX = 0f },
-                        onHorizontalDrag = { _, dragAmount ->
-                            totalDragX += dragAmount
-                        },
-                        onDragEnd = {
-                            val threshold = size.width * 0.18f
-                            when {
-                                totalDragX < -threshold -> navigateBySwipe(+1)
-                                totalDragX > threshold -> navigateBySwipe(-1)
-                            }
-                        }
-                    )
-                }
+                .padding(bottom = if (shouldShowFooter) bottomBarHeight else scaledDp(0, scale))
         ) {
             composable(AppRoute.SurvivorStandby.route) {
                 StandbyStatusScreen(
                     sttResetToken = sttResetToken,
                     sttEnabled = sttEnabled,
                     onSos = { autoTriggered ->
+                        sttEnabled = false
+                        if (!autoTriggered) {
+                            autoSosStandbyFlow = false
+                        }
                         onStartRescueSignal()
                         if (autoTriggered) {
                             triggerAutoSosFeedback()
@@ -581,7 +632,9 @@ fun AppNavHost(
                         }
                         pendingSosNavigation = true
                         sosStartedAt = System.currentTimeMillis()
-                        navController.navigate(AppRoute.SurvivorEmergency.route)
+                        if (!autoTriggered) {
+                            requestEmergencyNavigation()
+                        }
                     },
                     onSettings = {
                         // Standby 설정은 독립 라우트로 열어 시스템 뒤로가기로 Standby로 복귀되게 한다.

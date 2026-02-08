@@ -339,6 +339,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         if (enabled) {
             if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                clearSosSuspensionForManualEnable()
                 startServiceSafe(VoiceService::class.java)
                 _uiEvents.tryEmit(UiEvent.Toast("음성 감지 켜짐"))
             } else {
@@ -362,12 +363,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isShockDetectionEnabled = enabled) }
 
         if (enabled) {
+            clearSosSuspensionForManualEnable()
             startServiceSafe(SensorService::class.java)
             _uiEvents.tryEmit(UiEvent.Toast("충격 감지 켜짐"))
         } else {
             app.stopService(Intent(app, SensorService::class.java))
             _uiEvents.tryEmit(UiEvent.Toast("충격 감지 꺼짐"))
         }
+    }
+
+    private fun clearSosSuspensionForManualEnable() {
+        val settings = AppSettingsRepository.snapshot(app)
+        if (!settings.isSosBackgroundSuspended) return
+        AppSettingsRepository.setSosBackgroundSuspended(app, false)
+        AppSettingsRepository.clearSosBackup(app)
     }
 
     fun onAutoSosTriggered(reason: String?) {

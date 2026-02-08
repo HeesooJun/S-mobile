@@ -10,31 +10,36 @@ class PacketDeduplicator(
     private val messageTimeoutMs: Long = ProtocolConstants.Dedup.MESSAGE_TIMEOUT_MS,
     private val maxProcessedMessages: Int = ProtocolConstants.Dedup.MAX_PROCESSED_MESSAGES
 ) {
+    private val lock = Any()
     private val processedMessages = LinkedHashSet<String>()
     private val messageTimestamps = mutableMapOf<String, Long>()
 
     fun shouldProcess(packet: Packet): Boolean {
-        val messageId = generateMessageId(packet)
-        val now = clock()
+        synchronized(lock) {
+            val messageId = generateMessageId(packet)
+            val now = clock()
 
-        if (processedMessages.contains(messageId)) {
-            val isFreshAnnounce = packet.header.type == PacketType.ANNOUNCE &&
-                packet.header.ttl >= ProtocolConstants.MESSAGE_TTL_HOPS
-            if (!isFreshAnnounce) {
-                return false
+            if (processedMessages.contains(messageId)) {
+                val isFreshAnnounce = packet.header.type == PacketType.ANNOUNCE &&
+                    packet.header.ttl >= ProtocolConstants.MESSAGE_TTL_HOPS
+                if (!isFreshAnnounce) {
+                    return false
+                }
             }
+
+            processedMessages.add(messageId)
+            messageTimestamps[messageId] = now
+
+            cleanup(now)
+            return true
         }
-
-        processedMessages.add(messageId)
-        messageTimestamps[messageId] = now
-
-        cleanup(now)
-        return true
     }
 
     fun clear() {
-        processedMessages.clear()
-        messageTimestamps.clear()
+        synchronized(lock) {
+            processedMessages.clear()
+            messageTimestamps.clear()
+        }
     }
 
     private fun cleanup(now: Long) {

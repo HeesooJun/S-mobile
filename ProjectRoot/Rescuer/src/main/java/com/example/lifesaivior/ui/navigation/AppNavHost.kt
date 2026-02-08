@@ -232,27 +232,15 @@ fun AppNavHost(
     )
     LaunchedEffect(
         isInCall,
-        currentRoute,
-        distanceTargetPeerId,
-        shouldPreferUwbOnDetail,
-        allowRttFallbackForUwbTarget
+        callDebugState.activeTransport,
+        callDebugState.wifiAware.isReady
     ) {
-        // RTT는 구조자 상세(PTT) + 통화 아님 상태에서만 활성화합니다.
-        val enableRtt = !isInCall &&
-            isPttRoute &&
-            !distanceTargetPeerId.isNullOrBlank() &&
-            (!shouldPreferUwbOnDetail || allowRttFallbackForUwbTarget)
-        Log.i(
-            "NavHostPTT",
-            "RTT gate route=$currentRoute inCall=$isInCall enableRtt=$enableRtt preferUwb=$shouldPreferUwbOnDetail rttFallback=$allowRttFallbackForUwbTarget"
-        )
+        val enableRtt =
+            isInCall &&
+                callDebugState.activeTransport == CallTransportType.WIFI_AWARE &&
+                !callDebugState.wifiAware.isReady
+        Log.i("NavHostPTT", "RTT gate inCall=$isInCall enableRtt=$enableRtt")
         appViewModel.wifiAwareRanger.setRttEnabled(enableRtt)
-    }
-    LaunchedEffect(isInCall) {
-        // 통화 중에는 NDP/RTT 간섭 방지를 위해 RTT를 강제로 끕니다.
-        if (isInCall) {
-            appViewModel.wifiAwareRanger.setRttEnabled(false)
-        }
     }
     LaunchedEffect(shouldRunDistanceTracking) {
         appViewModel.setBleRssiActiveMode(shouldRunDistanceTracking)
@@ -1255,10 +1243,25 @@ fun AppNavHost(
                 ?: targetSurvivor?.peerId
                 ?: appState.callPeerId
             val pttTargetSupportsUwb = resolvePeerSupportsUwb(pttTargetPeerId)
+            val localSupportsUwb = appViewModel.isUwbSupportedLocally()
             val canAttemptUwbOnDetail =
                 appViewModel.isUwbRuntimeAvailableLocally() &&
-                    pttTargetSupportsUwb &&
                     !pttTargetPeerId.isNullOrBlank()
+            LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, localSupportsUwb, pttTargetSupportsUwb) {
+                val hasTarget = !pttTargetPeerId.isNullOrBlank()
+                if (canAttemptUwbOnDetail && hasTarget) {
+                    // 상세 화면에서는 UWB 지원 여부가 아직 확인되지 않아도 세션을 시도하도록 강제한다.
+                    distanceViewModel.setUwbCapability(
+                        localSupported = localSupportsUwb,
+                        peerSupported = true
+                    )
+                } else {
+                    distanceViewModel.setUwbCapability(
+                        localSupported = localSupportsUwb,
+                        peerSupported = hasTarget && pttTargetSupportsUwb
+                    )
+                }
+            }
             LaunchedEffect(pttTargetPeerId, canAttemptUwbOnDetail, isInCall) {
                 Log.i(
                     "NavHostPTT",
