@@ -180,6 +180,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val uiEvents: SharedFlow<UiEvent> = _uiEvents.asSharedFlow()
     private val _pendingAutoSos = MutableStateFlow<AutoSosTrigger?>(null)
     val pendingAutoSos: StateFlow<AutoSosTrigger?> = _pendingAutoSos.asStateFlow()
+    private val _remoteControlEvents = MutableSharedFlow<DeviceControlCommand>(extraBufferCapacity = 8)
+    val remoteControlEvents: SharedFlow<DeviceControlCommand> = _remoteControlEvents.asSharedFlow()
 
     private val _meshVisualEvents = MutableSharedFlow<MeshVisualEvent>(
         extraBufferCapacity = 64,
@@ -1604,6 +1606,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleDeviceControl(peerIdHex: String, payload: DeviceControlPayload) {
+        _remoteControlEvents.tryEmit(payload.command)
         when (payload.command) {
             DeviceControlCommand.WAKE_SCREEN -> {
                 updateLocalPowerSavingState(false)

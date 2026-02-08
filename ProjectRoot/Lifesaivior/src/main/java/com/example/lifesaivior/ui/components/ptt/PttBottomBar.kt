@@ -8,21 +8,30 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import com.example.lifesaivior.R
 import com.example.lifesaivior.ui.theme.AppColors
 import com.example.lifesaivior.ui.theme.LocalAppScale
 import com.example.lifesaivior.ui.theme.scaledDp
+import com.example.lifesaivior.ui.theme.scaledSp
 
 internal enum class PttBottomTab {
     Home,
@@ -36,6 +45,7 @@ internal fun PttBottomBar(
     onHome: () -> Unit,
     onChat: () -> Unit,
     onSettings: () -> Unit,
+    chatUnreadCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val scale = LocalAppScale.current
@@ -64,7 +74,8 @@ internal fun PttBottomBar(
             PttNavItem(
                 iconRes = R.drawable.ic_nav_chat,
                 isSelected = selectedTab == PttBottomTab.Chat,
-                onClick = onChat
+                onClick = onChat,
+                badgeCount = chatUnreadCount
             )
             PttNavItem(
                 iconRes = R.drawable.ic_nav_settings,
@@ -79,7 +90,8 @@ internal fun PttBottomBar(
 private fun PttNavItem(
     iconRes: Int,
     isSelected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    badgeCount: Int = 0
 ) {
     val scale = LocalAppScale.current
     Box(
@@ -106,5 +118,37 @@ private fun PttNavItem(
                 colorFilter = ColorFilter.tint(if (isSelected) AppColors.White else AppColors.Gray500)
             )
         }
+        if (badgeCount > 0) {
+            ChatUnreadBadge(
+                count = badgeCount,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = scaledDp(6, scale), y = scaledDp(4, scale))
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatUnreadBadge(count: Int, modifier: Modifier = Modifier) {
+    val scale = LocalAppScale.current
+    val safeCount = count.coerceAtMost(99)
+    val label = if (count > 99) "99+" else safeCount.toString()
+    Box(
+        modifier = modifier
+            .size(scaledDp(18, scale))
+            .clip(CircleShape)
+            .background(Color(0xFFE53935)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = scaledSp(10, scale),
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            lineHeight = scaledSp(10, scale),
+            maxLines = 1
+        )
     }
 }
