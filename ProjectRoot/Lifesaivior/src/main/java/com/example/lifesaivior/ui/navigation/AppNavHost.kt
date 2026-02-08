@@ -15,8 +15,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,10 +34,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStoreOwner
@@ -132,10 +129,7 @@ fun AppNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scale = LocalAppScale.current
     val context = LocalContext.current
-    val density = LocalDensity.current
     val bottomBarHeight = scaledDp(58, scale)
-    val bottomBarHeightPx = with(density) { bottomBarHeight.toPx() }
-    val minSwipeDistancePx = with(density) { scaledDp(72, scale).toPx() }
     val appContext = context.applicationContext
     val appState by appViewModel.uiState.collectAsState()
     val autoConnectBlocked = appState.isAutoConnectBlocked
@@ -576,34 +570,6 @@ fun AppNavHost(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(shouldShowFooter, currentRoute, bottomBarHeightPx, minSwipeDistancePx) {
-                if (!shouldShowFooter) return@pointerInput
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    if (down.position.y > size.height - bottomBarHeightPx) return@awaitEachGesture
-                    val pointerId = down.id
-                    var totalDragX = 0f
-                    var totalDragY = 0f
-                    var pressed = true
-                    while (pressed) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
-                        val dx = change.position.x - change.previousPosition.x
-                        val dy = change.position.y - change.previousPosition.y
-                        totalDragX += dx
-                        totalDragY += dy
-                        pressed = change.pressed
-                    }
-                    val threshold = kotlin.math.max(size.width * 0.12f, minSwipeDistancePx)
-                    if (kotlin.math.abs(totalDragX) <= threshold) return@awaitEachGesture
-                    if (kotlin.math.abs(totalDragX) <= kotlin.math.abs(totalDragY)) return@awaitEachGesture
-                    if (totalDragX < 0) {
-                        navigateBySwipe(+1)
-                    } else {
-                        navigateBySwipe(-1)
-                    }
-                }
-            }
     ) {
         NavHost(
             navController = navController,
@@ -615,6 +581,21 @@ fun AppNavHost(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = if (shouldShowFooter) bottomBarHeight else scaledDp(0, scale))
+                .pointerInput(shouldShowFooter, currentRoute) {
+                    if (!shouldShowFooter) return@pointerInput
+                    var totalDragX = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDragX = 0f },
+                        onHorizontalDrag = { _, dragAmount -> totalDragX += dragAmount },
+                        onDragEnd = {
+                            val threshold = size.width * 0.18f
+                            when {
+                                totalDragX < -threshold -> navigateBySwipe(+1)
+                                totalDragX > threshold -> navigateBySwipe(-1)
+                            }
+                        }
+                    )
+                }
         ) {
             composable(AppRoute.SurvivorStandby.route) {
                 StandbyStatusScreen(
