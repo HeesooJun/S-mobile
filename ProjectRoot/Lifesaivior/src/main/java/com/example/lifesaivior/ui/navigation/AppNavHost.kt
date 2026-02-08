@@ -126,6 +126,7 @@ fun AppNavHost(
     onSetVoiceDetection: (Boolean) -> Unit,
     onSetShockDetection: (Boolean) -> Unit,
     onSetDemoMode: (Boolean) -> Unit,
+    onRequestPowerSaveScreen: () -> Unit = {},
     onRouteChanged: (String) -> Unit = {}
 ) {
     val navController = rememberNavController()
@@ -202,6 +203,7 @@ fun AppNavHost(
     var autoNavBlockedUntilMs by remember { mutableStateOf(0L) }
     val autoNavCooldownMs = 1_200L
     val autoSosToneGenerator = remember { ToneGenerator(AudioManager.STREAM_ALARM, 90) }
+    val isBatteryCritical = batteryLevel in 0..20
     DisposableEffect(autoSosToneGenerator) {
         onDispose {
             runCatching { autoSosToneGenerator.release() }
@@ -634,12 +636,21 @@ fun AppNavHost(
     }
     LaunchedEffect(forceExitPowerSavingToken) {
         if (forceExitPowerSavingToken > 0L) {
-            isPowerSaving = false
+            if (!isBatteryCritical) {
+                isPowerSaving = false
+            } else {
+                isPowerSaving = true
+            }
         }
     }
     LaunchedEffect(forceSetPowerSavingToken) {
         if (forceSetPowerSavingToken > 0L) {
-            isPowerSaving = forceSetPowerSavingEnabled
+            isPowerSaving = if (isBatteryCritical) true else forceSetPowerSavingEnabled
+        }
+    }
+    LaunchedEffect(isBatteryCritical) {
+        if (isBatteryCritical) {
+            isPowerSaving = true
         }
     }
     LaunchedEffect(isPowerSaving) {
@@ -776,6 +787,7 @@ fun AppNavHost(
                     batteryLevel = batteryLevel,
                     uiState = emergencyState,
                     onPrev = stopAndBack,
+                    onRequestPowerSaveScreen = onRequestPowerSaveScreen
                 )
             }
 
@@ -809,7 +821,13 @@ fun AppNavHost(
                     isCallConnected = activeCallTransportReady,
                     isInCall = isInCall,
                     isPowerSaving = isPowerSaving,
-                    onSetPowerSaving = { isPowerSaving = it },
+                    onSetPowerSaving = { enabled ->
+                        if (!isBatteryCritical) {
+                            isPowerSaving = enabled
+                        } else {
+                            isPowerSaving = true
+                        }
+                    },
                     callPeerName = targetSurvivor?.name,
                     pendingCall = pendingRequest,
                     onBack = { navController.popBackStack() },
@@ -840,7 +858,11 @@ fun AppNavHost(
                     onProfile = { navController.navigate(AppRoute.SurvivorProfile.route) },
                     onPanicClear = onClearDeviceMonitoring,
                     onPowerSavingChanged = { enabled ->
-                        appViewModel.updateLocalPowerSavingState(enabled)
+                        if (!isBatteryCritical) {
+                            appViewModel.updateLocalPowerSavingState(enabled)
+                        } else {
+                            appViewModel.updateLocalPowerSavingState(true)
+                        }
                     },
                     onSettings = { navigateBottomTabUser(AppRoute.Settings.route) },
                     onAcceptCall = {
@@ -977,7 +999,13 @@ fun AppNavHost(
         PowerSavingLayer(
             isPowerSaving = isPowerSaving,
             isForceExit = !isPowerSaving,
-            onRequestExitPowerSaving = { isPowerSaving = false }
+            onRequestExitPowerSaving = {
+                if (!isBatteryCritical) {
+                    isPowerSaving = false
+                } else {
+                    isPowerSaving = true
+                }
+            }
         )
     }
 }
