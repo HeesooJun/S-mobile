@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -82,6 +83,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import androidx.core.content.ContextCompat
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+private const val VOICE_PREFIX = "[voice] "
 
 @Composable
 fun AppNavHost(
@@ -188,8 +191,16 @@ fun AppNavHost(
     var forceSetPowerSavingToken by remember { mutableStateOf(0L) }
     var forceSetPowerSavingEnabled by remember { mutableStateOf(false) }
     val callAttemptTimeoutMs = 15_000L
+    val rescueDisconnectDelayMs = 2_000L
     val currentRoute = backStackEntry?.destination?.route
+    val latestRoute by rememberUpdatedState(currentRoute)
     var pendingBottomTabRoute by remember { mutableStateOf<String?>(null) }
+    val readChatMessageKeys = remember { mutableSetOf<String>() }
+    var unreadChatCount by remember { mutableStateOf(0) }
+    var lastVoiceAutoNavKey by remember { mutableStateOf<String?>(null) }
+    var pendingVoiceAutoPlayKey by remember { mutableStateOf<String?>(null) }
+    var autoNavBlockedUntilMs by remember { mutableStateOf(0L) }
+    val autoNavCooldownMs = 1_200L
     val autoSosToneGenerator = remember { ToneGenerator(AudioManager.STREAM_ALARM, 90) }
     DisposableEffect(autoSosToneGenerator) {
         onDispose {
@@ -218,15 +229,16 @@ fun AppNavHost(
         AppRoute.SurvivorChat.route,
         AppRoute.Settings.route
     )
+    val shouldShowFooter = currentRoute in footerEnabledRoutes
     val swipeRoutes = listOf(
         AppRoute.SurvivorPTT.route,
         AppRoute.SurvivorChat.route,
         AppRoute.Settings.route
     )
-    val shouldShowFooter = currentRoute in footerEnabledRoutes
-    val navigateBottomTab: (String) -> Unit = tab@{ targetRoute ->
+    fun navigateBottomTabInternal(targetRoute: String, allowOverridePending: Boolean = false) {
         val currentRoute = navController.currentBackStackEntry?.destination?.route
-        if (pendingBottomTabRoute != null || currentRoute == targetRoute) return@tab
+        if (currentRoute == targetRoute) return
+        if (!allowOverridePending && pendingBottomTabRoute != null) return
         pendingBottomTabRoute = targetRoute
         if (!navController.popBackStack(targetRoute, inclusive = false)) {
             navController.navigate(targetRoute) {
@@ -234,13 +246,58 @@ fun AppNavHost(
             }
         }
     }
+    fun markUserNavigation() {
+        autoNavBlockedUntilMs = System.currentTimeMillis() + autoNavCooldownMs
+        pendingEmergencyNavigation = false
+    }
+    fun isAutoNavBlocked(): Boolean {
+        return System.currentTimeMillis() < autoNavBlockedUntilMs
+    }
+    val navigateBottomTabUser: (String) -> Unit = { targetRoute ->
+        markUserNavigation()
+        navigateBottomTabInternal(targetRoute, allowOverridePending = true)
+    }
+    val navigateBottomTabAuto: (String) -> Unit = { targetRoute ->
+        if (!isAutoNavBlocked()) {
+            navigateBottomTabInternal(targetRoute)
+        }
+    }
     val navigateBySwipe: (Int) -> Unit = swipe@{ delta ->
         val route = navController.currentBackStackEntry?.destination?.route ?: return@swipe
         val currentIndex = swipeRoutes.indexOf(route)
         if (currentIndex == -1) return@swipe
         val targetRoute = swipeRoutes.getOrNull(currentIndex + delta) ?: return@swipe
-        navigateBottomTab(targetRoute)
+        navigateBottomTabUser(targetRoute)
     }
+
+    LaunchedEffect(Unit) {
+        appViewModel.remoteControlEvents.collect {
+            val route = latestRoute ?: return@collect
+            if (route == AppRoute.SurvivorPTT.route) return@collect
+            if (route !in footerEnabledRoutes) return@collect
+            navigateBottomTabInternal(AppRoute.SurvivorPTT.route)
+        }
+    }
+
+    LaunchedEffect(messages, currentRoute, isInCall, appState.incomingCallPeerId) {
+        if (appState.incomingCallPeerId != null) return@LaunchedEffect
+        val route = currentRoute ?: return@LaunchedEffect
+        val latestIncomingVoice = messages.lastOrNull { message ->
+            !message.isMine && message.text.startsWith(VOICE_PREFIX)
+        } ?: return@LaunchedEffect
+        val key = buildChatMessageKey(latestIncomingVoice)
+        if (route == AppRoute.SurvivorChat.route) {
+            lastVoiceAutoNavKey = key
+            return@LaunchedEffect
+        }
+        if (route !in footerEnabledRoutes) return@LaunchedEffect
+        if (isInCall) return@LaunchedEffect
+        if (key == lastVoiceAutoNavKey) return@LaunchedEffect
+        lastVoiceAutoNavKey = key
+        pendingVoiceAutoPlayKey = key
+        navigateBottomTabAuto(AppRoute.SurvivorChat.route)
+    }
+
     fun requestEmergencyNavigation() {
         if (pendingEmergencyNavigation) return
         pendingEmergencyNavigation = true
@@ -322,6 +379,17 @@ fun AppNavHost(
         }
     }
 
+    LaunchedEffect(messages, currentRoute) {
+        if (currentRoute == AppRoute.SurvivorChat.route) {
+            messages.forEach { message ->
+                readChatMessageKeys.add(buildChatMessageKey(message))
+            }
+        }
+        unreadChatCount = messages.count { message ->
+            !message.isMine && !readChatMessageKeys.contains(buildChatMessageKey(message))
+        }
+    }
+
     LaunchedEffect(profileState.isComplete, backStackEntry) {
         val currentRoute = backStackEntry?.destination?.route
         if (profileState.isComplete &&
@@ -354,6 +422,13 @@ fun AppNavHost(
         }
         if (autoSosStandbyFlow) return@LaunchedEffect
         if (!isConnected) {
+            delay(rescueDisconnectDelayMs)
+            if (!isRescueSignalActive || autoSosStandbyFlow) return@LaunchedEffect
+            if (appViewModel.uiState.value.isConnected) return@LaunchedEffect
+            if (pendingBottomTabRoute != null) return@LaunchedEffect
+            val routeNow = latestRoute
+            if (routeNow in footerEnabledRoutes) return@LaunchedEffect
+            if (isAutoNavBlocked()) return@LaunchedEffect
             if (!pendingSosNavigation) {
                 pendingSosNavigation = true
                 if (sosStartedAt == 0L) {
@@ -372,8 +447,13 @@ fun AppNavHost(
     }
 
     LaunchedEffect(appState.incomingCallPeerId, isInCall, backStackEntry) {
+        if (appState.incomingCallPeerId == null) return@LaunchedEffect
+        if (isInCall) return@LaunchedEffect
         val current = backStackEntry?.destination?.route
-        if (appState.incomingCallPeerId != null && !isInCall && current !in footerEnabledRoutes) {
+        if (current == AppRoute.SurvivorPTT.route) return@LaunchedEffect
+        if (current in footerEnabledRoutes) {
+            navigateBottomTabInternal(AppRoute.SurvivorPTT.route)
+        } else {
             navController.navigate(AppRoute.SurvivorPTT.route) {
                 launchSingleTop = true
             }
@@ -762,7 +842,7 @@ fun AppNavHost(
                     onPowerSavingChanged = { enabled ->
                         appViewModel.updateLocalPowerSavingState(enabled)
                     },
-                    onSettings = { navigateBottomTab(AppRoute.Settings.route) },
+                    onSettings = { navigateBottomTabUser(AppRoute.Settings.route) },
                     onAcceptCall = {
                         val peerId = appState.incomingCallPeerId ?: return@PTTLinkScreen
                         acceptIncomingCall(peerId)
@@ -859,11 +939,17 @@ fun AppNavHost(
                     onClearProfileLogs = onClearProfileLogs,
                     onSendProfileTest = onSendProfileTest,
                     onPrev = { navController.popBackStack() },
-                    onSettings = { navigateBottomTab(AppRoute.Settings.route) },
+                    onSettings = { navigateBottomTabUser(AppRoute.Settings.route) },
                     inputValue = chatState.inputValue,
                     onInputChange = { chatViewModel.onInputChange(it) },
                     onSendClick = {
                         chatViewModel.consumeSend()?.let { text -> onSendMessage(text) }
+                    },
+                    autoPlayMessageKey = pendingVoiceAutoPlayKey,
+                    onAutoPlayMessageConsumed = { key ->
+                        if (pendingVoiceAutoPlayKey == key) {
+                            pendingVoiceAutoPlayKey = null
+                        }
                     }
                 )
             }
@@ -877,9 +963,10 @@ fun AppNavHost(
             }
             PttBottomBar(
                 selectedTab = selectedTab,
-                onHome = { navigateBottomTab(AppRoute.SurvivorPTT.route) },
-                onChat = { navigateBottomTab(AppRoute.SurvivorChat.route) },
-                onSettings = { navigateBottomTab(AppRoute.Settings.route) },
+                onHome = { navigateBottomTabUser(AppRoute.SurvivorPTT.route) },
+                onChat = { navigateBottomTabUser(AppRoute.SurvivorChat.route) },
+                onSettings = { navigateBottomTabUser(AppRoute.Settings.route) },
+                chatUnreadCount = unreadChatCount,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
@@ -893,4 +980,10 @@ fun AppNavHost(
             onRequestExitPowerSaving = { isPowerSaving = false }
         )
     }
+}
+
+private fun buildChatMessageKey(message: ChatMessage): String {
+    val sender = message.senderPeerId.orEmpty()
+    val recipient = message.recipientPeerId.orEmpty()
+    return "${message.timestamp}-$sender-$recipient-${message.text.hashCode()}"
 }

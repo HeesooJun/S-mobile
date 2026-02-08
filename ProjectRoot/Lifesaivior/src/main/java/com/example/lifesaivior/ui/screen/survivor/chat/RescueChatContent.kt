@@ -27,7 +27,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import com.example.lifesaivior.R
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.ui.components.chat.AutoScrollChatList
@@ -49,6 +48,8 @@ fun RescueChatContent(
     onShowSignatureLog: () -> Unit,
     onShowDbLog: () -> Unit,
     onSendProfileTest: () -> Unit,
+    autoPlayMessageKey: String? = null,
+    onAutoPlayMessageConsumed: (String) -> Unit = {},
     inputValue: String,
     onInputChange: (String) -> Unit,
     onSendClick: () -> Unit,
@@ -68,6 +69,7 @@ fun RescueChatContent(
     val pendingAutoPlayKeys = remember { ArrayDeque<String>() }
     var autoPlayKey by remember { mutableStateOf<String?>(null) }
     var baselineInitialized by remember { mutableStateOf(false) }
+    var consumedExternalAutoPlayKey by remember { mutableStateOf<String?>(null) }
 
     fun advanceAutoPlayQueue() {
         if (autoPlayKey != null) return
@@ -83,7 +85,7 @@ fun RescueChatContent(
         advanceAutoPlayQueue()
     }
 
-    LaunchedEffect(messages) {
+    LaunchedEffect(messages, autoPlayMessageKey) {
         if (!baselineInitialized) {
             messages.forEach { message ->
                 val key = buildMessageKey(message)
@@ -93,6 +95,21 @@ fun RescueChatContent(
                 }
             }
             baselineInitialized = true
+        }
+        val forcedKey = autoPlayMessageKey
+        if (forcedKey != null && forcedKey != consumedExternalAutoPlayKey) {
+            val forcedMessage = messages.firstOrNull { message ->
+                buildMessageKey(message) == forcedKey
+            }
+            if (forcedMessage != null && !forcedMessage.isMine && isVoiceMessage(forcedMessage)) {
+                playedVoiceKeys.remove(forcedKey)
+                if (autoPlayKey != forcedKey && !pendingAutoPlayKeys.contains(forcedKey)) {
+                    pendingAutoPlayKeys.addFirst(forcedKey)
+                }
+                advanceAutoPlayQueue()
+                onAutoPlayMessageConsumed(forcedKey)
+                consumedExternalAutoPlayKey = forcedKey
+            }
         }
         messages.forEach { message ->
             if (message.isMine) return@forEach
@@ -104,16 +121,6 @@ fun RescueChatContent(
             pendingAutoPlayKeys.addLast(key)
         }
         advanceAutoPlayQueue()
-    }
-
-    val newIncomingCount = remember(messages, baselineInitialized) {
-        if (!baselineInitialized) {
-            0
-        } else {
-            messages.count { message ->
-                !message.isMine && !baselineMessageKeys.contains(buildMessageKey(message))
-            }
-        }
     }
 
     // 메인 컨텐츠 영역
@@ -182,14 +189,6 @@ fun RescueChatContent(
                         )
                     }
 
-                    if (newIncomingCount > 0) {
-                        ChatUnreadBadge(
-                            count = newIncomingCount,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .zIndex(2f)
-                        )
-                    }
                 }
 
                 // Chat List - 배경 클릭 시 모달 닫기 기능 추가
@@ -366,27 +365,6 @@ private fun DebugBadge(text: String, onClick: () -> Unit) {
             .padding(horizontal = 4.dp, vertical = 2.dp)
     ) {
         Text(text = text, color = Color.Gray, fontSize = 9.sp)
-    }
-}
-
-@Composable
-private fun ChatUnreadBadge(count: Int, modifier: Modifier = Modifier) {
-    val safeCount = count.coerceAtMost(99)
-    val label = if (count > 99) "99+" else safeCount.toString()
-    Box(
-        modifier = modifier
-            .padding(top = 2.dp, end = 2.dp)
-            .size(20.dp)
-            .clip(CircleShape)
-            .background(Color(0xFFE53935)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
-        )
     }
 }
 
