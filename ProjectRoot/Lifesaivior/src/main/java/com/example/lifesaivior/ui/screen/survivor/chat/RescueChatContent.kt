@@ -208,6 +208,7 @@ fun RescueChatContent(
                         listModifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
+                        initialScrollToBottom = true,
                         verticalSpacing = 8.dp
                     ) { message ->
                         val messageKey = remember(message) { buildMessageKey(message) }

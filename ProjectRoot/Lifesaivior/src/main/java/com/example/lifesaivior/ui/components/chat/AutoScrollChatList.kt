@@ -17,8 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -35,6 +37,7 @@ fun AutoScrollChatList(
     listModifier: Modifier = Modifier,
     verticalSpacing: Dp,
     contentPadding: PaddingValues = PaddingValues(),
+    initialScrollToBottom: Boolean = false,
     nearBottomThreshold: Int = 2,
     itemKey: ((ChatMessage) -> Any)? = null,
     itemContent: @Composable (ChatMessage) -> Unit
@@ -42,6 +45,7 @@ fun AutoScrollChatList(
     val scale = LocalAppScale.current
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    var didInitialScroll by remember { mutableStateOf(false) }
 
     val isNearBottom by remember {
         derivedStateOf {
@@ -62,6 +66,14 @@ fun AutoScrollChatList(
     val showScrollToBottom by remember {
         derivedStateOf {
             messages.isNotEmpty() && hasUserScrolledUp && !isNearBottom
+        }
+    }
+
+    LaunchedEffect(messages.size, initialScrollToBottom) {
+        if (!initialScrollToBottom || didInitialScroll) return@LaunchedEffect
+        if (messages.isNotEmpty()) {
+            listState.scrollToItem(messages.lastIndex)
+            didInitialScroll = true
         }
     }
 
