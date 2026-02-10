@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
@@ -242,6 +243,7 @@ fun AppNavHost(
         if (currentRoute == targetRoute) return
         if (!allowOverridePending && pendingBottomTabRoute != null) return
         pendingBottomTabRoute = targetRoute
+        Log.d("NavHost", "bottomNav -> $targetRoute (from $currentRoute)")
         if (!navController.popBackStack(targetRoute, inclusive = false)) {
             navController.navigate(targetRoute) {
                 launchSingleTop = true
@@ -405,7 +407,12 @@ fun AppNavHost(
     }
 
     LaunchedEffect(isConnected, pendingSosNavigation, sosStartedAt) {
+        Log.d(
+            "NavHostSOS",
+            "sosCheck pending=$pendingSosNavigation connected=$isConnected startedAt=$sosStartedAt route=${currentRoute ?: "null"}"
+        )
         if (pendingSosNavigation && isConnected) {
+            Log.d("NavHostSOS", "sosReady -> switching to PTT after min duration")
             val elapsed = System.currentTimeMillis() - sosStartedAt
             if (elapsed < minSosDurationMs) {
                 delay(minSosDurationMs - elapsed)
@@ -423,6 +430,16 @@ fun AppNavHost(
             return@LaunchedEffect
         }
         if (autoSosStandbyFlow) return@LaunchedEffect
+        if (current !in footerEnabledRoutes && !pendingSosNavigation) {
+            pendingSosNavigation = true
+            if (sosStartedAt == 0L) {
+                sosStartedAt = System.currentTimeMillis()
+            }
+            Log.d(
+                "NavHostSOS",
+                "sosStart pending=$pendingSosNavigation connected=$isConnected current=$current"
+            )
+        }
         if (!isConnected) {
             delay(rescueDisconnectDelayMs)
             if (!isRescueSignalActive || autoSosStandbyFlow) return@LaunchedEffect
@@ -431,12 +448,6 @@ fun AppNavHost(
             val routeNow = latestRoute
             if (routeNow in footerEnabledRoutes) return@LaunchedEffect
             if (isAutoNavBlocked()) return@LaunchedEffect
-            if (!pendingSosNavigation) {
-                pendingSosNavigation = true
-                if (sosStartedAt == 0L) {
-                    sosStartedAt = System.currentTimeMillis()
-                }
-            }
             requestEmergencyNavigation()
             return@LaunchedEffect
         }

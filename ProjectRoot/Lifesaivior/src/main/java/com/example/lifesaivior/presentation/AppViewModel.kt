@@ -1107,11 +1107,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isDisconnecting) return
         autoConnectBlocked = true
         ConnectionLog.add("Runtime", "auto-connect blocked (manual disconnect)")
-        _uiState.update { it.copy(isDisconnecting = true, isAutoConnectBlocked = true) }
+        _uiState.update {
+            it.copy(
+                isDisconnecting = true,
+                isAutoConnectBlocked = true,
+                isConnected = false,
+                connectedCount = 0,
+                directPeerIds = emptyList()
+            )
+        }
         stopAllRemoteAlerts()
 
         sendLeavePacket()
         stopRescueSignal()
+        clearRuntimeCaches("disconnect")
 
         if (::bleManager.isInitialized) {
             bleManager.disconnect()
@@ -1125,6 +1134,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendLeaveOnShutdown() {
         if (!::protocolCore.isInitialized) return
         sendLeavePacket()
+    }
+
+    private fun clearRuntimeCaches(reason: String) {
+        announcedPeerLastSeen.clear()
+        peerNicknames.clear()
+        peerDirectAddresses.clear()
+        announcedProfiles.clear()
+        directPeerAnnounceTracker.clear()
+        meshRegistry.clear()
+        meshGraphRegistry.clear()
+        peerIdentityRegistry.clear()
+        _uiState.update {
+            it.copy(
+                peerNicknames = emptyMap(),
+                peerDirectAddresses = emptyMap(),
+                survivors = emptyList()
+            )
+        }
+        ConnectionLog.add("Runtime", "clear caches reason=$reason")
     }
 
     fun stopServicesForShutdown() {
@@ -1207,6 +1235,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         protocolCore.setOnPacketReceived { packet, relayAddress ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
+            if (autoConnectBlocked && packet.header.type == PacketType.ANNOUNCE) {
+                ConnectionLog.add("Runtime", "announce ignored (manual disconnect)")
+                return@setOnPacketReceived
+            }
 
             val pathLabel = packetPathLabel(packet, relayAddress)
             val peerHex = bytesToHex(packet.header.senderId)
@@ -1222,6 +1254,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
+                    if (autoConnectBlocked) {
+                        ConnectionLog.add("Runtime", "announce dropped (manual disconnect) peer=$peerHex")
+                        return@setOnPacketReceived
+                    }
                     val now = System.currentTimeMillis()
                     val age = now - packet.header.timestamp
                     if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
@@ -1380,9 +1416,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.DEVICE_CONTROL -> {
                     val recipient = packet.header.recipientId
                     if (recipient != null && !recipient.contentEquals(senderId)) {
+                        ConnectionLog.add(
+                            "DeviceControl",
+                            "drop recipient mismatch my=${bytesToHex(senderId)} recv=${bytesToHex(recipient)} from=$peerHex"
+                        )
                         return@setOnPacketReceived
                     }
-                    val payload = DeviceControlPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    val payload = DeviceControlPayload.decode(packet.payload)
+                    if (payload == null) {
+                        ConnectionLog.add(
+                            "DeviceControl",
+                            "drop decode failed from=$peerHex len=${packet.payload.size}"
+                        )
+                        return@setOnPacketReceived
+                    }
+                    ConnectionLog.add(
+                        "DeviceControl",
+                        "recv from=$peerHex rcp=${recipient?.let(::bytesToHex) ?: "-"} cmd=${payload.command.name} d=${payload.durationMs} i=${payload.intensity} f=${payload.frequencyHz ?: 0}"
+                    )
                     handleDeviceControl(peerHex, payload)
                 }
                 else -> Unit
@@ -2137,6 +2188,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun refreshSurvivorCapabilities() {
+        if (autoConnectBlocked) {
+            _uiState.update { state -> state.copy(survivors = emptyList()) }
+            return
+        }
         _uiState.update { state ->
             val peerIds = announcedPeerLastSeen.keys.sorted()
             val list = peerIds.map { peerId ->

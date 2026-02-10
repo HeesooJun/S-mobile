@@ -554,6 +554,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         frequencyHz: Int? = null
     ) {
         if (targetPeerIdHex.isBlank()) return
+        val ui = _uiState.value
+        ConnectionLog.add(
+            "DeviceControl",
+            "send request target=$targetPeerIdHex directPeers=${ui.directPeerIds} connected=${ui.isConnected}"
+        )
         val recipientId = runCatching { hexToBytes(targetPeerIdHex) }.getOrNull() ?: return
         val payload = DeviceControlPayload(
             command = command,
@@ -822,7 +827,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isDisconnecting) return
         autoConnectBlocked = true
         ConnectionLog.add("Runtime", "auto-connect blocked (manual disconnect)")
-        _uiState.update { it.copy(isAutoConnectBlocked = true) }
+        _uiState.update {
+            it.copy(
+                isAutoConnectBlocked = true,
+                isConnected = false,
+                connectedCount = 0,
+                directPeerIds = emptyList()
+            )
+        }
         ConnectionLifecycle.disconnect(
             sendLeave = { sendLeavePacket() },
             clearCaches = { clearRuntimeCaches(it) },
@@ -872,11 +884,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         profilePacketHandler = ProfilePacketHandler(profileDao, viewModelScope, ::appendProfileLog, { gossipSyncManager.onPublicPacketSeen(it) })
         protocolCore.setOnPacketReceived { packet, relay ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
+            if (autoConnectBlocked && packet.header.type == PacketType.ANNOUNCE) {
+                ConnectionLog.add("Runtime", "announce ignored (manual disconnect)")
+                return@setOnPacketReceived
+            }
             val path = packetPathLabel(packet, relay); val peer = bytesToHex(packet.header.senderId); emitMeshActivity(peer)
             if (packet.header.type != PacketType.LEAVE && packet.header.type != PacketType.ANNOUNCE) meshGraphRegistry.touchPeer(peer, peerNicknames[peer], System.currentTimeMillis())
             if (relay != null && path == "direct") { bleManager.bindPeerIdForAddress(relay, peer); bleManager.onAnnounceReceived(relay); refreshDirectPeers() }
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
+                    if (autoConnectBlocked) {
+                        ConnectionLog.add("Runtime", "announce dropped (manual disconnect) peer=$peer")
+                        return@setOnPacketReceived
+                    }
                     val now = System.currentTimeMillis()
                     val announcement = IdentityAnnouncementPayload.decode(packet.payload) ?: return@setOnPacketReceived
                     val decision = peerIdentityRegistry.handleAnnounce(peer, announcement.nickname, announcement.noisePublicKey, now, ProtocolConstants.Mesh.DUPLICATE_NICKNAME_STALE_MS)
@@ -1187,6 +1207,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun observeProfiles() { viewModelScope.launch { profileDao.getAll().collect { entities -> discoveredSurvivors.clear(); entities.forEach { discoveredSurvivors[it.peerId] = SurvivorProfile(it.name, it.gender, it.birthDate, it.notes, peerId = it.peerId) }; refreshSurvivorCapabilities() } } }
     private fun refreshSurvivorCapabilities() {
+        if (autoConnectBlocked) {
+            _uiState.update { s -> s.copy(survivors = emptyList()) }
+            return
+        }
         _uiState.update { s ->
             val now = System.currentTimeMillis()
             val cutoff = now - survivorDisplayTtlMs
@@ -1321,10 +1345,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearDeviceMonitoring() { if (::bleManager.isInitialized) { bleManager.clearAllConnectionsAndMappings(); _uiEvents.tryEmit(UiEvent.Toast("초기화됨")) } }
     private fun clearRuntimeCaches(reason: String) {
         if (reason == "disconnect") {
-            // Keep mesh/identity caches for stable reconnection; only reset announce gating.
+            // Manual disconnect: clear UI-facing caches to avoid stale survivors lingering.
             directPeerAnnounceTracker.clear()
-            ConnectionLog.add("Runtime", "skip cache clear on disconnect")
-            return
         }
         announcedPeerLastSeen.clear()
         peerNicknames.clear()
