@@ -587,6 +587,19 @@ class BleManager(
 
         override fun onScanFailed(errorCode: Int) {
             logCallback("Scan failed ($errorCode)")
+            isScanning = false
+            val retryDelayMs = if (errorCode == ScanCallback.SCAN_FAILED_SCANNING_TOO_FREQUENTLY) {
+                10_000L
+            } else {
+                5_000L
+            }
+            scanRestartJob?.cancel()
+            scanRestartJob = scope.launch {
+                delay(retryDelayMs)
+                if (!isScanning) {
+                    startScan()
+                }
+            }
         }
     }
 
