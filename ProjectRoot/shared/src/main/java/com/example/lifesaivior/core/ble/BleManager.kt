@@ -81,6 +81,8 @@ class BleManager(
         disconnectCallback = { address -> disconnectAddress(address) },
         log = logCallback
     )
+    private val clientManager = BleClientManager()
+    private val serverManager = BleServerManager()
 
     var isHost = false
     private var isConnected = false
@@ -261,7 +263,10 @@ class BleManager(
         }
 
         // Multiple screens call this; avoid dropping live connections.
-        if (autoConnectActive) return
+        if (autoConnectActive) {
+            ensureAutoConnectRunning()
+            return
+        }
 
         disconnect()
         isConnected = false
@@ -274,6 +279,20 @@ class BleManager(
         startMaintenanceJobs()
         startScan()
         autoConnectActive = true
+    }
+
+    private fun ensureAutoConnectRunning() {
+        if (adapter == null || !adapter.isEnabled) return
+        // Keep existing connections; only restore missing pieces.
+        isHost = true
+        setupGattServer()
+        if (currentAdvertisingSet == null) {
+            startAdvertisingInternal(isEmergencyMode = false)
+        }
+        startMaintenanceJobs()
+        if (!isScanning) {
+            startScan()
+        }
     }
 
     private fun startMaintenanceJobs() {
@@ -492,13 +511,16 @@ class BleManager(
         }
     }
 
+    private fun startAdvertisingInternal(isEmergencyMode: Boolean): Boolean =
+        serverManager.startAdvertisingInternal(isEmergencyMode)
+
     /**
      * 광고 시작 내부 함수
      * @param isEmergencyMode
      * - true (SOS): Interval High (느림=절전), TxPower High (강함=최대거리) -> 72시간 생존
      * - false (일반): Interval High (느림=절전), TxPower High (강함=일반)
      */
-    private fun startAdvertisingInternal(isEmergencyMode: Boolean): Boolean {
+    private fun startAdvertisingInternalImpl(isEmergencyMode: Boolean): Boolean {
         return try {
             // Prefer legacy advertising for cross-device compatibility.
             val parameters = AdvertisingSetParameters.Builder()
@@ -543,7 +565,9 @@ class BleManager(
         }
     }
 
-    fun stopAdvertising() {
+    fun stopAdvertising() = serverManager.stopAdvertising()
+
+    private fun stopAdvertisingImpl() {
         try {
             advertiser?.stopAdvertisingSet(advertisingCallback)
             currentAdvertisingSet = null
@@ -593,17 +617,13 @@ class BleManager(
             } else {
                 5_000L
             }
-            scanRestartJob?.cancel()
-            scanRestartJob = scope.launch {
-                delay(retryDelayMs)
-                if (!isScanning) {
-                    startScan()
-                }
-            }
+            restartScan(retryDelayMs)
         }
     }
 
-    private fun startScan(): Boolean {
+    private fun startScan(): Boolean = clientManager.startScan()
+
+    private fun startScanImpl(): Boolean {
         return try {
             val now = System.currentTimeMillis()
             if (isScanning) return true
@@ -639,7 +659,9 @@ class BleManager(
         }
     }
 
-    private fun stopScan() {
+    private fun stopScan() = clientManager.stopScan()
+
+    private fun stopScanImpl() {
         try {
             scanner?.stopScan(scanCallback)
         } catch (e: Exception) {
@@ -649,7 +671,21 @@ class BleManager(
         scanRestartJob = null
     }
 
-    private fun connectToPeer(device: BluetoothDevice) {
+    private fun restartScan(delayMs: Long = 1_000L) = clientManager.restartScan(delayMs)
+
+    private fun restartScanImpl(delayMs: Long = 1_000L) {
+        scanRestartJob?.cancel()
+        scanRestartJob = scope.launch {
+            delay(delayMs)
+            if (!isScanning) {
+                startScan()
+            }
+        }
+    }
+
+    private fun connectToPeer(device: BluetoothDevice) = clientManager.connectToPeer(device)
+
+    private fun connectToPeerImpl(device: BluetoothDevice) {
         try {
             if (deviceMonitor.isBlocked(device.address)) {
                 clearPending(device.address)
@@ -791,7 +827,9 @@ class BleManager(
         }
     }
 
-    private fun setupGattServer() {
+    private fun setupGattServer() = serverManager.setupGattServer()
+
+    private fun setupGattServerImpl() {
         cancelGattServerClose()
         if (gattServer != null) return
         try {
@@ -1615,5 +1653,20 @@ class BleManager(
             } catch (_: Exception) {
             }
         }
+    }
+
+    private inner class BleClientManager {
+        fun startScan(): Boolean = startScanImpl()
+        fun stopScan() = stopScanImpl()
+        fun restartScan(delayMs: Long = 1_000L) = restartScanImpl(delayMs)
+        fun connectToPeer(device: BluetoothDevice) = connectToPeerImpl(device)
+    }
+
+    private inner class BleServerManager {
+        fun startAdvertisingInternal(isEmergencyMode: Boolean): Boolean =
+            startAdvertisingInternalImpl(isEmergencyMode)
+
+        fun stopAdvertising() = stopAdvertisingImpl()
+        fun setupGattServer() = setupGattServerImpl()
     }
 }
