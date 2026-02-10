@@ -57,6 +57,7 @@ import kotlin.math.pow
 @Composable
 fun RescuerSurvivorDbScreen(
     survivors: List<SurvivorProfile>,
+    meshSurvivors: List<SurvivorProfile> = emptyList(),
     peerRssiMap: Map<String, Int> = emptyMap(),
     peerBatteryMap: Map<String, Int> = emptyMap(),
     onDisconnectClick: () -> Unit,
@@ -82,7 +83,7 @@ fun RescuerSurvivorDbScreen(
     val neonGreen = AppColors.Green
     val neonRed = AppColors.Red
 
-    val callingSurvivorName = survivors
+    val callingSurvivorName = (survivors + meshSurvivors)
         .firstOrNull { it.peerId == callingPeerId }
         ?.name
         ?.ifBlank { "생존자" }
@@ -95,6 +96,13 @@ fun RescuerSurvivorDbScreen(
         if (q.isEmpty()) survivors
         else survivors.filter { survivor -> survivor.name.contains(q, ignoreCase = true) }
     }
+    val filteredMesh = remember(query, meshSurvivors) {
+        val q = query.trim()
+        if (q.isEmpty()) meshSurvivors
+        else meshSurvivors.filter { survivor -> survivor.name.contains(q, ignoreCase = true) }
+    }
+    var isMeshExpanded by rememberSaveable { mutableStateOf(false) }
+    val hasAnySurvivor = filtered.isNotEmpty() || filteredMesh.isNotEmpty()
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -150,13 +158,13 @@ fun RescuerSurvivorDbScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "생존자 리스트",
+                                    text = "직접 연결 생존자",
                                     color = AppColors.White,
                                     fontSize = scaledSp(18, scale),
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "생존자 ${survivors.size}명 발견",
+                                    text = "직접 연결 ${survivors.size}명",
                                     color = AppColors.Gray500,
                                     fontSize = scaledSp(12, scale),
                                     fontWeight = FontWeight.SemiBold
@@ -217,7 +225,7 @@ fun RescuerSurvivorDbScreen(
 
                 Spacer(modifier = Modifier.height(scaledDp(14, scale)))
 
-                if (filtered.isEmpty()) {
+                if (!hasAnySurvivor) {
                     Spacer(modifier = Modifier.height(scaledDp(22, scale)))
                     Surface(
                         color = charcoal.copy(alpha = 0.55f),
@@ -254,47 +262,160 @@ fun RescuerSurvivorDbScreen(
                         contentPadding = PaddingValues(bottom = scaledDp(24, scale)),
                         verticalArrangement = Arrangement.spacedBy(scaledDp(12, scale))
                     ) {
-                        items(filtered) { survivor ->
-                            SurvivorCard(
-                                survivor = survivor,
-                                scale = scale,
-                                charcoal = charcoal,
-                                border = border,
-                                neonGreen = neonGreen,
-                                neonRed = neonRed,
-                                peerRssiMap = peerRssiMap,
-                                peerBatteryMap = peerBatteryMap,
-                                isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
-                                onSelectTarget = onSelectTarget,
-                                isCalling = survivor.peerId.isNotBlank() && survivor.peerId == callingPeerId,
-                                isInCallWithPeer = isInCall &&
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == (callPeerId ?: activeSurvivor?.peerId),
-                                liveDistanceMeters = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == activeDistancePeerId
+                        if (filtered.isEmpty()) {
+                            item {
+                                Surface(
+                                    color = charcoal.copy(alpha = 0.55f),
+                                    shape = RoundedCornerShape(scaledDp(18, scale)),
+                                    border = BorderStroke(1.dp, border),
+                                    tonalElevation = 0.dp,
+                                    shadowElevation = 0.dp,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    activeDistanceMeters
-                                } else {
-                                    null
-                                },
-                                liveDistanceSource = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == activeDistancePeerId
-                                ) {
-                                    activeDistanceSource
-                                } else {
-                                    DistanceMeasurementSource.NONE
-                                },
-                                rttDistanceMeters = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == callPeerId
-                                ) {
-                                    callPeerRttCm?.toFloat()?.div(100f)
-                                } else {
-                                    null
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = scaledDp(20, scale)),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "직접 연결된 생존자가 없습니다",
+                                            color = AppColors.White.copy(alpha = 0.82f),
+                                            fontSize = scaledSp(13, scale),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                                        Text(
+                                            text = "연결되면 바로 목록에 표시됩니다",
+                                            color = AppColors.Gray400,
+                                            fontSize = scaledSp(11, scale),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
-                            )
+                            }
+                        } else {
+                            items(filtered) { survivor ->
+                                SurvivorCard(
+                                    survivor = survivor,
+                                    scale = scale,
+                                    charcoal = charcoal,
+                                    border = border,
+                                    neonGreen = neonGreen,
+                                    neonRed = neonRed,
+                                    peerRssiMap = peerRssiMap,
+                                    peerBatteryMap = peerBatteryMap,
+                                    isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
+                                    onSelectTarget = onSelectTarget,
+                                    isCalling = survivor.peerId.isNotBlank() && survivor.peerId == callingPeerId,
+                                    isInCallWithPeer = isInCall &&
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == (callPeerId ?: activeSurvivor?.peerId),
+                                    liveDistanceMeters = if (
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == activeDistancePeerId
+                                    ) {
+                                        activeDistanceMeters
+                                    } else {
+                                        null
+                                    },
+                                    liveDistanceSource = if (
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == activeDistancePeerId
+                                    ) {
+                                        activeDistanceSource
+                                    } else {
+                                        DistanceMeasurementSource.NONE
+                                    },
+                                    rttDistanceMeters = if (
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == callPeerId
+                                    ) {
+                                        callPeerRttCm?.toFloat()?.div(100f)
+                                    } else {
+                                        null
+                                    }
+                                )
+                            }
+                        }
+                        if (meshSurvivors.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(scaledDp(6, scale)))
+                            }
+                            item {
+                                Surface(
+                                    color = charcoal.copy(alpha = 0.55f),
+                                    shape = RoundedCornerShape(scaledDp(18, scale)),
+                                    border = BorderStroke(1.dp, border),
+                                    tonalElevation = 0.dp,
+                                    shadowElevation = 0.dp,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { isMeshExpanded = !isMeshExpanded }
+                                            .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "메쉬 정보",
+                                                color = AppColors.White,
+                                                fontSize = scaledSp(14, scale),
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = "메쉬 수신 ${filteredMesh.size}명",
+                                                color = AppColors.Gray500,
+                                                fontSize = scaledSp(11, scale),
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = if (isMeshExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                            contentDescription = if (isMeshExpanded) "접기" else "펼치기",
+                                            tint = AppColors.White.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                }
+                            }
+                            if (isMeshExpanded) {
+                                if (filteredMesh.isEmpty()) {
+                                    item {
+                                        Text(
+                                            text = "검색 결과 없음",
+                                            color = AppColors.Gray400,
+                                            fontSize = scaledSp(12, scale),
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(start = scaledDp(6, scale))
+                                        )
+                                    }
+                                } else {
+                                    items(filteredMesh) { survivor ->
+                                        SurvivorCard(
+                                            survivor = survivor,
+                                            scale = scale,
+                                            charcoal = charcoal,
+                                            border = border,
+                                            neonGreen = neonGreen,
+                                            neonRed = neonRed,
+                                            peerRssiMap = peerRssiMap,
+                                            peerBatteryMap = peerBatteryMap,
+                                            isSelected = false,
+                                            onSelectTarget = {},
+                                            isCalling = false,
+                                            isInCallWithPeer = false,
+                                            liveDistanceMeters = null,
+                                            liveDistanceSource = DistanceMeasurementSource.NONE,
+                                            rttDistanceMeters = null,
+                                            isSelectable = false,
+                                            statusLabel = "메쉬",
+                                            statusColor = AppColors.Gray400
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -393,7 +514,10 @@ private fun SurvivorCard(
     isInCallWithPeer: Boolean,
     liveDistanceMeters: Float?,
     liveDistanceSource: DistanceMeasurementSource,
-    rttDistanceMeters: Float?
+    rttDistanceMeters: Float?,
+    isSelectable: Boolean = true,
+    statusLabel: String? = null,
+    statusColor: Color? = null
 ) {
     val rssi = peerRssiMap[survivor.peerId]
     val battery = peerBatteryMap[survivor.peerId]?.coerceIn(0, 100)
@@ -436,13 +560,13 @@ private fun SurvivorCard(
         battery >= 35 -> Color(0xFFFFB74D)
         else -> AppColors.Red
     }
-    val stateColor = when {
+    val stateColor = statusColor ?: when {
         isInCallWithPeer -> neonRed
         isCalling -> neonRed
         isSelected -> neonGreen
         else -> AppColors.Gray500
     }
-    val stateText = when {
+    val stateText = statusLabel ?: when {
         isInCallWithPeer -> "통화 중"
         isCalling -> "연결 중"
         isSelected -> "선택됨"
@@ -462,7 +586,13 @@ private fun SurvivorCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onSelectTarget(survivor) }
+                    .then(
+                        if (isSelectable) {
+                            Modifier.clickable { onSelectTarget(survivor) }
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
                 verticalAlignment = Alignment.CenterVertically
             ) {

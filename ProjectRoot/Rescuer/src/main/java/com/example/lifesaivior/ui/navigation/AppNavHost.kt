@@ -1630,8 +1630,18 @@ fun AppNavHost(
             }
             val dbDistanceState by distanceViewModel.uiState.collectAsState()
             val dbDistanceTargetPeerId = selectedTargetPeerId ?: targetSurvivor?.peerId ?: appState.callPeerId
+            val directPeerSet = appState.directPeerIds.toSet()
+            val directSurvivors = appState.survivors.filter { survivor ->
+                val peerId = survivor.peerId
+                peerId.isNotBlank() && directPeerSet.contains(peerId)
+            }
+            val meshSurvivors = appState.survivors.filter { survivor ->
+                val peerId = survivor.peerId
+                peerId.isNotBlank() && !directPeerSet.contains(peerId)
+            }
             RescuerSurvivorDbScreen(
-                survivors = appState.survivors,
+                survivors = directSurvivors,
+                meshSurvivors = meshSurvivors,
                 peerRssiMap = appState.peerRssi,
                 peerBatteryMap = appState.peerBatteryLevels,
                 onDisconnectClick = {
