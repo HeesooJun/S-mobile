@@ -86,7 +86,8 @@ class BleManager(
     private var isConnected = false
     private val connectedPeers = mutableSetOf<String>()
     private val clientConnections = mutableMapOf<String, BluetoothGatt>()
-    private val pendingConnections = mutableSetOf<String>()
+    private val pendingConnections = mutableMapOf<String, Long>()
+    private val inFlightConnections = mutableMapOf<String, BluetoothGatt>()
     private val addressPeerMap = mutableMapOf<String, String>()
     private val pendingPeerIds = mutableMapOf<String, String>()
     private var gattServer: BluetoothGattServer? = null
@@ -114,6 +115,9 @@ class BleManager(
     private val maxConnectionAttempts: Int = 6
     private val connectionAttempts = mutableMapOf<String, ConnectionAttempt>()
     private var connectionAttemptCleanupJob: Job? = null
+    private val pendingConnectionTimeoutMs: Long = 5_000L
+    private val pendingConnectionCleanupIntervalMs: Long = 1_000L
+    private var pendingConnectionCleanupJob: Job? = null
 
     private val baseRssiUpdateIntervalMs: Long = 10_000L
     private val activeRssiUpdateIntervalMs: Long = 3_000L
@@ -274,12 +278,15 @@ class BleManager(
 
     private fun startMaintenanceJobs() {
         startConnectionAttemptCleanup()
+        startPendingConnectionCleanup()
         startRssiMonitoring()
     }
 
     private fun stopMaintenanceJobs() {
         connectionAttemptCleanupJob?.cancel()
         connectionAttemptCleanupJob = null
+        pendingConnectionCleanupJob?.cancel()
+        pendingConnectionCleanupJob = null
         rssiMonitorJob?.cancel()
         rssiMonitorJob = null
     }
@@ -296,6 +303,48 @@ class BleManager(
                 delay(connectionAttemptCleanupIntervalMs)
             }
         }
+    }
+
+    private fun startPendingConnectionCleanup() {
+        if (pendingConnectionCleanupJob?.isActive == true) return
+        pendingConnectionCleanupJob = ioScope.launch {
+            while (isActive) {
+                val now = SystemClock.elapsedRealtime()
+                val expiredAddresses = synchronized(pendingConnections) {
+                    pendingConnections
+                        .filterValues { startedAt -> now - startedAt >= pendingConnectionTimeoutMs }
+                        .keys
+                        .toList()
+                }
+                expiredAddresses.forEach { address ->
+                    handlePendingTimeout(address)
+                }
+                delay(pendingConnectionCleanupIntervalMs)
+            }
+        }
+    }
+
+    private fun handlePendingTimeout(address: String) {
+        val gatt = synchronized(inFlightConnections) {
+            inFlightConnections.remove(address)
+        }
+        synchronized(pendingConnections) {
+            pendingConnections.remove(address)
+        }
+        synchronized(pendingPeerIds) {
+            pendingPeerIds.remove(address)
+        }
+        if (gatt != null) {
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+            }
+            try {
+                gatt.close()
+            } catch (_: Exception) {
+            }
+        }
+        logCallback("Pending connection timeout: $address")
     }
 
     private fun startRssiMonitoring() {
@@ -593,17 +642,28 @@ class BleManager(
                 clearPending(device.address)
                 return
             }
+            if (isInFlight(device.address)) {
+                clearPending(device.address)
+                return
+            }
             val phyMask = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isLongRangeSupported()) {
                 BluetoothDevice.PHY_LE_1M_MASK or BluetoothDevice.PHY_LE_CODED_MASK
             } else BluetoothDevice.PHY_LE_1M_MASK
 
-            device.connectGatt(
+            val gatt = device.connectGatt(
                 context,
                 false,
                 gattClientCallback,
                 BluetoothDevice.TRANSPORT_LE,
                 phyMask
             )
+            if (gatt == null) {
+                clearPending(device.address)
+                return
+            }
+            synchronized(inFlightConnections) {
+                inFlightConnections[device.address] = gatt
+            }
         } catch (e: Exception) {
             logCallback("Connect error: ${e.message}")
             clearPending(device.address)
@@ -613,6 +673,19 @@ class BleManager(
     private val gattClientCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             val address = gatt.device.address
+            val wasPending = isPending(address)
+            val hadInFlight = removeInFlight(address)
+            if (!wasPending && !hadInFlight) {
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
+                return
+            }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 logCallback("Connected. Requesting MTU...")
                 synchronized(clientConnections) {
@@ -1056,15 +1129,18 @@ class BleManager(
             if (clientConnections.containsKey(address)) return true
         }
         synchronized(pendingConnections) {
-            if (pendingConnections.contains(address)) return true
+            if (pendingConnections.containsKey(address)) return true
+        }
+        synchronized(inFlightConnections) {
+            if (inFlightConnections.containsKey(address)) return true
         }
         return false
     }
 
     private fun markPending(address: String): Boolean {
         synchronized(pendingConnections) {
-            if (pendingConnections.contains(address)) return false
-            pendingConnections.add(address)
+            if (pendingConnections.containsKey(address)) return false
+            pendingConnections[address] = SystemClock.elapsedRealtime()
             return true
         }
     }
@@ -1075,6 +1151,24 @@ class BleManager(
         }
         synchronized(pendingPeerIds) {
             pendingPeerIds.remove(address)
+        }
+    }
+
+    private fun isPending(address: String): Boolean {
+        synchronized(pendingConnections) {
+            return pendingConnections.containsKey(address)
+        }
+    }
+
+    private fun isInFlight(address: String): Boolean {
+        synchronized(inFlightConnections) {
+            return inFlightConnections.containsKey(address)
+        }
+    }
+
+    private fun removeInFlight(address: String): Boolean {
+        synchronized(inFlightConnections) {
+            return inFlightConnections.remove(address) != null
         }
     }
 
@@ -1308,6 +1402,7 @@ class BleManager(
         synchronized(connectionAttempts) {
             connectionAttempts.clear()
         }
+        clearInFlightConnections()
         clearAllRssiState()
         notifyConnectionState()
     }
@@ -1416,6 +1511,7 @@ class BleManager(
         synchronized(connectionAttempts) {
             connectionAttempts.clear()
         }
+        clearInFlightConnections()
         clearAllRssiState()
         scheduleGattServerClose()
         isConnected = false
@@ -1480,12 +1576,31 @@ class BleManager(
             synchronized(connectionAttempts) {
                 connectionAttempts.clear()
             }
+            clearInFlightConnections()
             clearAllRssiState()
             // 코루틴 취소 (메모리 릭 방지)
             job.cancel()
             logCallback("BleManager resources released.")
         } catch (e: Exception) {
             logCallback("Error releasing resources: ${e.message}")
+        }
+    }
+
+    private fun clearInFlightConnections() {
+        val inflight = synchronized(inFlightConnections) {
+            val snapshot = inFlightConnections.values.toList()
+            inFlightConnections.clear()
+            snapshot
+        }
+        inflight.forEach { gatt ->
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+            }
+            try {
+                gatt.close()
+            } catch (_: Exception) {
+            }
         }
     }
 }
