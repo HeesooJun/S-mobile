@@ -102,7 +102,8 @@ class BleManager(
     private var autoConnectActive: Boolean = false
 
     // Discovery/connection tuning knobs.
-    private var rssiThresholdDbm: Int = -95
+    // Permissive default to reduce connection gating (bitchat-style).
+    private var rssiThresholdDbm: Int = -120
     private val scanRateLimitMs: Long = 5_000L
     private var lastScanStartTimeMs: Long = 0L
     @Volatile
@@ -111,10 +112,10 @@ class BleManager(
     private var scanRestartJob: Job? = null
 
     private val connectionBackoffBaseMs: Long = 5_000L
-    private val connectionBackoffMaxMs: Long = 30_000L
-    private val connectionAttemptResetMs: Long = 60_000L
+    private val connectionBackoffMaxMs: Long = 5_000L
+    private val connectionAttemptResetMs: Long = 10_000L
     private val connectionAttemptCleanupIntervalMs: Long = 30_000L
-    private val maxConnectionAttempts: Int = 6
+    private val maxConnectionAttempts: Int = 3
     private val connectionAttempts = mutableMapOf<String, ConnectionAttempt>()
     private var connectionAttemptCleanupJob: Job? = null
     private val pendingConnectionTimeoutMs: Long = 5_000L
@@ -1268,9 +1269,7 @@ class BleManager(
     }
 
     private fun requiredBackoffMs(attempts: Int): Long {
-        if (attempts <= 1) return connectionBackoffBaseMs
-        val factor = 1 shl (attempts - 1).coerceAtMost(5)
-        return (connectionBackoffBaseMs * factor).coerceAtMost(connectionBackoffMaxMs)
+        return connectionBackoffBaseMs
     }
 
     fun getDebugSnapshot(): BleDebugSnapshot {
