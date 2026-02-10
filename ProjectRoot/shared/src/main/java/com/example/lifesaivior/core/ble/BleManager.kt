@@ -592,7 +592,6 @@ class BleManager(
             synchronized(scanRssiUpdatedAtMs) {
                 scanRssiUpdatedAtMs[address] = SystemClock.elapsedRealtime()
             }
-            if (filteredRssi < rssiThresholdDbm) return
             val peerId = extractPeerId(result)
             if (peerId != null && isPeerConnected(peerId)) return
             if (isConnectionKnown(address)) return
