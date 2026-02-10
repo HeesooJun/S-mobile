@@ -88,10 +88,14 @@ class BleManager(
     private var isConnected = false
     private val connectedPeers = mutableSetOf<String>()
     private val clientConnections = mutableMapOf<String, BluetoothGatt>()
+    private val pendingClientConnections = mutableMapOf<String, BluetoothGatt>()
     private val pendingConnections = mutableMapOf<String, Long>()
     private val inFlightConnections = mutableMapOf<String, BluetoothGatt>()
     private val addressPeerMap = mutableMapOf<String, String>()
     private val pendingPeerIds = mutableMapOf<String, String>()
+    private val pendingServerConnections = mutableSetOf<String>()
+    private val cccdRetryJobs = mutableMapOf<String, Job>()
+    private val cccdRetryCounts = mutableMapOf<String, Int>()
     private var gattServer: BluetoothGattServer? = null
     @Volatile private var lastServerNotifyAtMs: Long = 0L
     private var gattServerCloseJob: Job? = null
@@ -157,6 +161,12 @@ class BleManager(
             val characteristicUuid: UUID,
             val data: ByteArray
         ) : SendRequest()
+    }
+
+    private enum class NotifySetupResult {
+        STARTED,
+        RETRY,
+        MISSING
     }
 
     // Serialize outbound GATT operations to avoid write/notify races.
@@ -266,6 +276,17 @@ class BleManager(
         // Multiple screens call this; avoid dropping live connections.
         if (autoConnectActive) {
             ensureAutoConnectRunning()
+            return
+        }
+
+        if (isConnected) {
+            logCallback("Auto connect start (already connected).")
+            isHost = true
+            setupGattServer()
+            startAdvertisingInternal(isEmergencyMode = false)
+            startMaintenanceJobs()
+            startScan()
+            autoConnectActive = true
             return
         }
 
@@ -737,14 +758,12 @@ class BleManager(
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 logCallback("Connected. Requesting MTU...")
-                synchronized(clientConnections) {
-                    clientConnections[address] = gatt
+                synchronized(pendingClientConnections) {
+                    pendingClientConnections[address] = gatt
                 }
                 clearConnectionAttempt(address)
                 attachPendingPeerId(address)
                 clearPending(address)
-                notifyConnectionState()
-                deviceMonitor.onConnectionEstablished(address)
                 try {
                     gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                 } catch (_: Exception) {
@@ -765,6 +784,15 @@ class BleManager(
                 synchronized(clientConnections) {
                     clientConnections.remove(address)
                 }
+                synchronized(pendingClientConnections) {
+                    pendingClientConnections.remove(address)
+                }
+                synchronized(cccdRetryCounts) {
+                    cccdRetryCounts.remove(address)
+                }
+                synchronized(cccdRetryJobs) {
+                    cccdRetryJobs.remove(address)?.cancel()
+                }
                 clearRssiState(address)
                 clearPeerId(address)
                 clearPending(address)
@@ -783,9 +811,32 @@ class BleManager(
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            enableNotifications(gatt, Constants.CHAR_UUID)
-            enableNotifications(gatt, Constants.PROTOCOL_CHAR_UUID)
-            logCallback("Ready to chat.")
+            val address = gatt.device.address
+            val protocolResult = enableNotifications(
+                gatt,
+                Constants.PROTOCOL_CHAR_UUID,
+                address,
+                required = true
+            )
+            if (protocolResult == NotifySetupResult.MISSING) {
+                logCallback("Service setup failed for $address, disconnecting.")
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                return
+            }
+            if (protocolResult == NotifySetupResult.RETRY) {
+                scheduleProtocolCccdRetry(address, gatt)
+                return
+            }
+            // Best-effort legacy notification (do not gate readiness)
+            enableNotifications(
+                gatt,
+                Constants.CHAR_UUID,
+                address,
+                required = false
+            )
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
@@ -812,19 +863,86 @@ class BleManager(
                 handleReceivedData(characteristic.value)
             }
         }
+
+        override fun onServiceChanged(gatt: BluetoothGatt) {
+            logCallback("Service changed: ${gatt.device.address}")
+            try {
+                gatt.discoverServices()
+            } catch (_: Exception) {
+            }
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
+            val address = gatt.device.address
+            val characteristic = descriptor.characteristic
+            if (characteristic.uuid != Constants.PROTOCOL_CHAR_UUID) return
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                logCallback("CCCD write failed for $address status=$status")
+                scheduleProtocolCccdRetry(address, gatt)
+                return
+            }
+            markClientReady(address, gatt)
+            // Best-effort legacy notification after readiness
+            enableNotifications(
+                gatt,
+                Constants.CHAR_UUID,
+                address,
+                required = false
+            )
+        }
     }
 
-    private fun enableNotifications(gatt: BluetoothGatt, characteristicUuid: UUID) {
-        val char = gatt.getService(Constants.SERVICE_UUID)?.getCharacteristic(characteristicUuid)
-        if (char == null) return
-        gatt.setCharacteristicNotification(char, true)
+    private fun enableNotifications(
+        gatt: BluetoothGatt,
+        characteristicUuid: UUID,
+        address: String,
+        required: Boolean
+    ): NotifySetupResult {
+        val service = gatt.getService(Constants.SERVICE_UUID)
+        if (service == null) {
+            if (required) {
+                logCallback("Required service missing for $address")
+                return NotifySetupResult.MISSING
+            }
+            return NotifySetupResult.STARTED
+        }
+        val char = service.getCharacteristic(characteristicUuid)
+        if (char == null) {
+            if (required) {
+                logCallback("Required characteristic missing for $address")
+                return NotifySetupResult.MISSING
+            }
+            return NotifySetupResult.STARTED
+        }
+        val notified = gatt.setCharacteristicNotification(char, true)
+        if (!notified && required) {
+            logCallback("setCharacteristicNotification failed for $address")
+            return NotifySetupResult.MISSING
+        }
         val descriptor = char.getDescriptor(
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         )
-        if (descriptor != null) {
-            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            gatt.writeDescriptor(descriptor)
+        if (descriptor == null) {
+            if (required) {
+                logCallback("CCCD missing for $address")
+                return NotifySetupResult.MISSING
+            }
+            return NotifySetupResult.STARTED
         }
+        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        val wrote = gatt.writeDescriptor(descriptor)
+        if (!wrote) {
+            if (required) {
+                logCallback("CCCD write failed for $address")
+                return NotifySetupResult.RETRY
+            }
+            return NotifySetupResult.STARTED
+        }
+        return NotifySetupResult.STARTED
     }
 
     private fun setupGattServer() = serverManager.setupGattServer()
@@ -838,6 +956,13 @@ class BleManager(
                 Constants.SERVICE_UUID,
                 BluetoothGattService.SERVICE_TYPE_PRIMARY
             )
+            val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+            fun createCccd(): BluetoothGattDescriptor {
+                return BluetoothGattDescriptor(
+                    cccdUuid,
+                    BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
+                )
+            }
             val legacyChar = BluetoothGattCharacteristic(
                 Constants.CHAR_UUID,
                 BluetoothGattCharacteristic.PROPERTY_READ or
@@ -847,6 +972,7 @@ class BleManager(
                 BluetoothGattCharacteristic.PERMISSION_READ or
                     BluetoothGattCharacteristic.PERMISSION_WRITE
             )
+            legacyChar.addDescriptor(createCccd())
             val protocolChar = BluetoothGattCharacteristic(
                 Constants.PROTOCOL_CHAR_UUID,
                 BluetoothGattCharacteristic.PROPERTY_READ or
@@ -856,6 +982,7 @@ class BleManager(
                 BluetoothGattCharacteristic.PERMISSION_READ or
                     BluetoothGattCharacteristic.PERMISSION_WRITE
             )
+            protocolChar.addDescriptor(createCccd())
             service.addCharacteristic(legacyChar)
             service.addCharacteristic(protocolChar)
             gattServer?.addService(service)
@@ -879,28 +1006,28 @@ class BleManager(
                     }
                     return
                 }
-                logCallback("✅ Peer joined (구조대 접속!): ${device.address}")
-
-                // 구조대가 접속하면 ViewModel에 알림 (사이렌 울리기)
-                Handler(Looper.getMainLooper()).post {
-                    onRescueConnected?.invoke()
+                logCallback("✅ Peer joined (pending notify): ${device.address}")
+                synchronized(pendingServerConnections) {
+                    pendingServerConnections.add(device.address)
                 }
-
-                synchronized(connectedPeers) {
-                    connectedPeers.add(device.address)
-                }
-                notifyConnectionState()
                 handler.removeCallbacksAndMessages(null)
-                deviceMonitor.onConnectionEstablished(device.address)
+                // wait for CCCD enable before marking established
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 synchronized(connectedPeers) {
                     connectedPeers.remove(device.address)
+                }
+                synchronized(pendingServerConnections) {
+                    pendingServerConnections.remove(device.address)
                 }
                 clearRssiState(device.address)
                 clearPeerId(device.address)
                 notifyConnectionState()
                 deviceMonitor.onDeviceDisconnected(device.address, status != BluetoothGatt.GATT_SUCCESS)
             }
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            logCallback("notify sent to=${device.address} status=$status")
         }
 
         override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
@@ -922,6 +1049,33 @@ class BleManager(
             } else {
                 handleReceivedData(value)
                 relayData(device.address, value, characteristic.uuid)
+            }
+            if (responseNeeded) {
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            }
+        }
+
+        override fun onDescriptorWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            descriptor: BluetoothGattDescriptor,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray
+        ) {
+            val address = device.address
+            if (descriptor.characteristic.uuid == Constants.PROTOCOL_CHAR_UUID) {
+                val enabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
+                    value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+                if (enabled) {
+                    markServerReady(address)
+                } else if (value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)) {
+                    synchronized(connectedPeers) {
+                        connectedPeers.remove(address)
+                    }
+                    notifyConnectionState()
+                }
             }
             if (responseNeeded) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
@@ -993,6 +1147,14 @@ class BleManager(
         if (!isConnected) {
             ConnectionLog.add("BleSend", "broadcast skipped (no active link)")
             return
+        }
+        if (characteristicUuid == Constants.PROTOCOL_CHAR_UUID) {
+            val addrCount = getAllConnectedAddresses().size
+            val peerCount = getConnectedPeerCount()
+            ConnectionLog.add(
+                "BleSend",
+                "protocol broadcast len=${data.size} addrCount=$addrCount peerCount=$peerCount"
+            )
         }
         val queued = sendActor.trySend(
             SendRequest.Broadcast(characteristicUuid, data, excludeAddress)
@@ -1152,8 +1314,107 @@ class BleManager(
         }
         removedAddresses.forEach { address -> clearRssiState(address) }
         val count = getAllConnectedAddresses().size
+        val peerCount = getConnectedPeerCount()
         isConnected = count > 0
-        connectionCallback(isConnected, getConnectedPeerCount())
+        logCallback("notifyConnectionState addrCount=$count peerCount=$peerCount isConnected=$isConnected")
+        connectionCallback(isConnected, peerCount)
+    }
+
+    private fun scheduleProtocolCccdRetry(address: String, gatt: BluetoothGatt) {
+        synchronized(cccdRetryJobs) {
+            if (cccdRetryJobs[address]?.isActive == true) return
+        }
+        val attempt = synchronized(cccdRetryCounts) {
+            val next = (cccdRetryCounts[address] ?: 0) + 1
+            cccdRetryCounts[address] = next
+            next
+        }
+        if (attempt > 6) {
+            logCallback("CCCD retry exceeded for $address, disconnecting.")
+            try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+            }
+            return
+        }
+        val delayMs = (200L * attempt).coerceAtMost(1_500L)
+        val job = scope.launch {
+            delay(delayMs)
+            synchronized(cccdRetryJobs) {
+                cccdRetryJobs.remove(address)
+            }
+            val stillPending = synchronized(pendingClientConnections) {
+                pendingClientConnections.containsKey(address)
+            } || synchronized(clientConnections) {
+                clientConnections.containsKey(address)
+            }
+            if (!stillPending) return@launch
+            val result = enableNotifications(
+                gatt,
+                Constants.PROTOCOL_CHAR_UUID,
+                address,
+                required = true
+            )
+            when (result) {
+                NotifySetupResult.STARTED -> Unit
+                NotifySetupResult.RETRY -> scheduleProtocolCccdRetry(address, gatt)
+                NotifySetupResult.MISSING -> {
+                    logCallback("Service setup failed for $address, disconnecting.")
+                    try {
+                        gatt.disconnect()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+        synchronized(cccdRetryJobs) {
+            cccdRetryJobs[address] = job
+        }
+    }
+
+    private fun markClientReady(address: String, gatt: BluetoothGatt) {
+        var added = false
+        synchronized(clientConnections) {
+            if (!clientConnections.containsKey(address)) {
+                clientConnections[address] = gatt
+                added = true
+            }
+        }
+        synchronized(pendingClientConnections) {
+            pendingClientConnections.remove(address)
+        }
+        synchronized(cccdRetryCounts) {
+            cccdRetryCounts.remove(address)
+        }
+        synchronized(cccdRetryJobs) {
+            cccdRetryJobs.remove(address)?.cancel()
+        }
+        if (added) {
+            logCallback("Client ready (CCCD enabled): $address")
+            notifyConnectionState()
+            deviceMonitor.onConnectionEstablished(address)
+        }
+    }
+
+    private fun markServerReady(address: String) {
+        var added = false
+        synchronized(connectedPeers) {
+            if (!connectedPeers.contains(address)) {
+                connectedPeers.add(address)
+                added = true
+            }
+        }
+        synchronized(pendingServerConnections) {
+            pendingServerConnections.remove(address)
+        }
+        if (added) {
+            logCallback("Server ready (CCCD enabled): $address")
+            notifyConnectionState()
+            Handler(Looper.getMainLooper()).post {
+                onRescueConnected?.invoke()
+            }
+            deviceMonitor.onConnectionEstablished(address)
+        }
     }
 
     private fun getSystemConnectedAddresses(): Set<String>? {
@@ -1178,6 +1439,9 @@ class BleManager(
         }
         synchronized(clientConnections) {
             if (clientConnections.containsKey(address)) return true
+        }
+        synchronized(pendingClientConnections) {
+            if (pendingClientConnections.containsKey(address)) return true
         }
         synchronized(pendingConnections) {
             if (pendingConnections.containsKey(address)) return true
@@ -1429,6 +1693,19 @@ class BleManager(
             }
             clientConnections.clear()
         }
+        synchronized(pendingClientConnections) {
+            pendingClientConnections.values.forEach { gatt ->
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
+            }
+            pendingClientConnections.clear()
+        }
         val serverDevices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
         serverDevices.forEach { device ->
             try {
@@ -1438,6 +1715,16 @@ class BleManager(
         }
         synchronized(connectedPeers) {
             connectedPeers.clear()
+        }
+        synchronized(pendingServerConnections) {
+            pendingServerConnections.clear()
+        }
+        synchronized(cccdRetryCounts) {
+            cccdRetryCounts.clear()
+        }
+        synchronized(cccdRetryJobs) {
+            cccdRetryJobs.values.forEach { it.cancel() }
+            cccdRetryJobs.clear()
         }
         synchronized(addressPeerMap) {
             addressPeerMap.clear()
@@ -1554,6 +1841,19 @@ class BleManager(
             }
             clientConnections.clear()
         }
+        synchronized(pendingClientConnections) {
+            pendingClientConnections.values.forEach { gatt ->
+                try {
+                    gatt.disconnect()
+                } catch (_: Exception) {
+                }
+                try {
+                    gatt.close()
+                } catch (_: Exception) {
+                }
+            }
+            pendingClientConnections.clear()
+        }
         synchronized(pendingConnections) {
             pendingConnections.clear()
         }
@@ -1566,6 +1866,16 @@ class BleManager(
         isConnected = false
         synchronized(connectedPeers) {
             connectedPeers.clear()
+        }
+        synchronized(pendingServerConnections) {
+            pendingServerConnections.clear()
+        }
+        synchronized(cccdRetryCounts) {
+            cccdRetryCounts.clear()
+        }
+        synchronized(cccdRetryJobs) {
+            cccdRetryJobs.values.forEach { it.cancel() }
+            cccdRetryJobs.clear()
         }
         connectionCallback(false, 0)
     }
