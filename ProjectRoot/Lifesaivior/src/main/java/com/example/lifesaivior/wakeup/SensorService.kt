@@ -139,7 +139,14 @@ class SensorService : Service(), SensorEventListener {
                 backupDemo = settings.isDemoModeEnabled
             )
         }
-        if (!settings.isDemoModeEnabled) {
+        if (settings.isDemoModeEnabled) {
+            // 시연 모드에서는 1회 발동 후 자동 OFF 처리
+            AppSettingsRepository.setDemoMode(this, false)
+            AppSettingsRepository.setVoiceDetection(this, false)
+            AppSettingsRepository.setShockDetection(this, false)
+            AppSettingsRepository.setSosBackgroundSuspended(this, false)
+            AppSettingsRepository.clearSosBackup(this)
+        } else {
             val voiceEnabled = settings.isVoiceDetectionEnabled
             val shockEnabled = settings.isShockDetectionEnabled
             if (shockEnabled && !voiceEnabled) {
