@@ -999,6 +999,7 @@ fun AppNavHost(
         PowerSavingLayer(
             isPowerSaving = isPowerSaving,
             isForceExit = !isPowerSaving,
+            resetToken = forceSetPowerSavingToken,
             onRequestExitPowerSaving = {
                 if (!isBatteryCritical) {
                     isPowerSaving = false

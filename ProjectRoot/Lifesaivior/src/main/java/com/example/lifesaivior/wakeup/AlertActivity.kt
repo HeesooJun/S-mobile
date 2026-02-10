@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.example.lifesaivior.R

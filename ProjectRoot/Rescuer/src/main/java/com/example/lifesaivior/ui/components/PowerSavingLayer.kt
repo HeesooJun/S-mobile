@@ -24,6 +24,7 @@ import com.example.lifesaivior.ui.theme.scaledSp
 fun PowerSavingLayer(
     isPowerSaving: Boolean,
     isForceExit: Boolean = false,
+    resetToken: Long = 0L,
     onRequestExitPowerSaving: () -> Unit
 ) {
     if (!isPowerSaving) return
@@ -36,6 +37,13 @@ fun PowerSavingLayer(
 
     // 절전모드 들어가면 무조건 블랙부터 시작
     LaunchedEffect(isPowerSaving) { revealed = false }
+
+    // 외부에서 절전 모드 재요청 시(예: 원격 패킷), 즉시 블랙으로 복귀
+    LaunchedEffect(resetToken) {
+        if (resetToken > 0L) {
+            revealed = false
+        }
+    }
 
     // (옵션) 강제 트리거가 있으면 화면 잠깐 보여주기
     LaunchedEffect(isForceExit) {
