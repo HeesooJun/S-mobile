@@ -96,6 +96,8 @@ class BleManager(
     private val pendingServerConnections = mutableSetOf<String>()
     private val cccdRetryJobs = mutableMapOf<String, Job>()
     private val cccdRetryCounts = mutableMapOf<String, Int>()
+    private val mtuFallbackJobs = mutableMapOf<String, Job>()
+    private val mtuFallbackDelayMs: Long = 2_000L
     private var gattServer: BluetoothGattServer? = null
     @Volatile private var lastServerNotifyAtMs: Long = 0L
     private var gattServerCloseJob: Job? = null
@@ -779,8 +781,10 @@ class BleManager(
                     }
                 }
                 gatt.requestMtu(512)
+                scheduleMtuFallback(address, gatt)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 logCallback("Disconnected.")
+                cancelMtuFallback(address)
                 synchronized(clientConnections) {
                     clientConnections.remove(address)
                 }
@@ -807,6 +811,7 @@ class BleManager(
 
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
             logCallback("MTU changed: $mtu bytes")
+            gatt?.device?.address?.let { cancelMtuFallback(it) }
             gatt?.discoverServices()
         }
 
@@ -949,7 +954,19 @@ class BleManager(
 
     private fun setupGattServerImpl() {
         cancelGattServerClose()
-        if (gattServer != null) return
+        if (gattServer != null) {
+            val hasServerLinks = synchronized(connectedPeers) { connectedPeers.isNotEmpty() } ||
+                synchronized(pendingServerConnections) { pendingServerConnections.isNotEmpty() }
+            val hasClientLinks = synchronized(clientConnections) { clientConnections.isNotEmpty() } ||
+                synchronized(pendingClientConnections) { pendingClientConnections.isNotEmpty() } ||
+                synchronized(inFlightConnections) { inFlightConnections.isNotEmpty() }
+            if (hasServerLinks || hasClientLinks) return
+            try {
+                gattServer?.close()
+            } catch (_: Exception) {
+            }
+            gattServer = null
+        }
         try {
             gattServer = bluetoothManager?.openGattServer(context, gattServerCallback)
             val service = BluetoothGattService(
@@ -1372,6 +1389,39 @@ class BleManager(
         }
     }
 
+    private fun scheduleMtuFallback(address: String, gatt: BluetoothGatt) {
+        synchronized(mtuFallbackJobs) {
+            if (mtuFallbackJobs[address]?.isActive == true) return
+        }
+        val job = scope.launch {
+            delay(mtuFallbackDelayMs)
+            synchronized(mtuFallbackJobs) {
+                mtuFallbackJobs.remove(address)
+            }
+            logCallback("MTU timeout, discovering services for $address")
+            try {
+                gatt.discoverServices()
+            } catch (_: Exception) {
+            }
+        }
+        synchronized(mtuFallbackJobs) {
+            mtuFallbackJobs[address] = job
+        }
+    }
+
+    private fun cancelMtuFallback(address: String) {
+        synchronized(mtuFallbackJobs) {
+            mtuFallbackJobs.remove(address)?.cancel()
+        }
+    }
+
+    private fun cancelAllMtuFallbacks() {
+        synchronized(mtuFallbackJobs) {
+            mtuFallbackJobs.values.forEach { it.cancel() }
+            mtuFallbackJobs.clear()
+        }
+    }
+
     private fun markClientReady(address: String, gatt: BluetoothGatt) {
         var added = false
         synchronized(clientConnections) {
@@ -1680,6 +1730,7 @@ class BleManager(
 
     fun clearAllConnectionsAndMappings() {
         deviceMonitor.clearAll()
+        cancelAllMtuFallbacks()
         synchronized(clientConnections) {
             clientConnections.values.forEach { gatt ->
                 try {
@@ -1706,7 +1757,10 @@ class BleManager(
             }
             pendingClientConnections.clear()
         }
-        val serverDevices = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
+        val serverDevices = buildList {
+            addAll(bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty())
+            addAll(bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT_SERVER).orEmpty())
+        }
         serverDevices.forEach { device ->
             try {
                 gattServer?.cancelConnection(device)
@@ -1828,6 +1882,7 @@ class BleManager(
         stopScan()
         stopAdvertising()
         stopMaintenanceJobs()
+        cancelAllMtuFallbacks()
         synchronized(clientConnections) {
             clientConnections.values.forEach { gatt ->
                 try {
@@ -1854,6 +1909,16 @@ class BleManager(
             }
             pendingClientConnections.clear()
         }
+        val serverDevices = buildList {
+            addAll(bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty())
+            addAll(bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT_SERVER).orEmpty())
+        }
+        serverDevices.forEach { device ->
+            try {
+                gattServer?.cancelConnection(device)
+            } catch (_: Exception) {
+            }
+        }
         synchronized(pendingConnections) {
             pendingConnections.clear()
         }
@@ -1876,6 +1941,12 @@ class BleManager(
         synchronized(cccdRetryJobs) {
             cccdRetryJobs.values.forEach { it.cancel() }
             cccdRetryJobs.clear()
+        }
+        synchronized(addressPeerMap) {
+            addressPeerMap.clear()
+        }
+        synchronized(pendingPeerIds) {
+            pendingPeerIds.clear()
         }
         connectionCallback(false, 0)
     }
