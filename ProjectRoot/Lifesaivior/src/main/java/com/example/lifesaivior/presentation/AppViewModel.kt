@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.location.LocationManager
 import android.net.wifi.WifiManager
 import android.media.AudioManager
@@ -35,6 +37,7 @@ import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.core.profile.ProfileStore
 import com.example.lifesaivior.core.profile.SurvivorProfile
 import com.example.lifesaivior.core.service.RescueService
+import com.example.lifesaivior.core.settings.AppSettingsRepository
 import com.example.lifesaivior.core.uwb.UwbRanger
 import com.example.lifesaivior.core.wifi.WifiAwareRanger
 import com.example.lifesaivior.core.wifi.WifiDirectRanger
@@ -58,10 +61,14 @@ import com.example.lifesaivior.wakeup.SensorService
 import com.example.lifesaivior.wakeup.VoiceService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
@@ -115,6 +122,11 @@ data class AppUiState(
     // [추가] 설정 상태 관리
     val isVoiceDetectionEnabled: Boolean = false,
     val isShockDetectionEnabled: Boolean = false,
+    val isDemoModeEnabled: Boolean = false,
+    val demoBeepLevel: Int = 100,
+    val demoHighToneLevel: Int = 100,
+    val demoVibrateLevel: Int = 100,
+    val demoEasLevel: Int = 100,
     val messages: List<ChatMessage> = emptyList(),
     val bleDebug: BleDebugStats = BleDebugStats(),
     val signatureLogs: List<SignatureLogEntry> = emptyList(),
@@ -143,6 +155,19 @@ sealed interface UiEvent {
     data class Toast(val message: String) : UiEvent
 }
 
+data class AutoSosTrigger(
+    val triggeredAtMs: Long,
+    val reason: String?
+)
+
+private data class AlertToneRequest(
+    val command: DeviceControlCommand,
+    val durationMs: Int,
+    val intensity: Int,
+    val frequencyHz: Int? = null,
+    val enqueuedAtMs: Long = System.currentTimeMillis()
+)
+
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = getApplication<Application>()
@@ -155,6 +180,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiEvents = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
     val uiEvents: SharedFlow<UiEvent> = _uiEvents.asSharedFlow()
+    private val _pendingAutoSos = MutableStateFlow<AutoSosTrigger?>(null)
+    val pendingAutoSos: StateFlow<AutoSosTrigger?> = _pendingAutoSos.asStateFlow()
+    private val _remoteControlEvents = MutableSharedFlow<DeviceControlCommand>(extraBufferCapacity = 8)
+    val remoteControlEvents: SharedFlow<DeviceControlCommand> = _remoteControlEvents.asSharedFlow()
 
     private val _meshVisualEvents = MutableSharedFlow<MeshVisualEvent>(
         extraBufferCapacity = 64,
@@ -182,6 +211,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             add(Manifest.permission.UWB_RANGING)
         }
+        add(Manifest.permission.CAMERA)
         add(Manifest.permission.ACCESS_FINE_LOCATION)
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         add(Manifest.permission.RECORD_AUDIO)
@@ -201,10 +231,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val profileLogBuffer = ArrayDeque<ProfileSyncLogEntry>()
     private val profileDao by lazy { AppDatabase.getInstance(app).profileDao() }
 
+    private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val cameraManager = app.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+    private val alarmVolumeLock = Any()
+    @Volatile private var alarmVolumeBackup: Int? = null
+    private val alertQueueMutex = Mutex()
+    private val beepQueue = ArrayDeque<AlertToneRequest>()
+    private val highToneQueue = ArrayDeque<AlertToneRequest>()
+    @Volatile private var lastAlertType: DeviceControlCommand? = null
+    @Volatile private var lastBeepEnqueueAtMs: Long = 0L
+    @Volatile private var lastHighEnqueueAtMs: Long = 0L
+    private var alertPlaybackJob: Job? = null
+    private var torchCameraId: String? = null
+    private var torchSosJob: Job? = null
+    @Volatile private var isTorchSosEnabled: Boolean = false
 
-    // 설정 저장소
-    private val settingsPrefs by lazy { app.getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
     private val prefs by lazy { app.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
 
     private var senderId: ByteArray = ByteArray(0)
@@ -240,6 +282,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        AppSettingsRepository.init(app)
         initProtocol()
         initBle()
         initBatteryMonitor()
@@ -251,14 +294,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         observeCallConnection()
 
         // [초기화] 저장된 설정 불러오기
-        val savedVoice = settingsPrefs.getBoolean("voice_detection", false)
-        val savedShock = settingsPrefs.getBoolean("shock_detection", false)
+        val settings = AppSettingsRepository.snapshot(app)
+        val effectiveVoice = if (settings.isDemoModeEnabled) true else settings.isVoiceDetectionEnabled
+        val effectiveShock = if (settings.isDemoModeEnabled) true else settings.isShockDetectionEnabled
         _uiState.update {
             it.copy(
                 myPeerId = bytesToHex(senderId),
-                isVoiceDetectionEnabled = savedVoice,
-                isShockDetectionEnabled = savedShock
+                isVoiceDetectionEnabled = effectiveVoice,
+                isShockDetectionEnabled = effectiveShock,
+                isDemoModeEnabled = settings.isDemoModeEnabled,
+                demoBeepLevel = settings.demoBeepLevel,
+                demoHighToneLevel = settings.demoHighToneLevel,
+                demoVibrateLevel = settings.demoVibrateLevel,
+                demoEasLevel = settings.demoEasLevel
             )
+        }
+
+        viewModelScope.launch {
+            AppSettingsRepository.state.collect { latest ->
+                val voiceEnabled = if (latest.isDemoModeEnabled) true else latest.isVoiceDetectionEnabled
+                val shockEnabled = if (latest.isDemoModeEnabled) true else latest.isShockDetectionEnabled
+                _uiState.update { state ->
+                    state.copy(
+                        isVoiceDetectionEnabled = voiceEnabled,
+                        isShockDetectionEnabled = shockEnabled,
+                        isDemoModeEnabled = latest.isDemoModeEnabled,
+                        demoBeepLevel = latest.demoBeepLevel,
+                        demoHighToneLevel = latest.demoHighToneLevel,
+                        demoVibrateLevel = latest.demoVibrateLevel,
+                        demoEasLevel = latest.demoEasLevel
+                    )
+                }
+            }
         }
 
         AppShutdownHooks.register(
@@ -272,18 +339,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ------------------------------------------------------------------------
 
     fun setVoiceDetection(enabled: Boolean) {
-        settingsPrefs.edit().putBoolean("voice_detection", enabled).apply()
+        if (!enabled && AppSettingsRepository.state.value.isDemoModeEnabled) {
+            _uiEvents.tryEmit(UiEvent.Toast("시연 모드에서는 음성 감지를 끌 수 없습니다."))
+            return
+        }
+        AppSettingsRepository.setVoiceDetection(app, enabled)
         _uiState.update { it.copy(isVoiceDetectionEnabled = enabled) }
 
         if (enabled) {
             if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                clearSosSuspensionForManualEnable()
                 startServiceSafe(VoiceService::class.java)
                 _uiEvents.tryEmit(UiEvent.Toast("음성 감지 켜짐"))
             } else {
                 _uiEvents.tryEmit(UiEvent.Toast("마이크 권한이 필요합니다."))
                 // 권한이 없으면 다시 끔
                 _uiState.update { it.copy(isVoiceDetectionEnabled = false) }
-                settingsPrefs.edit().putBoolean("voice_detection", false).apply()
+                AppSettingsRepository.setVoiceDetection(app, false)
             }
         } else {
             app.stopService(Intent(app, VoiceService::class.java))
@@ -292,15 +364,116 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setShockDetection(enabled: Boolean) {
-        settingsPrefs.edit().putBoolean("shock_detection", enabled).apply()
+        if (!enabled && AppSettingsRepository.state.value.isDemoModeEnabled) {
+            _uiEvents.tryEmit(UiEvent.Toast("시연 모드에서는 충격 감지를 끌 수 없습니다."))
+            return
+        }
+        AppSettingsRepository.setShockDetection(app, enabled)
         _uiState.update { it.copy(isShockDetectionEnabled = enabled) }
 
         if (enabled) {
+            clearSosSuspensionForManualEnable()
             startServiceSafe(SensorService::class.java)
             _uiEvents.tryEmit(UiEvent.Toast("충격 감지 켜짐"))
         } else {
             app.stopService(Intent(app, SensorService::class.java))
             _uiEvents.tryEmit(UiEvent.Toast("충격 감지 꺼짐"))
+        }
+    }
+
+    private fun clearSosSuspensionForManualEnable() {
+        val settings = AppSettingsRepository.snapshot(app)
+        if (!settings.isSosBackgroundSuspended) return
+        AppSettingsRepository.setSosBackgroundSuspended(app, false)
+        AppSettingsRepository.clearSosBackup(app)
+    }
+
+    fun onAutoSosTriggered(reason: String?) {
+        _pendingAutoSos.value = AutoSosTrigger(
+            triggeredAtMs = System.currentTimeMillis(),
+            reason = reason
+        )
+    }
+
+    fun consumeAutoSosTrigger() {
+        _pendingAutoSos.value = null
+    }
+
+    fun setDemoMode(enabled: Boolean) {
+        AppSettingsRepository.setDemoMode(app, enabled)
+        _uiState.update { it.copy(isDemoModeEnabled = enabled) }
+
+        if (enabled) {
+            app.stopService(Intent(app, VoiceService::class.java))
+            setVoiceDetection(true)
+            setShockDetection(true)
+        } else {
+            setVoiceDetection(false)
+            setShockDetection(false)
+        }
+    }
+
+    fun setDemoBeepLevel(level: Int) {
+        val safe = level.coerceIn(0, 100)
+        AppSettingsRepository.setDemoBeepLevel(app, safe)
+        _uiState.update { it.copy(demoBeepLevel = safe) }
+    }
+
+    fun setDemoHighToneLevel(level: Int) {
+        val safe = level.coerceIn(0, 100)
+        AppSettingsRepository.setDemoHighToneLevel(app, safe)
+        _uiState.update { it.copy(demoHighToneLevel = safe) }
+    }
+
+    fun setDemoVibrateLevel(level: Int) {
+        val safe = level.coerceIn(0, 100)
+        AppSettingsRepository.setDemoVibrateLevel(app, safe)
+        _uiState.update { it.copy(demoVibrateLevel = safe) }
+    }
+
+    fun setDemoEasLevel(level: Int) {
+        val safe = level.coerceIn(0, 100)
+        AppSettingsRepository.setDemoEasLevel(app, safe)
+        _uiState.update { it.copy(demoEasLevel = safe) }
+    }
+
+    private fun suspendBackgroundForSos() {
+        val settings = AppSettingsRepository.snapshot(app)
+        if (settings.isSosBackgroundSuspended) return
+
+        AppSettingsRepository.setSosBackgroundSuspended(
+            context = app,
+            suspended = true,
+            backupVoice = settings.isVoiceDetectionEnabled,
+            backupShock = settings.isShockDetectionEnabled,
+            backupDemo = settings.isDemoModeEnabled
+        )
+
+        app.stopService(Intent(app, VoiceService::class.java))
+        app.stopService(Intent(app, SensorService::class.java))
+    }
+
+    private fun restoreBackgroundAfterSos() {
+        val settings = AppSettingsRepository.snapshot(app)
+        if (!settings.isSosBackgroundSuspended) return
+
+        AppSettingsRepository.setSosBackgroundSuspended(app, false)
+        AppSettingsRepository.clearSosBackup(app)
+
+        val isDemoOn = settings.isDemoModeEnabled
+        val shouldVoiceOn = settings.isVoiceDetectionEnabled || isDemoOn
+        val shouldShockOn = settings.isShockDetectionEnabled || isDemoOn
+
+        if (shouldVoiceOn && ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startServiceSafe(VoiceService::class.java)
+        } else {
+            app.stopService(Intent(app, VoiceService::class.java))
+        }
+
+        if (shouldShockOn) {
+            startServiceSafe(SensorService::class.java)
+        } else {
+            app.stopService(Intent(app, SensorService::class.java))
         }
     }
 
@@ -327,6 +500,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _uiEvents.tryEmit(UiEvent.Toast("블루투스 및 서비스 권한이 필요합니다."))
             return
         }
+        suspendBackgroundForSos()
         autoConnectBlocked = false
         ConnectionLog.add("Runtime", "auto-connect unblocked (rescue-start)")
         _uiState.update { it.copy(isAutoConnectBlocked = false) }
@@ -365,6 +539,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         _uiState.update { it.copy(isRescueSignalActive = false) }
         _uiEvents.tryEmit(UiEvent.Toast("구조 신호 중단됨"))
+        restoreBackgroundAfterSos()
     }
 
     fun refreshPermissions() {
@@ -932,11 +1107,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isDisconnecting) return
         autoConnectBlocked = true
         ConnectionLog.add("Runtime", "auto-connect blocked (manual disconnect)")
-        _uiState.update { it.copy(isDisconnecting = true, isAutoConnectBlocked = true) }
+        _uiState.update {
+            it.copy(
+                isDisconnecting = true,
+                isAutoConnectBlocked = true,
+                isConnected = false,
+                connectedCount = 0,
+                directPeerIds = emptyList()
+            )
+        }
         stopAllRemoteAlerts()
 
         sendLeavePacket()
         stopRescueSignal()
+        clearRuntimeCaches("disconnect")
 
         if (::bleManager.isInitialized) {
             bleManager.disconnect()
@@ -950,6 +1134,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendLeaveOnShutdown() {
         if (!::protocolCore.isInitialized) return
         sendLeavePacket()
+    }
+
+    private fun clearRuntimeCaches(reason: String) {
+        announcedPeerLastSeen.clear()
+        peerNicknames.clear()
+        peerDirectAddresses.clear()
+        announcedProfiles.clear()
+        directPeerAnnounceTracker.clear()
+        meshRegistry.clear()
+        meshGraphRegistry.clear()
+        peerIdentityRegistry.clear()
+        _uiState.update {
+            it.copy(
+                peerNicknames = emptyMap(),
+                peerDirectAddresses = emptyMap(),
+                survivors = emptyList()
+            )
+        }
+        ConnectionLog.add("Runtime", "clear caches reason=$reason")
     }
 
     fun stopServicesForShutdown() {
@@ -1032,6 +1235,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         protocolCore.setOnPacketReceived { packet, relayAddress ->
             if (packet.header.senderId.contentEquals(senderId)) return@setOnPacketReceived
+            if (autoConnectBlocked && packet.header.type == PacketType.ANNOUNCE) {
+                ConnectionLog.add("Runtime", "announce ignored (manual disconnect)")
+                return@setOnPacketReceived
+            }
 
             val pathLabel = packetPathLabel(packet, relayAddress)
             val peerHex = bytesToHex(packet.header.senderId)
@@ -1047,6 +1254,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             when (packet.header.type) {
                 PacketType.ANNOUNCE -> {
+                    if (autoConnectBlocked) {
+                        ConnectionLog.add("Runtime", "announce dropped (manual disconnect) peer=$peerHex")
+                        return@setOnPacketReceived
+                    }
                     val now = System.currentTimeMillis()
                     val age = now - packet.header.timestamp
                     if (age > ProtocolConstants.Mesh.PEER_TIMEOUT_MS) return@setOnPacketReceived
@@ -1205,9 +1416,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketType.DEVICE_CONTROL -> {
                     val recipient = packet.header.recipientId
                     if (recipient != null && !recipient.contentEquals(senderId)) {
+                        ConnectionLog.add(
+                            "DeviceControl",
+                            "drop recipient mismatch my=${bytesToHex(senderId)} recv=${bytesToHex(recipient)} from=$peerHex"
+                        )
                         return@setOnPacketReceived
                     }
-                    val payload = DeviceControlPayload.decode(packet.payload) ?: return@setOnPacketReceived
+                    val payload = DeviceControlPayload.decode(packet.payload)
+                    if (payload == null) {
+                        ConnectionLog.add(
+                            "DeviceControl",
+                            "drop decode failed from=$peerHex len=${packet.payload.size}"
+                        )
+                        return@setOnPacketReceived
+                    }
+                    ConnectionLog.add(
+                        "DeviceControl",
+                        "recv from=$peerHex rcp=${recipient?.let(::bytesToHex) ?: "-"} cmd=${payload.command.name} d=${payload.durationMs} i=${payload.intensity} f=${payload.frequencyHz ?: 0}"
+                    )
                     handleDeviceControl(peerHex, payload)
                 }
                 else -> Unit
@@ -1438,6 +1664,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleDeviceControl(peerIdHex: String, payload: DeviceControlPayload) {
+        _remoteControlEvents.tryEmit(payload.command)
         when (payload.command) {
             DeviceControlCommand.WAKE_SCREEN -> {
                 updateLocalPowerSavingState(false)
@@ -1448,14 +1675,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             DeviceControlCommand.BEEP -> {
-                val toneType = when (payload.intensity) {
-                    0 -> ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD
-                    1 -> ToneGenerator.TONE_CDMA_HIGH_L
-                    2 -> ToneGenerator.TONE_CDMA_HIGH_PBX_L
-                    else -> ToneGenerator.TONE_CDMA_HIGH_SS
-                }
-                runCatching { toneGenerator.stopTone() }
-                toneGenerator.startTone(toneType, payload.durationMs.coerceIn(220, 8_000))
+                enqueueAlertTone(
+                    AlertToneRequest(
+                        command = DeviceControlCommand.BEEP,
+                        durationMs = payload.durationMs,
+                        intensity = payload.intensity,
+                        frequencyHz = null
+                    )
+                )
                 ConnectionLog.add(
                     "DeviceControl",
                     "beep by $peerIdHex d=${payload.durationMs} i=${payload.intensity}"
@@ -1471,11 +1698,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             DeviceControlCommand.HIGH_TONE -> {
-                val frequency = payload.frequencyHz ?: DEFAULT_HIGH_TONE_HZ
-                playHighTone(frequency, payload.durationMs, payload.intensity)
+                enqueueAlertTone(
+                    AlertToneRequest(
+                        command = DeviceControlCommand.HIGH_TONE,
+                        durationMs = payload.durationMs,
+                        intensity = payload.intensity,
+                        frequencyHz = payload.frequencyHz ?: DEFAULT_HIGH_TONE_HZ
+                    )
+                )
                 ConnectionLog.add(
                     "DeviceControl",
-                    "high-tone by $peerIdHex f=${frequency} d=${payload.durationMs} i=${payload.intensity}"
+                    "high-tone by $peerIdHex f=${payload.frequencyHz ?: DEFAULT_HIGH_TONE_HZ} d=${payload.durationMs} i=${payload.intensity}"
                 )
             }
 
@@ -1499,38 +1732,261 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun triggerLocalVibration(durationMs: Int, intensity: Int) {
-        val vibrator = getVibrator() ?: return
-        val safeDuration = durationMs.coerceIn(200, 8_000).toLong()
-        val amplitude = when (intensity.coerceIn(0, 3)) {
-            0 -> 120
-            1 -> 185
-            2 -> 235
-            else -> 255
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val effect = VibrationEffect.createOneShot(safeDuration, amplitude)
-            vibrator.vibrate(effect)
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(safeDuration)
+    private fun enqueueAlertTone(request: AlertToneRequest) {
+        viewModelScope.launch {
+            alertQueueMutex.withLock {
+                val totalSize = beepQueue.size + highToneQueue.size
+                if (totalSize >= MAX_ALERT_QUEUE_SIZE) {
+                    // Drop the oldest in the same queue if possible; otherwise drop from the other queue.
+                    val dropQueue = when (request.command) {
+                        DeviceControlCommand.BEEP -> if (beepQueue.isNotEmpty()) beepQueue else highToneQueue
+                        DeviceControlCommand.HIGH_TONE -> if (highToneQueue.isNotEmpty()) highToneQueue else beepQueue
+                        else -> beepQueue
+                    }
+                    if (dropQueue.isNotEmpty()) dropQueue.removeFirst()
+                }
+
+                when (request.command) {
+                    DeviceControlCommand.BEEP -> {
+                        beepQueue.addLast(request)
+                        lastBeepEnqueueAtMs = request.enqueuedAtMs
+                    }
+                    DeviceControlCommand.HIGH_TONE -> {
+                        highToneQueue.addLast(request)
+                        lastHighEnqueueAtMs = request.enqueuedAtMs
+                    }
+                    else -> Unit
+                }
+            }
+            startAlertPlaybackLoop()
         }
     }
 
-    private fun playHighTone(frequencyHz: Int, durationMs: Int, intensity: Int) {
+    private fun startAlertPlaybackLoop() {
+        if (alertPlaybackJob?.isActive == true) return
+        alertPlaybackJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                while (isActive) {
+                    val next = alertQueueMutex.withLock {
+                        val hasBeep = beepQueue.isNotEmpty()
+                        val hasHigh = highToneQueue.isNotEmpty()
+                        if (!hasBeep && !hasHigh) return@withLock null
+
+                        val now = System.currentTimeMillis()
+                        val repeatMode = hasBeep && hasHigh &&
+                            (now - lastBeepEnqueueAtMs <= ALERT_REPEAT_WINDOW_MS) &&
+                            (now - lastHighEnqueueAtMs <= ALERT_REPEAT_WINDOW_MS)
+
+                        val nextType = if (repeatMode && hasBeep && hasHigh) {
+                            if (lastAlertType == DeviceControlCommand.BEEP) {
+                                DeviceControlCommand.HIGH_TONE
+                            } else {
+                                DeviceControlCommand.BEEP
+                            }
+                        } else if (hasBeep && hasHigh) {
+                            val beepAt = beepQueue.first().enqueuedAtMs
+                            val highAt = highToneQueue.first().enqueuedAtMs
+                            if (beepAt <= highAt) DeviceControlCommand.BEEP else DeviceControlCommand.HIGH_TONE
+                        } else if (hasBeep) {
+                            DeviceControlCommand.BEEP
+                        } else {
+                            DeviceControlCommand.HIGH_TONE
+                        }
+
+                        val request = if (nextType == DeviceControlCommand.BEEP) {
+                            beepQueue.removeFirst()
+                        } else {
+                            highToneQueue.removeFirst()
+                        }
+                        lastAlertType = nextType
+                        request
+                    } ?: break
+
+                    when (next.command) {
+                        DeviceControlCommand.BEEP -> playBeepBlocking(next)
+                        DeviceControlCommand.HIGH_TONE -> playHighToneBlocking(next)
+                        else -> Unit
+                    }
+                    delay(ALERT_GAP_MS)
+                }
+            } finally {
+                restoreAlarmVolumeIfNeeded()
+            }
+        }
+    }
+
+    private fun resolveDemoLevel(value: Int): Int {
+        val demoEnabled = AppSettingsRepository.state.value.isDemoModeEnabled
+        return if (!demoEnabled) {
+            100
+        } else {
+            value.coerceIn(0, 100)
+        }
+    }
+
+    private fun applyAlarmVolume(level: Int) {
+        if (level <= 0) return
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        val target = ((level / 100.0) * maxVolume).roundToInt().coerceIn(0, maxVolume)
+        synchronized(alarmVolumeLock) {
+            if (alarmVolumeBackup == null) {
+                alarmVolumeBackup = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+            }
+            if (audioManager.getStreamVolume(AudioManager.STREAM_ALARM) != target) {
+                audioManager.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
+            }
+        }
+    }
+
+    private fun restoreAlarmVolumeIfNeeded() {
+        synchronized(alarmVolumeLock) {
+            val backup = alarmVolumeBackup ?: return
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, backup, 0)
+            alarmVolumeBackup = null
+        }
+    }
+
+    private suspend fun playBeepBlocking(request: AlertToneRequest) {
+        val level = resolveDemoLevel(AppSettingsRepository.state.value.demoBeepLevel)
+        if (level <= 0) return
+        applyAlarmVolume(level)
+        val safeDuration = request.durationMs.coerceIn(220, 8_000)
+        val intensity = request.intensity.coerceIn(0, 3)
+        val baseHz = when (intensity) {
+            0 -> 700
+            1 -> 900
+            2 -> 1_100
+            else -> 1_300
+        }
+        val toneScale = 0.55 + (level / 100.0) * 0.45
+        val frequencyHz = (baseHz * toneScale).roundToInt().coerceIn(250, 2_000)
+        val gain = (level / 100.0 * MAX_BEEP_GAIN).coerceIn(0.0, MAX_BEEP_GAIN)
+
+        val fallbackToneType = when (intensity) {
+            0 -> ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD
+            1 -> ToneGenerator.TONE_CDMA_HIGH_L
+            2 -> ToneGenerator.TONE_CDMA_HIGH_PBX_L
+            else -> ToneGenerator.TONE_CDMA_HIGH_SS
+        }
+
+        runCatching {
+            val sampleRate = 48_000
+            val sampleCount = (sampleRate * (safeDuration / 1000.0)).toInt().coerceAtLeast(1)
+            val pcm = ShortArray(sampleCount)
+
+            val rawDotMs = (safeDuration / 27.0).roundToInt().coerceAtLeast(8)
+            val dotMs = minOf(rawDotMs, 180)
+            val dashMs = dotMs * 3
+            val intraGapMs = dotMs
+            val letterGapMs = dotMs * 3
+
+            val pattern = ArrayList<Pair<Boolean, Int>>(20)
+            fun addOn(ms: Int) {
+                if (ms > 0) pattern.add(true to ms)
+            }
+            fun addOff(ms: Int) {
+                if (ms > 0) pattern.add(false to ms)
+            }
+            fun addLetter(symbols: List<Boolean>) {
+                symbols.forEachIndexed { index, isDash ->
+                    addOn(if (isDash) dashMs else dotMs)
+                    if (index < symbols.lastIndex) addOff(intraGapMs)
+                }
+            }
+
+            addLetter(listOf(false, false, false)) // S: ...
+            addOff(letterGapMs)
+            addLetter(listOf(true, true, true)) // O: ---
+            addOff(letterGapMs)
+            addLetter(listOf(false, false, false)) // S: ...
+
+            val patternDuration = pattern.sumOf { it.second }
+            val trailingSilence = (safeDuration - patternDuration).coerceAtLeast(0)
+            if (trailingSilence > 0) addOff(trailingSilence)
+
+            var cursorSample = 0
+            fun writeToneSegment(durationMs: Int) {
+                if (durationMs <= 0 || cursorSample >= sampleCount) return
+                val durationSamples = (sampleRate * (durationMs / 1000.0)).toInt().coerceAtLeast(1)
+                val safeEnd = (cursorSample + durationSamples).coerceAtMost(sampleCount)
+                val segmentSamples = safeEnd - cursorSample
+                if (segmentSamples <= 0) return
+                val segmentMs = segmentSamples * 1000.0 / sampleRate
+                val rampMs = segmentMs.coerceIn(4.0, 10.0)
+                val rampSamples = (sampleRate * (rampMs / 1000.0)).toInt().coerceAtLeast(1)
+                for (i in 0 until segmentSamples) {
+                    val attack = (i + 1).toDouble() / rampSamples
+                    val release = (segmentSamples - i).toDouble() / rampSamples
+                    val env = minOf(1.0, minOf(attack, release))
+                    val angle = 2.0 * PI * frequencyHz * i / sampleRate
+                    val sample = sin(angle) * Short.MAX_VALUE * gain * env
+                    pcm[cursorSample + i] = sample.toInt().toShort()
+                }
+                cursorSample = safeEnd
+            }
+
+            fun skipSilence(durationMs: Int) {
+                if (durationMs <= 0 || cursorSample >= sampleCount) return
+                val durationSamples = (sampleRate * (durationMs / 1000.0)).toInt().coerceAtLeast(1)
+                cursorSample = (cursorSample + durationSamples).coerceAtMost(sampleCount)
+            }
+
+            pattern.forEach { (isOn, ms) ->
+                if (isOn) {
+                    writeToneSegment(ms)
+                } else {
+                    skipSilence(ms)
+                }
+            }
+
+            val track = AudioTrack(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build(),
+                pcm.size * 2,
+                AudioTrack.MODE_STATIC,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            )
+            try {
+                track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
+                track.play()
+                delay(safeDuration.toLong() + 40L)
+            } finally {
+                runCatching { track.stop() }
+                runCatching { track.release() }
+            }
+        }.onFailure { throwable ->
+            Log.w("DeviceControl", "beep playback fallback: ${throwable.message}")
+            runCatching { toneGenerator.stopTone() }
+            toneGenerator.startTone(fallbackToneType, safeDuration)
+            try {
+                delay(safeDuration.toLong())
+            } catch (_: CancellationException) {
+                // no-op
+            } finally {
+                runCatching { toneGenerator.stopTone() }
+            }
+        }
+    }
+
+    private suspend fun playHighToneBlocking(request: AlertToneRequest) {
+        val level = resolveDemoLevel(AppSettingsRepository.state.value.demoHighToneLevel)
+        if (level <= 0) return
+        applyAlarmVolume(level)
         highToneJob?.cancel()
-        highToneJob = viewModelScope.launch(Dispatchers.Default) {
+        val job = viewModelScope.launch(Dispatchers.Default) {
             runCatching {
                 val sampleRate = 48_000
-                val safeFrequency = frequencyHz.coerceIn(500, 20_000)
-                val safeDurationMs = durationMs.coerceIn(220, 8_000)
+                val safeFrequency = request.frequencyHz?.coerceIn(500, 20_000) ?: DEFAULT_HIGH_TONE_HZ
+                val safeDurationMs = request.durationMs.coerceIn(220, 8_000)
                 val sampleCount = (sampleRate * (safeDurationMs / 1000.0)).toInt().coerceAtLeast(1)
-                val gain = when (intensity.coerceIn(0, 3)) {
-                    0 -> 0.20
-                    1 -> 0.32
-                    2 -> 0.45
-                    else -> 0.58
-                }
+                val gain = (level / 100.0 * MAX_HIGH_TONE_GAIN).coerceIn(0.0, MAX_HIGH_TONE_GAIN)
                 val pcm = ShortArray(sampleCount)
                 for (idx in 0 until sampleCount) {
                     val angle = 2.0 * PI * safeFrequency * idx / sampleRate
@@ -1562,6 +2018,101 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 Log.w("DeviceControl", "high-tone playback failed: ${throwable.message}")
             }
         }
+        highToneJob = job
+        job.join()
+    }
+
+    private fun triggerLocalVibration(durationMs: Int, _intensity: Int) {
+        val vibrator = getVibrator() ?: return
+        val level = resolveDemoLevel(AppSettingsRepository.state.value.demoVibrateLevel)
+        if (level <= 0) return
+        val safeDuration = durationMs.coerceIn(200, 8_000).toLong()
+        val amplitude = ((level / 100.0) * 255.0).roundToInt().coerceIn(1, 255)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val effect = VibrationEffect.createOneShot(safeDuration, amplitude)
+            vibrator.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(safeDuration)
+        }
+    }
+
+    private fun ensureTorchReady(): String? {
+        val manager = cameraManager ?: run {
+            _uiEvents.tryEmit(UiEvent.Toast("손전등을 사용할 수 없습니다."))
+            return null
+        }
+        if (ContextCompat.checkSelfPermission(app, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            _uiEvents.tryEmit(UiEvent.Toast("손전등 사용을 위해 카메라 권한이 필요합니다."))
+            return null
+        }
+        val cameraId = resolveTorchCameraId(manager) ?: run {
+            _uiEvents.tryEmit(UiEvent.Toast("플래시가 없는 기기입니다."))
+            return null
+        }
+        return cameraId
+    }
+
+    private fun resolveTorchCameraId(manager: CameraManager): String? {
+        torchCameraId?.let { return it }
+        val cameraId = runCatching {
+            manager.cameraIdList.firstOrNull { id ->
+                manager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        }.getOrNull()
+        torchCameraId = cameraId
+        return cameraId
+    }
+
+    private fun setTorchEnabledInternal(cameraId: String, enabled: Boolean): Boolean {
+        return runCatching {
+            cameraManager?.setTorchMode(cameraId, enabled)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun disableTorchSilently() {
+        val manager = cameraManager ?: return
+        val cameraId = torchCameraId ?: resolveTorchCameraId(manager) ?: return
+        runCatching { manager.setTorchMode(cameraId, false) }
+    }
+
+    private fun startTorchSos(): Boolean {
+        val cameraId = ensureTorchReady() ?: return false
+        stopTorchSosInternal(turnOff = true)
+        torchSosJob = viewModelScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                playTorchSosSequence(cameraId)
+            }
+        }
+        isTorchSosEnabled = true
+        return true
+    }
+
+    private fun stopTorchSosInternal(turnOff: Boolean) {
+        torchSosJob?.cancel()
+        torchSosJob = null
+        isTorchSosEnabled = false
+        if (turnOff) {
+            disableTorchSilently()
+        }
+    }
+
+    private suspend fun playTorchSosSequence(cameraId: String) {
+        suspend fun blink(onMs: Long, offMs: Long) {
+            setTorchEnabledInternal(cameraId, true)
+            delay(onMs)
+            setTorchEnabledInternal(cameraId, false)
+            delay(offMs)
+        }
+
+        repeat(2) { blink(TORCH_SOS_DOT_MS, TORCH_SOS_GAP_MS) }
+        blink(TORCH_SOS_DOT_MS, TORCH_SOS_LETTER_GAP_MS)
+        repeat(2) { blink(TORCH_SOS_DASH_MS, TORCH_SOS_GAP_MS) }
+        blink(TORCH_SOS_DASH_MS, TORCH_SOS_LETTER_GAP_MS)
+        repeat(2) { blink(TORCH_SOS_DOT_MS, TORCH_SOS_GAP_MS) }
+        blink(TORCH_SOS_DOT_MS, TORCH_SOS_WORD_GAP_MS)
     }
 
     private fun getVibrator(): Vibrator? {
@@ -1577,6 +2128,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopAllRemoteAlerts() {
         runCatching { toneGenerator.stopTone() }
         highToneJob?.cancel()
+        alertPlaybackJob?.cancel()
+        viewModelScope.launch {
+            alertQueueMutex.withLock {
+                beepQueue.clear()
+                highToneQueue.clear()
+            }
+        }
+        restoreAlarmVolumeIfNeeded()
         runCatching { getVibrator()?.cancel() }
     }
 
@@ -1629,6 +2188,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun refreshSurvivorCapabilities() {
+        if (autoConnectBlocked) {
+            _uiState.update { state -> state.copy(survivors = emptyList()) }
+            return
+        }
         _uiState.update { state ->
             val peerIds = announcedPeerLastSeen.keys.sorted()
             val list = peerIds.map { peerId ->
@@ -1824,6 +2387,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun triggerLocalBeep(durationMs: Int = 1_500, intensity: Int = 2) {
+        enqueueAlertTone(
+            AlertToneRequest(
+                command = DeviceControlCommand.BEEP,
+                durationMs = durationMs,
+                intensity = intensity
+            )
+        )
+    }
+
+    fun triggerLocalVibrate(durationMs: Int = 1_500, intensity: Int = 2) {
+        triggerLocalVibration(durationMs, intensity)
+    }
+
+    fun triggerLocalHighTone(
+        durationMs: Int = 1_500,
+        intensity: Int = 2,
+        frequencyHz: Int? = null
+    ) {
+        enqueueAlertTone(
+            AlertToneRequest(
+                command = DeviceControlCommand.HIGH_TONE,
+                durationMs = durationMs,
+                intensity = intensity,
+                frequencyHz = frequencyHz ?: DEFAULT_HIGH_TONE_HZ
+            )
+        )
+    }
+
+    fun stopLocalAlerts() {
+        stopAllRemoteAlerts()
+    }
+
+    fun setTorchSosEnabled(enabled: Boolean): Boolean {
+        return if (enabled) {
+            startTorchSos()
+        } else {
+            stopTorchSosInternal(turnOff = true)
+            true
+        }
+    }
+
+    fun isTorchSosEnabled(): Boolean = isTorchSosEnabled
+
     fun updateLocalPowerSavingState(enabled: Boolean) {
         if (localPowerSavingEnabled == enabled) return
         localPowerSavingEnabled = enabled
@@ -1932,6 +2539,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_SIGNATURE_LOGS = 200
         const val MAX_PROFILE_LOGS = 200
         const val DEFAULT_HIGH_TONE_HZ = 17_500
+        const val MAX_HIGH_TONE_GAIN = 1.0
+        const val MAX_BEEP_GAIN = 0.85
+        const val ALERT_GAP_MS = 150L
+        const val MAX_ALERT_QUEUE_SIZE = 10
+        const val ALERT_REPEAT_WINDOW_MS = 4_000L
+        const val TORCH_SOS_DOT_MS = 150L
+        const val TORCH_SOS_DASH_MS = 450L
+        const val TORCH_SOS_GAP_MS = 150L
+        const val TORCH_SOS_LETTER_GAP_MS = 450L
+        const val TORCH_SOS_WORD_GAP_MS = 1_050L
     }
 
     override fun onCleared() {
@@ -1939,6 +2556,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine?.stopRecording()
         voiceRecorder?.stop()
         stopAllRemoteAlerts()
+        stopTorchSosInternal(turnOff = true)
         toneGenerator.release()
         if (wifiAwareEnabled) {
             wifiAwareRanger.stop()

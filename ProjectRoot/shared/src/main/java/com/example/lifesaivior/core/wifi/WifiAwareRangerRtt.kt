@@ -6,6 +6,7 @@ import android.net.wifi.rtt.RangingResult
 import android.net.wifi.rtt.RangingResultCallback
 import android.util.Log
 import com.example.lifesaivior.core.log.ConnectionLog
+import kotlin.math.pow
 
 // =========================================================================
 // 3. RTT 거리 측정 루프
@@ -87,6 +88,7 @@ internal fun WifiAwareRanger.handleRangingResultsOnMain(results: List<RangingRes
         rttFailureStreak = 0
         rttStatusFailStreak = 0
         val dist = best.distanceMm / 1000f
+        val signalDistance = estimateDistanceFromRssi(best.rssi)
         Log.d("WifiAware", "RTT distance=${dist}m")
         ConnectionLog.add("Aware", "RTT distance=${dist}m")
         _rttDistance.value = dist
@@ -103,15 +105,20 @@ internal fun WifiAwareRanger.handleRangingResultsOnMain(results: List<RangingRes
         }
 
         // [연결 트리거 로직]
-        // 30m 이내이고, 아직 연결 안됐고, 연결 시도 중이 아니면 -> 연결
+        // RSSI 기반 거리 추정이 가능하면 그 값을 사용하고, 그렇지 않으면 RTT 거리로 fallback.
+        val proximityMeters = signalDistance ?: dist
         if (isNdpInitiator &&
             shouldUseDataPathForCall() &&
-            dist < connectDistanceMeters &&
+            proximityMeters < connectDistanceMeters &&
             !_isConnectionReady.value &&
             !isConnecting
         ) {
-            Log.i("WifiAware", "Peer close ($dist m). Requesting NDP connection...")
-            ConnectionLog.add("Aware", "distance<$connectDistanceMeters -> connect")
+            val source = if (signalDistance != null) "rssi" else "rtt"
+            Log.i(
+                "WifiAware",
+                "Peer close ($proximityMeters m, $source). Requesting NDP connection..."
+            )
+            ConnectionLog.add("Aware", "distance<$connectDistanceMeters($source) -> connect")
             currentTargetPeer?.let { sendNdpRequestToPeer(it) }
             if (dataPathEnabled) {
                 connectToCurrentPeer()
@@ -273,4 +280,14 @@ internal fun WifiAwareRanger.rangingFailureCodeLabel(code: Int): String {
         RangingResultCallback.STATUS_CODE_FAIL_RTT_NOT_AVAILABLE -> "RTT_NOT_AVAILABLE(2)"
         else -> "UNKNOWN($code)"
     }
+}
+
+private const val RSSI_TX_POWER_DBM = -59
+private const val RSSI_PATH_LOSS_EXPONENT = 2.0
+
+internal fun WifiAwareRanger.estimateDistanceFromRssi(rssi: Int): Float? {
+    if (rssi >= 0) return null
+    val distance = 10.0.pow((RSSI_TX_POWER_DBM - rssi) / (10 * RSSI_PATH_LOSS_EXPONENT)).toFloat()
+    if (!distance.isFinite() || distance <= 0f) return null
+    return distance
 }
