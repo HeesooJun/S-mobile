@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -46,12 +47,17 @@ private val ColorSwitchOff = Color(0xFF8E8E93)
 fun SettingsScreen(
     isVoiceOn: Boolean,
     isShockOn: Boolean,
+    isDemoOn: Boolean,
+    isSosActive: Boolean = false,
+    isDemoToggleEnabled: Boolean = true,
     profileName: String = "",
     profileGender: String = "",
     profileBirthDate: String = "",
     profileNotes: String = "",
     onVoiceToggle: (Boolean) -> Unit,
     onShockToggle: (Boolean) -> Unit,
+    onDemoToggle: (Boolean) -> Unit,
+    onDemoDetails: (() -> Unit)? = null,
     onBack: () -> Unit = {},
     onEditProfile: () -> Unit = {}
 ) {
@@ -71,6 +77,7 @@ fun SettingsScreen(
 
     var showVoiceDialog by remember { mutableStateOf(false) }
     var showShockDialog by remember { mutableStateOf(false) }
+    var showDemoDialog by remember { mutableStateOf(false) }
 
 
     // --- [Logic] 권한 및 음성 켜기 처리 ---
@@ -107,6 +114,9 @@ fun SettingsScreen(
                 scale = scale,
                 isVoiceOn = isVoiceOn,
                 isShockOn = isShockOn,
+                isDemoOn = isDemoOn,
+                isSosActive = isSosActive,
+                isDemoToggleEnabled = isDemoToggleEnabled,
                 onVoiceToggle = { shouldEnable ->
                     if (shouldEnable) {
                         // '다시 보지 않기'가 체크 안 되어 있으면(false) 팝업 띄움
@@ -129,8 +139,24 @@ fun SettingsScreen(
                     } else {
                         onShockToggle(false)
                     }
+                },
+                onDemoToggle = { shouldEnable ->
+                    if (shouldEnable) {
+                        showDemoDialog = true
+                    } else {
+                        onDemoToggle(false)
+                    }
                 }
             )
+            if (onDemoDetails != null) {
+                Spacer(modifier = Modifier.height(scaledDp(16, scale)))
+                SettingsActionCard(
+                    scale = scale,
+                    label = "시연 모드 상세",
+                    actionLabel = "설정",
+                    onClick = onDemoDetails
+                )
+            }
         }
 
         // --- [Dialog] 음성 감지 설명 팝업 ---
@@ -168,6 +194,22 @@ fun SettingsScreen(
                     showShockDialog = false
                     onShockToggle(true)
                 }
+            )
+        }
+
+        // --- [Dialog] 시연 모드 주의사항 ---
+        if (showDemoDialog) {
+            ConfirmDialog(
+                scale = scale,
+                title = "시연 모드",
+                description = "주의사항: 인터넷 연결 시에도 동작합니다.",
+                confirmText = "동의합니다",
+                cancelText = "취소",
+                onConfirm = {
+                    showDemoDialog = false
+                    onDemoToggle(true)
+                },
+                onCancel = { showDemoDialog = false }
             )
         }
     }
@@ -256,6 +298,82 @@ fun ExplanationDialog(
     }
 }
 
+@Composable
+fun ConfirmDialog(
+    scale: Float,
+    title: String,
+    description: String,
+    confirmText: String,
+    cancelText: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Dialog(onDismissRequest = onCancel) {
+        Column(
+            modifier = Modifier
+                .width(scaledDp(320, scale))
+                .clip(RoundedCornerShape(scaledDp(16, scale)))
+                .background(ColorCard)
+                .padding(scaledDp(24, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = title,
+                color = ColorTextMain,
+                fontSize = scaledSp(18, scale),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(scaledDp(12, scale)))
+            Text(
+                text = description,
+                color = ColorTextSub,
+                fontSize = scaledSp(14, scale),
+                lineHeight = scaledSp(20, scale),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(scaledDp(20, scale)))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(scaledDp(10, scale))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(scaledDp(48, scale))
+                        .clip(RoundedCornerShape(scaledDp(8, scale)))
+                        .background(ColorDivider)
+                        .clickable { onCancel() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = cancelText,
+                        color = ColorTextMain,
+                        fontSize = scaledSp(14, scale),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(scaledDp(48, scale))
+                        .clip(RoundedCornerShape(scaledDp(8, scale)))
+                        .background(ColorSwitchOn)
+                        .clickable { onConfirm() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = confirmText,
+                        color = Color.White,
+                        fontSize = scaledSp(14, scale),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
 // --- (나머지 하위 컴포저블들은 기존 코드와 동일) ---
 @Composable
 private fun HeaderSection(scale: Float, onBack: () -> Unit) {
@@ -309,26 +427,96 @@ private fun InfoRow(scale: Float, label: String, value: String, showDivider: Boo
 }
 
 @Composable
-private fun SettingsControlCard(scale: Float, isVoiceOn: Boolean, isShockOn: Boolean, onVoiceToggle: (Boolean) -> Unit, onShockToggle: (Boolean) -> Unit) {
+private fun SettingsControlCard(
+    scale: Float,
+    isVoiceOn: Boolean,
+    isShockOn: Boolean,
+    isDemoOn: Boolean,
+    isSosActive: Boolean,
+    isDemoToggleEnabled: Boolean,
+    onVoiceToggle: (Boolean) -> Unit,
+    onShockToggle: (Boolean) -> Unit,
+    onDemoToggle: (Boolean) -> Unit
+) {
     Column(modifier = Modifier.fillMaxWidth().background(ColorCard, RoundedCornerShape(scaledDp(13, scale))).padding(horizontal = scaledDp(16, scale))) {
-        SettingToggleRow(scale, "음성 감지", isVoiceOn, onVoiceToggle, true)
-        SettingToggleRow(scale, "충격 감지", isShockOn, onShockToggle, false)
+        SettingToggleRow(scale, "음성 감지", isVoiceOn, onVoiceToggle, true, enabled = !isDemoOn && !isSosActive)
+        SettingToggleRow(scale, "충격 감지", isShockOn, onShockToggle, true, enabled = !isDemoOn && !isSosActive)
+        SettingToggleRow(
+            scale,
+            "시연 모드",
+            isDemoOn,
+            onDemoToggle,
+            false,
+            enabled = isDemoToggleEnabled && !isSosActive
+        )
     }
 }
 
 @Composable
-private fun SettingToggleRow(scale: Float, label: String, isChecked: Boolean, onCheckedChange: (Boolean) -> Unit, showDivider: Boolean) {
+private fun SettingsActionCard(
+    scale: Float,
+    label: String,
+    actionLabel: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ColorCard, RoundedCornerShape(scaledDp(13, scale)))
+            .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(14, scale))
+            .alpha(if (enabled) 1f else 0.45f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (enabled) Modifier.clickable { onClick() } else Modifier),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = ColorTextMain,
+                fontSize = scaledSp(16, scale),
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = actionLabel,
+                color = ColorTextSub,
+                fontSize = scaledSp(12, scale),
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingToggleRow(
+    scale: Float,
+    label: String,
+    isChecked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    showDivider: Boolean,
+    enabled: Boolean = true
+) {
     Column {
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = scaledDp(12, scale)), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = scaledDp(12, scale))
+                .alpha(if (enabled) 1f else 0.45f),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(text = label, color = ColorTextMain, fontSize = scaledSp(16, scale))
-            CustomToggleSwitch(scale, isChecked, onCheckedChange)
+            CustomToggleSwitch(scale, isChecked, onCheckedChange, enabled)
         }
         if (showDivider) Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ColorDivider))
     }
 }
 
 @Composable
-private fun CustomToggleSwitch(scale: Float, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun CustomToggleSwitch(scale: Float, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean) {
     val width = scaledDp(52, scale)
     val height = scaledDp(32, scale)
     val thumbSize = scaledDp(28, scale)
@@ -337,7 +525,15 @@ private fun CustomToggleSwitch(scale: Float, checked: Boolean, onCheckedChange: 
     val thumbOffset by animateDpAsState(targetValue = if (checked) width - thumbSize - padding else padding, animationSpec = tween(300), label = "ThumbOffset")
 
     Box(
-        modifier = Modifier.size(width, height).clip(RoundedCornerShape(100)).background(backgroundColor).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onCheckedChange(!checked) }
+        modifier = Modifier
+            .size(width, height)
+            .clip(RoundedCornerShape(100))
+            .background(backgroundColor)
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onCheckedChange(!checked) }
     ) {
         Box(modifier = Modifier.size(thumbSize).offset(x = thumbOffset).align(Alignment.CenterStart).background(Color.White, CircleShape))
     }

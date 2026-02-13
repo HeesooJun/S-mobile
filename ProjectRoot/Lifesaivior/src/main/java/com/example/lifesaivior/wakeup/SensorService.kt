@@ -11,12 +11,20 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.lifesaivior.R
+import com.example.lifesaivior.core.settings.AppSettingsRepository
+import kotlin.math.PI
+import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 class SensorService : Service(), SensorEventListener {
@@ -31,6 +39,8 @@ class SensorService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
+    private var isolationDetector: IsolationDetector? = null
+    private var isMonitoringActive = false
 
     // [핵심 1] 서비스 종료 상태 플래그 (오작동 방지)
     @Volatile private var isDestroyed = false
@@ -50,16 +60,28 @@ class SensorService : Service(), SensorEventListener {
         createNotificationChannels()
         startForegroundServiceNotification()
 
+        AppSettingsRepository.init(this)
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        isolationDetector = IsolationDetector(
+            context = this,
+            onIsolated = { startMonitoringSensors() },
+            onRecovered = { stopMonitoringSensors() }
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // [수정] 서비스가 죽은 상태라면 리스너 등록 안 함
-        if (!isDestroyed) {
-            accelerometer?.also { sensor ->
-                sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)
-            }
+        val settings = AppSettingsRepository.snapshot(this)
+        if (settings.isSosBackgroundSuspended) {
+            Log.w("SensorService", "🛑 SOS 활성화 상태: 센서 감지 중단")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (settings.isDemoModeEnabled) {
+            startMonitoringSensors()
+        } else {
+            isolationDetector?.startMonitoring()
         }
         return START_STICKY
     }
@@ -105,15 +127,36 @@ class SensorService : Service(), SensorEventListener {
 
         Log.e("SensorService", "🚨 비상 알림 발동! 원인: $reason")
 
-        // [핵심 1] 두 설정 모두 OFF (충격 + 음성)
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean("shock_detection", false)
-            .putBoolean("voice_detection", false) // 음성 감지도 끔
-            .apply()
+        // [핵심 1] SOS 동안 백그라운드 감지 중단 플래그 설정
+        AppSettingsRepository.init(this)
+        val settings = AppSettingsRepository.snapshot(this)
+        if (!settings.isSosBackgroundSuspended) {
+            AppSettingsRepository.setSosBackgroundSuspended(
+                context = this,
+                suspended = true,
+                backupVoice = settings.isVoiceDetectionEnabled,
+                backupShock = settings.isShockDetectionEnabled,
+                backupDemo = settings.isDemoModeEnabled
+            )
+        }
+        if (settings.isDemoModeEnabled) {
+            // 시연 모드에서는 1회 발동 후 자동 OFF 처리
+            AppSettingsRepository.setDemoMode(this, false)
+            AppSettingsRepository.setVoiceDetection(this, false)
+            AppSettingsRepository.setShockDetection(this, false)
+            AppSettingsRepository.setSosBackgroundSuspended(this, false)
+            AppSettingsRepository.clearSosBackup(this)
+        } else {
+            val voiceEnabled = settings.isVoiceDetectionEnabled
+            val shockEnabled = settings.isShockDetectionEnabled
+            if (shockEnabled && !voiceEnabled) {
+                AppSettingsRepository.setShockDetection(this, false)
+            }
+        }
+        playEasAlertAsync()
 
         // 1. 센서 해제
-        sensorManager.unregisterListener(this)
+        stopMonitoringSensors()
 
         // 2. 실행할 액티비티 인텐트 준비
         val activityIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
@@ -210,6 +253,8 @@ class SensorService : Service(), SensorEventListener {
         super.onDestroy()
         isDestroyed = true // [핵심] 깃발 내림
 
+        isolationDetector?.stopMonitoring()
+
         // [핵심 4] UI 렉 방지: 센서 해제도 백그라운드 스레드에서 처리 (비동기)
         val sm = sensorManager
         val listener = this
@@ -223,6 +268,112 @@ class SensorService : Service(), SensorEventListener {
         }.start()
 
         Log.d("SensorService", "🔴 센서 서비스 종료")
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        BackgroundMonitorReceiver.schedule(this)
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun startMonitoringSensors() {
+        if (isDestroyed || isMonitoringActive) return
+        accelerometer?.also { sensor ->
+            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)
+            isMonitoringActive = true
+        }
+    }
+
+    private fun stopMonitoringSensors() {
+        if (!isMonitoringActive) return
+        try {
+            sensorManager.unregisterListener(this)
+        } catch (_: Exception) {
+        } finally {
+            isMonitoringActive = false
+        }
+    }
+
+    private fun playEasAlertAsync() {
+        Thread {
+            try {
+                AppSettingsRepository.init(this)
+                val settings = AppSettingsRepository.snapshot(this)
+                val level = if (settings.isDemoModeEnabled) settings.demoEasLevel else 100
+                if (level <= 0) return@Thread
+
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val stream = AudioManager.STREAM_ALARM
+                val originalVolume = audioManager.getStreamVolume(stream)
+                val maxVolume = audioManager.getStreamMaxVolume(stream)
+                val targetVolume = ((level / 100.0) * maxVolume).roundToInt().coerceIn(0, maxVolume)
+                audioManager.setStreamVolume(stream, targetVolume, 0)
+
+                val freq1 = 853.0
+                val freq2 = 960.0
+                val durationSeconds = 5
+                val sampleRate = 44_100
+                val gain = (level / 100.0).coerceIn(0.0, 1.0)
+
+                val numSamples = durationSeconds * sampleRate
+                val generatedSnd = ByteArray(2 * numSamples)
+
+                try {
+                    for (i in 0 until numSamples) {
+                        val time = i.toDouble() / sampleRate
+                        val wave1 = sin(2.0 * PI * freq1 * time)
+                        val wave2 = sin(2.0 * PI * freq2 * time)
+                        val mixed = (wave1 + wave2) * 0.5 * gain
+                        val maxVal = Short.MAX_VALUE.toInt()
+                        val value = (mixed * maxVal).toInt()
+                        generatedSnd[2 * i] = (value and 0x00FF).toByte()
+                        generatedSnd[2 * i + 1] = ((value and 0xFF00) shr 8).toByte()
+                    }
+
+                    val audioTrack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        AudioTrack.Builder()
+                            .setAudioAttributes(
+                                AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_ALARM)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                    .build()
+                            )
+                            .setAudioFormat(
+                                AudioFormat.Builder()
+                                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                    .setSampleRate(sampleRate)
+                                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                    .build()
+                            )
+                            .setBufferSizeInBytes(generatedSnd.size)
+                            .setTransferMode(AudioTrack.MODE_STATIC)
+                            .build()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        AudioTrack(
+                            AudioManager.STREAM_ALARM,
+                            sampleRate,
+                            AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                            generatedSnd.size,
+                            AudioTrack.MODE_STATIC
+                        )
+                    }
+
+                    try {
+                        audioTrack.write(generatedSnd, 0, generatedSnd.size)
+                        audioTrack.play()
+                        Thread.sleep(durationSeconds * 1000L + 50L)
+                    } finally {
+                        runCatching { audioTrack.stop() }
+                        runCatching { audioTrack.release() }
+                    }
+                } finally {
+                    audioManager.setStreamVolume(stream, originalVolume, 0)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

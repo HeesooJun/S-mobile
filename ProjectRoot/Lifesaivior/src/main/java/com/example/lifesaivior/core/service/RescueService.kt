@@ -9,6 +9,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.lifesaivior.R
 import com.example.lifesaivior.presentation.AppShutdownHooks
+import com.example.lifesaivior.wakeup.BackgroundMonitorReceiver
 
 class RescueService : Service() {
 
@@ -35,6 +36,7 @@ class RescueService : Service() {
             }
             ACTION_SHUTDOWN -> {
                 try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
+                BackgroundMonitorReceiver.schedule(this)
                 AppShutdownHooks.requestShutdown()
                 stopSelf()
                 return START_NOT_STICKY
@@ -45,6 +47,7 @@ class RescueService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        BackgroundMonitorReceiver.schedule(this)
         AppShutdownHooks.requestShutdown()
         stopSelf()
         super.onTaskRemoved(rootIntent)

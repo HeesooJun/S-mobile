@@ -48,7 +48,7 @@ class WifiAwareRanger(internal val context: Context) {
     @Volatile internal var peerAddress: InetAddress? = null
     @Volatile internal var peerPort: Int? = null
     internal val socketPort = 50000
-    internal val connectDistanceMeters = 30.0
+    internal val connectDistanceMeters = 20.0
     internal val maxUdpPayload = 1200
     internal var lastNetSendLogAt = 0L
     internal var lastNetRecvLogAt = 0L

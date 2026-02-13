@@ -35,7 +35,9 @@ fun RescueChatScreen(
     onSettings: () -> Unit,
     inputValue: String,
     onInputChange: (String) -> Unit,
-    onSendClick: () -> Unit
+    onSendClick: () -> Unit,
+    autoPlayMessageKey: String? = null,
+    onAutoPlayMessageConsumed: (String) -> Unit = {}
 ) {
     var showSignatureLog by remember { mutableStateOf(false) }
     var showDbLog by remember { mutableStateOf(false) }
@@ -44,7 +46,10 @@ fun RescueChatScreen(
         gradient = listOf(Color.Transparent, Color.Transparent),
         vignetteColor = Color.Transparent
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
             RescueChatContent(
                 roomTitle = roomTitle,
                 participants = peerNodes.map { it.peerId to (it.nickname ?: "") },
@@ -54,6 +59,8 @@ fun RescueChatScreen(
                 onShowSignatureLog = { showSignatureLog = true },
                 onShowDbLog = { showDbLog = true },
                 onSendProfileTest = onSendProfileTest,
+                autoPlayMessageKey = autoPlayMessageKey,
+                onAutoPlayMessageConsumed = onAutoPlayMessageConsumed,
                 inputValue = inputValue,
                 onInputChange = onInputChange,
                 onSendClick = onSendClick,
