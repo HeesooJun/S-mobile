@@ -151,14 +151,14 @@ AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](ProjectRoot/docs/ai/ai_p
 
 ### Build
 ```powershell
-.\ProjectRoot\gradlew.bat :lifesaivior:assembleDebug
-.\ProjectRoot\gradlew.bat :rescuer:assembleDebug
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :lifesaivior:assembleDebug
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :rescuer:assembleDebug
 ```
 
 ### Test
 ```powershell
-.\ProjectRoot\gradlew.bat :lifesaivior:testDebugUnitTest
-.\ProjectRoot\gradlew.bat :rescuer:testDebugUnitTest
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :lifesaivior:testDebugUnitTest
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :rescuer:testDebugUnitTest
 ```
 
 ## 지원 범위 / 제약
