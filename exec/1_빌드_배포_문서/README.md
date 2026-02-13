@@ -22,14 +22,16 @@ Android Studio/Gradle 표준 설정만으로 재현 가능하도록 했고, SDK 
 
 ## APK 빠른 설치 (이미 준비된 파일 사용)
 이미 프로젝트 루트에 APK가 준비되어 있습니다.
-- [lifesaivior.apk](../../lifesaivior.apk)
-- [rescuer.apk](../../rescuer.apk)
+- [lifesaivior(0.6.0).apk](../../lifesaivior(0.6.0).apk) - 시연 기준 빌드(망 안정화 개선 반영)
+- [rescuer(0.6.0).apk](../../rescuer(0.6.0).apk) - 시연 기준 빌드(망 안정화 개선 반영)
+- [lifesaivior(0.3.0).apk](../../lifesaivior(0.3.0).apk) - 내부 기능 검증용 빌드(비시연)
+- [rescuer(0.3.0).apk](../../rescuer(0.3.0).apk) - 내부 기능 검증용 빌드(비시연)
 
-Android Studio를 열어둔 상태에서 **프로젝트 루트** 기준으로 아래만 실행하면 됩니다.
+Android Studio를 열어둔 상태에서 **프로젝트 루트** 기준으로 아래(시연 기준 `0.6.0`)만 실행하면 됩니다.
 ```powershell
 adb devices
-adb install -r .\lifesaivior.apk
-adb install -r .\rescuer.apk
+adb install -r ".\lifesaivior(0.6.0).apk"
+adb install -r ".\rescuer(0.6.0).apk"
 ```
 
 ADB가 인식되지 않으면 Android SDK의 `platform-tools` 경로에서 실행:
@@ -105,3 +107,4 @@ adb uninstall com.example.lifesaivior.rescuer
 ## 배포 특이사항
 - 오프라인 전제
 - UWB/BLE/Wi-Fi Aware는 기기 하드웨어 및 권한에 따라 동작
+- APK 버전 정책: `0.3.0`은 내부 검증용(비시연), `0.6.0`은 시연 기준(망 안정화 개선 반영)
