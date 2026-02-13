@@ -57,6 +57,7 @@ import kotlin.math.pow
 @Composable
 fun RescuerSurvivorDbScreen(
     survivors: List<SurvivorProfile>,
+    meshSurvivors: List<SurvivorProfile> = emptyList(),
     peerRssiMap: Map<String, Int> = emptyMap(),
     peerBatteryMap: Map<String, Int> = emptyMap(),
     onDisconnectClick: () -> Unit,
@@ -82,19 +83,36 @@ fun RescuerSurvivorDbScreen(
     val neonGreen = AppColors.Green
     val neonRed = AppColors.Red
 
-    val callingSurvivorName = survivors
+    val callingSurvivorName = (survivors + meshSurvivors)
         .firstOrNull { it.peerId == callingPeerId }
         ?.name
         ?.ifBlank { "생존자" }
         ?: "생존자"
 
     var query by rememberSaveable { mutableStateOf("") }
+    var showMeshInfo by rememberSaveable { mutableStateOf(false) }
 
     val filtered = remember(query, survivors) {
         val q = query.trim()
         if (q.isEmpty()) survivors
         else survivors.filter { survivor -> survivor.name.contains(q, ignoreCase = true) }
     }
+    val filteredMesh = remember(query, meshSurvivors) {
+        val q = query.trim()
+        if (q.isEmpty()) meshSurvivors
+        else meshSurvivors.filter { survivor -> survivor.name.contains(q, ignoreCase = true) }
+    }
+    val infoList = remember(showMeshInfo, filtered, filteredMesh) {
+        if (!showMeshInfo) return@remember emptyList()
+        val seen = mutableSetOf<String>()
+        val merged = mutableListOf<SurvivorProfile>()
+        (filtered + filteredMesh).forEach { survivor ->
+            val key = survivor.peerId.ifBlank { "name:${survivor.name}" }
+            if (seen.add(key)) merged.add(survivor)
+        }
+        merged
+    }
+    val hasAnySurvivor = if (showMeshInfo) infoList.isNotEmpty() else filtered.isNotEmpty()
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -156,12 +174,19 @@ fun RescuerSurvivorDbScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "생존자 ${survivors.size}명 발견",
+                                    text = "직접 ${survivors.size}명 · 메쉬 ${meshSurvivors.size}명",
                                     color = AppColors.Gray500,
                                     fontSize = scaledSp(12, scale),
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
+                            ActionPill(
+                                label = if (showMeshInfo) "직접 리스트" else "전체 리스트",
+                                tint = AppColors.Gray500,
+                                scale = scale,
+                                onClick = { showMeshInfo = !showMeshInfo }
+                            )
+                            Spacer(modifier = Modifier.width(scaledDp(8, scale)))
                             ActionPill(
                                 label = if (isDisconnecting) "연결 해제 중" else "연결 해제",
                                 tint = neonRed,
@@ -217,7 +242,7 @@ fun RescuerSurvivorDbScreen(
 
                 Spacer(modifier = Modifier.height(scaledDp(14, scale)))
 
-                if (filtered.isEmpty()) {
+                if (!hasAnySurvivor) {
                     Spacer(modifier = Modifier.height(scaledDp(22, scale)))
                     Surface(
                         color = charcoal.copy(alpha = 0.55f),
@@ -234,17 +259,17 @@ fun RescuerSurvivorDbScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "수신된 생존자 정보가 없습니다",
+                                text = if (showMeshInfo) "메쉬 정보가 없습니다" else "수신된 생존자 정보가 없습니다",
                                 color = AppColors.White.copy(alpha = 0.85f),
                                 fontSize = scaledSp(14, scale),
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
-                                text = "연결되면 이 화면에 자동으로 표시됩니다",
+                                text = if (showMeshInfo) "메쉬 수신이 들어오면 표시됩니다" else "연결되면 이 화면에 자동으로 표시됩니다",
                                 color = AppColors.White.copy(alpha = 0.5f),
                                 fontSize = scaledSp(12, scale),
-                        fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -254,47 +279,72 @@ fun RescuerSurvivorDbScreen(
                         contentPadding = PaddingValues(bottom = scaledDp(24, scale)),
                         verticalArrangement = Arrangement.spacedBy(scaledDp(12, scale))
                     ) {
-                        items(filtered) { survivor ->
-                            SurvivorCard(
-                                survivor = survivor,
-                                scale = scale,
-                                charcoal = charcoal,
-                                border = border,
-                                neonGreen = neonGreen,
-                                neonRed = neonRed,
-                                peerRssiMap = peerRssiMap,
-                                peerBatteryMap = peerBatteryMap,
-                                isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
-                                onSelectTarget = onSelectTarget,
-                                isCalling = survivor.peerId.isNotBlank() && survivor.peerId == callingPeerId,
-                                isInCallWithPeer = isInCall &&
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == (callPeerId ?: activeSurvivor?.peerId),
-                                liveDistanceMeters = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == activeDistancePeerId
-                                ) {
-                                    activeDistanceMeters
-                                } else {
-                                    null
-                                },
-                                liveDistanceSource = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == activeDistancePeerId
-                                ) {
-                                    activeDistanceSource
-                                } else {
-                                    DistanceMeasurementSource.NONE
-                                },
-                                rttDistanceMeters = if (
-                                    survivor.peerId.isNotBlank() &&
-                                    survivor.peerId == callPeerId
-                                ) {
-                                    callPeerRttCm?.toFloat()?.div(100f)
-                                } else {
-                                    null
-                                }
-                            )
+                        if (showMeshInfo) {
+                            items(infoList) { survivor ->
+                                SurvivorCard(
+                                    survivor = survivor,
+                                    scale = scale,
+                                    charcoal = charcoal,
+                                    border = border,
+                                    neonGreen = neonGreen,
+                                    neonRed = neonRed,
+                                    peerRssiMap = peerRssiMap,
+                                    peerBatteryMap = peerBatteryMap,
+                                    isSelected = false,
+                                    onSelectTarget = {},
+                                    isCalling = false,
+                                    isInCallWithPeer = false,
+                                    liveDistanceMeters = null,
+                                    liveDistanceSource = DistanceMeasurementSource.NONE,
+                                    rttDistanceMeters = null,
+                                    isSelectable = false,
+                                    statusLabel = "정보",
+                                    statusColor = AppColors.Gray400
+                                )
+                            }
+                        } else {
+                            items(filtered) { survivor ->
+                                SurvivorCard(
+                                    survivor = survivor,
+                                    scale = scale,
+                                    charcoal = charcoal,
+                                    border = border,
+                                    neonGreen = neonGreen,
+                                    neonRed = neonRed,
+                                    peerRssiMap = peerRssiMap,
+                                    peerBatteryMap = peerBatteryMap,
+                                    isSelected = survivor.peerId.isNotBlank() && survivor.peerId == selectedTargetPeerId,
+                                    onSelectTarget = onSelectTarget,
+                                    isCalling = survivor.peerId.isNotBlank() && survivor.peerId == callingPeerId,
+                                    isInCallWithPeer = isInCall &&
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == (callPeerId ?: activeSurvivor?.peerId),
+                                    liveDistanceMeters = if (
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == activeDistancePeerId
+                                    ) {
+                                        activeDistanceMeters
+                                    } else {
+                                        null
+                                    },
+                                    liveDistanceSource = if (
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == activeDistancePeerId
+                                    ) {
+                                        activeDistanceSource
+                                    } else {
+                                        DistanceMeasurementSource.NONE
+                                    },
+                                    rttDistanceMeters = if (
+                                        survivor.peerId.isNotBlank() &&
+                                        survivor.peerId == callPeerId
+                                    ) {
+                                        callPeerRttCm?.toFloat()?.div(100f)
+                                    } else {
+                                        null
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -393,7 +443,10 @@ private fun SurvivorCard(
     isInCallWithPeer: Boolean,
     liveDistanceMeters: Float?,
     liveDistanceSource: DistanceMeasurementSource,
-    rttDistanceMeters: Float?
+    rttDistanceMeters: Float?,
+    isSelectable: Boolean = true,
+    statusLabel: String? = null,
+    statusColor: Color? = null
 ) {
     val rssi = peerRssiMap[survivor.peerId]
     val battery = peerBatteryMap[survivor.peerId]?.coerceIn(0, 100)
@@ -436,13 +489,13 @@ private fun SurvivorCard(
         battery >= 35 -> Color(0xFFFFB74D)
         else -> AppColors.Red
     }
-    val stateColor = when {
+    val stateColor = statusColor ?: when {
         isInCallWithPeer -> neonRed
         isCalling -> neonRed
         isSelected -> neonGreen
         else -> AppColors.Gray500
     }
-    val stateText = when {
+    val stateText = statusLabel ?: when {
         isInCallWithPeer -> "통화 중"
         isCalling -> "연결 중"
         isSelected -> "선택됨"
@@ -462,7 +515,13 @@ private fun SurvivorCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onSelectTarget(survivor) }
+                    .then(
+                        if (isSelectable) {
+                            Modifier.clickable { onSelectTarget(survivor) }
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(horizontal = scaledDp(16, scale), vertical = scaledDp(12, scale)),
                 verticalAlignment = Alignment.CenterVertically
             ) {

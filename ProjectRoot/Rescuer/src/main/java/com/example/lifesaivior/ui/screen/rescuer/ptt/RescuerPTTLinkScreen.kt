@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,8 +56,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.lifesaivior.R
 import com.example.lifesaivior.core.model.ChatMessage
 import com.example.lifesaivior.presentation.MeshVisualEvent
@@ -345,13 +348,23 @@ fun RescuerPTTLinkScreen(
             }
             }
             if (showControlModal) {
-                Dialog(onDismissRequest = { showControlModal = false }) {
+                Dialog(
+                    onDismissRequest = { showControlModal = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
                     val modalScale = scale / 1.08f
+                    val actionTextSize = scaledSp(11, modalScale)
+                    val hintTextSize = scaledSp(10, modalScale)
+                    val controlButtonHeight = scaledDp(52, scale)
+                    val actionContentPadding = PaddingValues(
+                        horizontal = scaledDp(4, scale),
+                        vertical = 0.dp
+                    )
                     Surface(
                         color = AppColors.Gray900,
                         shape = RoundedCornerShape(scaledDp(18, scale)),
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .fillMaxWidth(0.9f)
                             .padding(horizontal = scaledDp(6, scale))
                     ) {
                         Column(
@@ -367,7 +380,7 @@ fun RescuerPTTLinkScreen(
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
-                                text = "RSSI 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
+                                text = "거리 탐지음 ${rssiFeedbackMode.label} · 강도 ${rssiFeedbackLevel.label}",
                                 color = AppColors.Gray400,
                                 fontSize = scaledSp(11, modalScale),
                                 fontWeight = FontWeight.Medium
@@ -437,11 +450,18 @@ fun RescuerPTTLinkScreen(
                                         disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
                                         disabledContentColor = AppColors.Gray500
                                     ),
+                                    contentPadding = actionContentPadding,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(scaledDp(52, scale))
+                                        .height(controlButtonHeight)
                                 ) {
-                                    Text("절전 켜기", fontSize = scaledSp(11, modalScale))
+                                    Text(
+                                        text = "절전 켜기",
+                                        fontSize = actionTextSize,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Clip
+                                    )
                                 }
                                 Button(
                                     enabled = remoteControlEnabled,
@@ -452,11 +472,18 @@ fun RescuerPTTLinkScreen(
                                         disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
                                         disabledContentColor = AppColors.Gray500
                                     ),
+                                    contentPadding = actionContentPadding,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(scaledDp(52, scale))
+                                        .height(controlButtonHeight)
                                 ) {
-                                    Text("절전 해제", fontSize = scaledSp(11, modalScale))
+                                    Text(
+                                        text = "절전 해제",
+                                        fontSize = actionTextSize,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Clip
+                                    )
                                 }
                                 RepeatActionButton(
                                     label = "비프음",
@@ -466,9 +493,11 @@ fun RescuerPTTLinkScreen(
                                     onStickyStateChanged = { stickyBeep = it },
                                     isRepeating = isBeepRepeating,
                                     onActiveStateChanged = { isBeepRepeating = it },
+                                    fontSize = actionTextSize,
+                                    contentPadding = actionContentPadding,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(scaledDp(44, scale))
+                                        .height(controlButtonHeight)
                                 )
                             }
                             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
@@ -490,11 +519,18 @@ fun RescuerPTTLinkScreen(
                                         disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
                                         disabledContentColor = AppColors.Gray500
                                     ),
+                                    contentPadding = actionContentPadding,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(scaledDp(44, scale))
+                                        .height(controlButtonHeight)
                                 ) {
-                                    Text("송출 중지", fontSize = scaledSp(11, modalScale))
+                                    Text(
+                                        text = "송출 중지",
+                                        fontSize = actionTextSize,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Clip
+                                    )
                                 }
                                 RepeatActionButton(
                                     label = "저주파",
@@ -504,9 +540,11 @@ fun RescuerPTTLinkScreen(
                                     onStickyStateChanged = { stickyVibrate = it },
                                     isRepeating = isVibrateRepeating,
                                     onActiveStateChanged = { isVibrateRepeating = it },
+                                    fontSize = actionTextSize,
+                                    contentPadding = actionContentPadding,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(scaledDp(44, scale))
+                                        .height(controlButtonHeight)
                                 )
                                 RepeatActionButton(
                                     label = "고주파",
@@ -516,9 +554,11 @@ fun RescuerPTTLinkScreen(
                                     onStickyStateChanged = { stickyHighTone = it },
                                     isRepeating = isHighToneRepeating,
                                     onActiveStateChanged = { isHighToneRepeating = it },
+                                    fontSize = actionTextSize,
+                                    contentPadding = actionContentPadding,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(scaledDp(44, scale))
+                                        .height(controlButtonHeight)
                                 )
                             }
                             Spacer(modifier = Modifier.height(scaledDp(6, scale)))
@@ -531,44 +571,42 @@ fun RescuerPTTLinkScreen(
                                 text = if (repeatingItems.isNotEmpty()) {
                                     "반복 송출 중: ${repeatingItems.joinToString(", ")} · [송출 중지]로 해제"
                                 } else {
-                                    "안내: 비프음/저주파/고주파를 3초 길게 누르면 반복 고정"
+                                    "안내: 비프음/저주파/고주파를 1초 길게 누르면 반복 고정"
                                 },
                                 color = if (repeatingItems.isNotEmpty()) AppColors.Green else AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale),
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                fontSize = hintTextSize,
+                                fontWeight = FontWeight.Medium
                             )
                             Spacer(modifier = Modifier.height(scaledDp(8, scale)))
                             Text(
                                 text = "절전 켜기/해제: 대상 기기의 절전 상태를 직접 변경합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale)
+                                fontSize = hintTextSize
                             )
                             Text(
                                 text = "비프음: 대상 기기에서 경고음을 재생합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale)
+                                fontSize = hintTextSize
                             )
                             Text(
                                 text = "저주파: 대상 기기에서 진동을 울립니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale)
+                                fontSize = hintTextSize
                             )
                             Text(
                                 text = "고주파: 대상 기기에서 높은 주파수대의 음을 재생합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale)
+                                fontSize = hintTextSize
                             )
                             Text(
                                 text = "강도 변경: 알림 강도를 약/중/강으로 순환합니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale)
+                                fontSize = hintTextSize
                             )
                             Text(
                                 text = "송출 중지: 현재 실행 중인 반복 송출을 즉시 멈춥니다.",
                                 color = AppColors.Gray500,
-                                fontSize = scaledSp(10, modalScale)
+                                fontSize = hintTextSize
                             )
                             Spacer(modifier = Modifier.height(scaledDp(14, scale)))
                             Text(
@@ -1119,6 +1157,8 @@ private fun RepeatActionButton(
     onStickyStateChanged: (Boolean) -> Unit = {},
     isRepeating: Boolean,
     onActiveStateChanged: (Boolean) -> Unit = {},
+    fontSize: TextUnit = scaledSp(11, LocalAppScale.current),
+    contentPadding: PaddingValues = PaddingValues(horizontal = scaledDp(4, LocalAppScale.current)),
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -1143,7 +1183,7 @@ private fun RepeatActionButton(
             currentActiveStateChanged(false)
             return@LaunchedEffect
         }
-        delay(3_000L)
+        delay(1_000L)
         if (!isPressed || isStickyActive) return@LaunchedEffect
         // Consume release click once so sticky mode does not immediately toggle off.
         suppressTap = true
@@ -1175,11 +1215,12 @@ private fun RepeatActionButton(
             disabledContainerColor = AppColors.Gray800.copy(alpha = 0.35f),
             disabledContentColor = AppColors.Gray500
         ),
+        contentPadding = contentPadding,
         modifier = modifier
     ) {
         Text(
             text = if (isRepeating) "$label · 반복중" else label,
-            fontSize = scaledSp(11, LocalAppScale.current),
+            fontSize = fontSize,
             fontWeight = FontWeight.SemiBold
         )
     }

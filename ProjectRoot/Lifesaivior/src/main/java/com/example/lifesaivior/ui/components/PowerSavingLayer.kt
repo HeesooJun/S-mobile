@@ -24,6 +24,7 @@ import com.example.lifesaivior.ui.theme.scaledSp
 fun PowerSavingLayer(
     isPowerSaving: Boolean,
     isForceExit: Boolean = false,
+    resetToken: Long = 0L,
     onRequestExitPowerSaving: () -> Unit
 ) {
     if (!isPowerSaving) return
@@ -36,6 +37,13 @@ fun PowerSavingLayer(
 
     // 절전모드 들어가면 무조건 블랙부터 시작
     LaunchedEffect(isPowerSaving) { revealed = false }
+
+    // 외부에서 절전 모드 재요청 시(예: 원격 패킷), 즉시 블랙으로 복귀
+    LaunchedEffect(resetToken) {
+        if (resetToken > 0L) {
+            revealed = false
+        }
+    }
 
     // (옵션) 강제 트리거가 있으면 화면 잠깐 보여주기
     LaunchedEffect(isForceExit) {
@@ -54,7 +62,11 @@ fun PowerSavingLayer(
         Modifier.clickable(
             indication = null,
             interactionSource = interactionSource
-        ) { revealed = true }
+        ) {
+            // 터치 시 절전 해제를 시도하고, 실패(배터리 임계 등) 시 안내 노출
+            onRequestExitPowerSaving()
+            revealed = true
+        }
     } else {
         Modifier
     }
@@ -97,7 +109,7 @@ fun PowerSavingLayer(
                 )
                 Spacer(modifier = Modifier.height(scaledDp(6, scale)))
                 Text(
-                    text = "10초 후 다시 꺼집니다.\n유지하려면 절전모드를 해제하세요.",
+                    text = "터치 시 절전모드를 해제합니다.\n배터리 부족 시 유지될 수 있습니다.",
                     color = AppColors.Gray400,
                     fontSize = scaledSp(11, scale),
                     fontWeight = FontWeight.Medium

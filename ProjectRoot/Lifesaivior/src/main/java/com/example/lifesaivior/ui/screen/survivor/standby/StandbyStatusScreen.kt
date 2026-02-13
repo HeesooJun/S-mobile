@@ -57,8 +57,6 @@ fun StandbyStatusScreen(
     val classifier = remember(context) { EmergencyIntentClassifierKorean(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var hasTriggered by remember { mutableStateOf(false) }
-    var sttStatus by remember { mutableStateOf("🎙️ 대기 중") }
-    var lastHeardText by remember { mutableStateOf("") }
 
     ScreenScaffold(
         gradient = listOf(AppColors.Gray900, AppColors.Black),
@@ -70,13 +68,10 @@ fun StandbyStatusScreen(
             // 기존 내용 (LaunchedEffect 등 로직 포함)
             LaunchedEffect(sttResetToken, sttEnabled) {
                 hasTriggered = false
-                sttStatus = "🎙️ 대기 중"
-                lastHeardText = ""
                 if (sttEnabled) {
-                    delay(30_000)
+                    delay(5_000)
                     if (!hasTriggered) {
                         hasTriggered = true
-                        sttStatus = "⏱️ 시간 초과로 자동 송출"
                         onSos(true)
                     }
                 }
@@ -89,10 +84,9 @@ fun StandbyStatusScreen(
                 var detector: VoiceTriggerDetector? = null
                 detector = VoiceTriggerDetector(
                     context = context,
-                    onStateChange = { state -> sttStatus = state },
+                    onStateChange = { },
                     onDetected = { text ->
                         if (hasTriggered) return@VoiceTriggerDetector
-                        lastHeardText = text
                         classifier.checkIntent(text) { isEmergency, _, _ ->
                             if (!isEmergency) {
                                 detector?.startListening()
@@ -135,14 +129,6 @@ fun StandbyStatusScreen(
                         fontSize = scaledSp(14, scale),
                         fontWeight = FontWeight.Medium
                     )
-                    if (sttEnabled) {
-                        Text(
-                            text = sttStatus,
-                            color = AppColors.Gray500,
-                            fontSize = scaledSp(11, scale),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
                 }
 
                 Column(
@@ -193,28 +179,6 @@ fun StandbyStatusScreen(
                                 fontSize = scaledSp(11, scale),
                                 textAlign = TextAlign.Center
                             )
-                            if (sttEnabled) {
-                                Spacer(modifier = Modifier.height(scaledDp(16, scale)))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            color = AppColors.White,
-                                            shape = RoundedCornerShape(scaledDp(10, scale))
-                                        )
-                                        .padding(
-                                            horizontal = scaledDp(14, scale),
-                                            vertical = scaledDp(10, scale)
-                                        )
-                                ) {
-                                    Text(
-                                        text = if (lastHeardText.isBlank()) "최근 인식된 문장이 여기 표시됩니다." else lastHeardText,
-                                        color = AppColors.Gray900,
-                                        fontSize = scaledSp(12, scale),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(scaledDp(48, scale)))

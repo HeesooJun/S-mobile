@@ -145,16 +145,20 @@ AI 파이프라인 상세는 [`docs/ai/ai_pipeline.md`](ProjectRoot/docs/ai/ai_p
 - JDK 17+
 - Android SDK (`compileSdk 36`, `targetSdk 34`, `minSdk 31`)
 
+### APK 버전 안내 (루트 배포 파일 기준)
+- `0.3.0`: 내부 기능 검증용 빌드 (비시연)
+- `0.6.0`: 시연 기준 빌드 (망 안정화 개선 반영)
+
 ### Build
 ```powershell
-.\ProjectRoot\gradlew.bat :lifesaivior:assembleDebug
-.\ProjectRoot\gradlew.bat :rescuer:assembleDebug
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :lifesaivior:assembleDebug
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :rescuer:assembleDebug
 ```
 
 ### Test
 ```powershell
-.\ProjectRoot\gradlew.bat :lifesaivior:testDebugUnitTest
-.\ProjectRoot\gradlew.bat :rescuer:testDebugUnitTest
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :lifesaivior:testDebugUnitTest
+.\ProjectRoot\gradlew.bat -p .\ProjectRoot :rescuer:testDebugUnitTest
 ```
 
 ## 지원 범위 / 제약

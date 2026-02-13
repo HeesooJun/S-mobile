@@ -3,7 +3,6 @@ package com.example.lifesaivior
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -33,6 +32,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.lifesaivior.core.service.RescueService
+import com.example.lifesaivior.core.settings.AppSettingsRepository
 import com.example.lifesaivior.presentation.AppViewModel
 import com.example.lifesaivior.presentation.UiEvent
 import com.example.lifesaivior.ui.theme.LifesaiviorTheme
@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
 
         // [핵심] 앱 켜자마자 권한 체크 시작 (PermissionViewModel UI 없음)
         checkAllPermissions()
+        handleAutoSosIntent(intent)
 
         setContent {
             LifesaiviorTheme(darkTheme = true, dynamicColor = false) {
@@ -153,8 +154,10 @@ class MainActivity : ComponentActivity() {
                         onClearDeviceMonitoring = { viewModel.clearDeviceMonitoring() },
                         isVoiceDetectionEnabled = uiState.isVoiceDetectionEnabled,
                         isShockDetectionEnabled = uiState.isShockDetectionEnabled,
+                        isDemoModeEnabled = uiState.isDemoModeEnabled,
                         onSetVoiceDetection = { enabled -> viewModel.setVoiceDetection(enabled) },
-                        onSetShockDetection = { enabled -> viewModel.setShockDetection(enabled) }
+                        onSetShockDetection = { enabled -> viewModel.setShockDetection(enabled) },
+                        onSetDemoMode = { enabled -> viewModel.setDemoMode(enabled) }
                     )
                 } else {
                     // [로딩 화면] 체크하는 동안 검은 화면에 로딩바 (이 위로 팝업들이 뜸)
@@ -177,6 +180,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAutoSosIntent(intent)
     }
 
     override fun onResume() {
@@ -212,6 +221,12 @@ class MainActivity : ComponentActivity() {
             viewModel.onPermissionsResult(true)
             checkOverlayPermission()
         }
+    }
+
+    private fun handleAutoSosIntent(intent: Intent?) {
+        if (intent?.action != SensorService.ACTION_SENSOR_TRIGGERED) return
+        val reason = intent.getStringExtra("triggerReason")
+        viewModel.onAutoSosTriggered(reason)
     }
 
     // 2단계: 오버레이 권한 체크
@@ -264,9 +279,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshServices() {
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        val isVoiceOn = prefs.getBoolean("voice_detection", false)
-        val isShockOn = prefs.getBoolean("shock_detection", false)
+        AppSettingsRepository.init(this)
+        val settings = AppSettingsRepository.snapshot(this)
+        if (settings.isSosBackgroundSuspended) {
+            stopService(Intent(this, VoiceService::class.java))
+            stopService(Intent(this, SensorService::class.java))
+            return
+        }
+        val isDemoOn = settings.isDemoModeEnabled
+        val isVoiceOn = settings.isVoiceDetectionEnabled || isDemoOn
+        val isShockOn = settings.isShockDetectionEnabled || isDemoOn
 
         if (isVoiceOn) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {

@@ -131,6 +131,7 @@ fun AppNavHost(
     var pendingSosNavigation by remember { mutableStateOf(false) }
     var pendingSosRoute by remember { mutableStateOf<String?>(null) }
     var sosStartedAt by remember { mutableStateOf(0L) }
+    var rescueSignalArmed by remember { mutableStateOf(false) }
     var sttResetToken by remember { mutableStateOf(0L) }
     var sttEnabled by remember { mutableStateOf(false) }
     var autoAcceptedPeerId by remember { mutableStateOf<String?>(null) }
@@ -232,27 +233,15 @@ fun AppNavHost(
     )
     LaunchedEffect(
         isInCall,
-        currentRoute,
-        distanceTargetPeerId,
-        shouldPreferUwbOnDetail,
-        allowRttFallbackForUwbTarget
+        callDebugState.activeTransport,
+        callDebugState.wifiAware.isReady
     ) {
-        // RTT는 구조자 상세(PTT) + 통화 아님 상태에서만 활성화합니다.
-        val enableRtt = !isInCall &&
-            isPttRoute &&
-            !distanceTargetPeerId.isNullOrBlank() &&
-            (!shouldPreferUwbOnDetail || allowRttFallbackForUwbTarget)
-        Log.i(
-            "NavHostPTT",
-            "RTT gate route=$currentRoute inCall=$isInCall enableRtt=$enableRtt preferUwb=$shouldPreferUwbOnDetail rttFallback=$allowRttFallbackForUwbTarget"
-        )
+        val enableRtt =
+            isInCall &&
+                callDebugState.activeTransport == CallTransportType.WIFI_AWARE &&
+                !callDebugState.wifiAware.isReady
+        Log.i("NavHostPTT", "RTT gate inCall=$isInCall enableRtt=$enableRtt")
         appViewModel.wifiAwareRanger.setRttEnabled(enableRtt)
-    }
-    LaunchedEffect(isInCall) {
-        // 통화 중에는 NDP/RTT 간섭 방지를 위해 RTT를 강제로 끕니다.
-        if (isInCall) {
-            appViewModel.wifiAwareRanger.setRttEnabled(false)
-        }
     }
     LaunchedEffect(shouldRunDistanceTracking) {
         appViewModel.setBleRssiActiveMode(shouldRunDistanceTracking)
@@ -271,8 +260,18 @@ fun AppNavHost(
     }
     val navigateSingleRoute: (String) -> Unit = nav@{ targetRoute ->
         val currentRoute = navController.currentBackStackEntry?.destination?.route
-        if (pendingNavigateRoute != null || currentRoute == targetRoute) return@nav
+        if (pendingNavigateRoute != null || currentRoute == targetRoute) {
+            Log.d(
+                "NavHost",
+                "navigateSingleRoute blocked current=$currentRoute target=$targetRoute pending=$pendingNavigateRoute"
+            )
+            return@nav
+        }
         pendingNavigateRoute = targetRoute
+        Log.d(
+            "NavHost",
+            "navigateSingleRoute -> $targetRoute (from $currentRoute)"
+        )
         if (!navController.popBackStack(targetRoute, inclusive = false)) {
             navController.navigate(targetRoute) {
                 launchSingleTop = true
@@ -315,6 +314,10 @@ fun AppNavHost(
         resetRssiFeedbackDefaults()
     }
     fun requestRescuerCall(survivor: SurvivorProfile) {
+        if (appState.directPeerIds.isEmpty()) {
+            Toast.makeText(context, "BLE mesh 연결이 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (callingTargetPeerId != null) {
             val pendingPeerId = callingTargetPeerId.orEmpty()
             if (pendingPeerId == survivor.peerId) {
@@ -405,10 +408,24 @@ fun AppNavHost(
             if (cachedSelected != null && cachedSelected.peerId == selectedPeerId) {
                 return cachedSelected
             }
+            if (directPeerIds.contains(selectedPeerId)) {
+                return SurvivorProfile(
+                    name = appState.peerNicknames[selectedPeerId].orEmpty(),
+                    peerId = selectedPeerId
+                )
+            }
             return null
         }
         selectedTargetSurvivor?.let { return it }
         return appState.survivors.singleOrNull()
+    }
+
+    fun clearDirectSelection(reason: String) {
+        selectedTargetPeerId = null
+        selectedTargetSurvivor = null
+        callingTargetPeerId = null
+        callAttemptStartedAtMs = 0L
+        Log.d("NavHost", "clearDirectSelection reason=$reason")
     }
 
     fun startCallAudioService() {
@@ -469,7 +486,12 @@ fun AppNavHost(
     }
 
     LaunchedEffect(isConnected, pendingSosNavigation, sosStartedAt) {
+        Log.d(
+            "NavHostSOS",
+            "sosCheck pending=$pendingSosNavigation connected=$isConnected startedAt=$sosStartedAt route=${pendingSosRoute ?: "null"}"
+        )
         if (pendingSosNavigation && isConnected) {
+            Log.d("NavHostSOS", "sosReady -> switching to PTT after min duration")
             val elapsed = System.currentTimeMillis() - sosStartedAt
             if (elapsed < minSosDurationMs) {
                 delay(minSosDurationMs - elapsed)
@@ -481,37 +503,48 @@ fun AppNavHost(
         }
     }
 
-    LaunchedEffect(isConnected, isRescueSignalActive, backStackEntry) {
+    LaunchedEffect(isRescueSignalActive) {
+        if (!isRescueSignalActive) {
+            rescueSignalArmed = false
+        }
+    }
+
+    LaunchedEffect(isConnected, isRescueSignalActive) {
+        if (!isRescueSignalActive || rescueSignalArmed) return@LaunchedEffect
+        rescueSignalArmed = true
         val currentRoute = backStackEntry?.destination?.route
-        if (isRescueSignalActive && !isConnected) {
-            val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
-                currentRoute == AppRoute.RescuerPTT.route ||
-                currentRoute == AppRoute.RescuerEmergency.route ||
-                currentRoute == AppRoute.RescuerSurvivorDb.route ||
-                currentRoute == AppRoute.RescuerMeshMap.route
-            val targetRoute = if (isRescuerRoute) {
-                AppRoute.RescuerEmergency.route
-            } else {
-                AppRoute.SurvivorEmergency.route
+        val isRescuerRoute = currentRoute == AppRoute.RescuerStandby.route ||
+            currentRoute == AppRoute.RescuerPTT.route ||
+            currentRoute == AppRoute.RescuerEmergency.route ||
+            currentRoute == AppRoute.RescuerSurvivorDb.route ||
+            currentRoute == AppRoute.RescuerMeshMap.route
+        val isRescuerPttRoute = currentRoute == AppRoute.RescuerPTT.route
+        val targetRoute = if (isRescuerRoute) {
+            AppRoute.RescuerEmergency.route
+        } else {
+            AppRoute.SurvivorEmergency.route
+        }
+        if (!pendingSosNavigation) {
+            pendingSosNavigation = true
+            pendingSosRoute = when {
+                isRescuerRoute && isRescuerPttRoute -> AppRoute.RescuerPTT.route
+                isRescuerRoute -> AppRoute.RescuerSurvivorDb.route
+                else -> AppRoute.SurvivorPTT.route
             }
-            if (!pendingSosNavigation) {
-                pendingSosNavigation = true
-                pendingSosRoute = if (isRescuerRoute) {
-                    AppRoute.RescuerSurvivorDb.route
+            sosStartedAt = System.currentTimeMillis()
+            Log.d(
+                "NavHostSOS",
+                "sosStart route=$targetRoute pendingRoute=$pendingSosRoute current=$currentRoute connected=$isConnected"
+            )
+        }
+        if (!isConnected && currentRoute != targetRoute) {
+            navController.navigate(targetRoute) {
+                if (currentRoute == AppRoute.SurvivorPTT.route ||
+                    currentRoute == AppRoute.RescuerPTT.route
+                ) {
+                    popUpTo(currentRoute) { inclusive = true }
                 } else {
-                    AppRoute.SurvivorPTT.route
-                }
-                sosStartedAt = System.currentTimeMillis()
-            }
-            if (currentRoute != targetRoute) {
-                navController.navigate(targetRoute) {
-                    if (currentRoute == AppRoute.SurvivorPTT.route ||
-                        currentRoute == AppRoute.RescuerPTT.route
-                    ) {
-                        popUpTo(currentRoute) { inclusive = true }
-                    } else {
-                        launchSingleTop = true
-                    }
+                    launchSingleTop = true
                 }
             }
         }
@@ -625,6 +658,39 @@ fun AppNavHost(
             selectedTargetSurvivor = null
         }
     }
+
+      LaunchedEffect(
+          appState.survivors,
+          backStackEntry?.destination?.route,
+          selectedTargetPeerId,
+          selectedTargetSurvivor,
+          isInCall,
+          callingTargetPeerId,
+          pendingTarget
+      ) {
+          val currentRoute = backStackEntry?.destination?.route
+          if (currentRoute != AppRoute.RescuerPTT.route) return@LaunchedEffect
+          if (isInCall || callingTargetPeerId != null || pendingTarget != null) return@LaunchedEffect
+
+          val targetPeerId = selectedTargetPeerId ?: selectedTargetSurvivor?.peerId
+          if (targetPeerId.isNullOrBlank()) return@LaunchedEffect
+
+          val activePeerIds = appState.survivors
+              .map { it.peerId }
+              .filter { it.isNotBlank() }
+              .toSet() + directPeerIds.filter { it.isNotBlank() }
+          if (targetPeerId !in activePeerIds) {
+              delay(1_500L)
+              val refreshedActive = appState.survivors
+                  .map { it.peerId }
+                  .filter { it.isNotBlank() }
+                  .toSet() + directPeerIds.filter { it.isNotBlank() }
+              if (targetPeerId !in refreshedActive) {
+                  selectedTargetPeerId = null
+                  selectedTargetSurvivor = null
+              }
+          }
+      }
 
     LaunchedEffect(
         appState.survivors,
@@ -948,6 +1014,7 @@ fun AppNavHost(
                     pendingSosNavigation = true
                     pendingSosRoute = AppRoute.SurvivorPTT.route
                     sosStartedAt = System.currentTimeMillis()
+                    Log.d("NavHostSOS", "user SOS -> pendingRoute=$pendingSosRoute")
                     navigateSingleRoute(AppRoute.SurvivorEmergency.route)
                 }
             )
@@ -1061,6 +1128,7 @@ fun AppNavHost(
                         callViewModel.endCall()
                     }
                     resetRssiFeedbackDefaults()
+                    clearDirectSelection("ptt_disconnect")
                     onDisconnect()
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
@@ -1068,6 +1136,7 @@ fun AppNavHost(
                 onProfile = { navigateSingleRoute(AppRoute.SurvivorProfile.route) },
                 onPanicClear = {
                     resetRssiFeedbackDefaults()
+                    clearDirectSelection("ptt_panic_clear")
                     onDisconnect()
                     Toast.makeText(context, "모든 연결을 해제했습니다.", Toast.LENGTH_SHORT).show()
                 },
@@ -1186,6 +1255,7 @@ fun AppNavHost(
                     pendingSosNavigation = true
                     pendingSosRoute = AppRoute.RescuerSurvivorDb.route
                     sosStartedAt = System.currentTimeMillis()
+                    Log.d("NavHostSOS", "user SOS -> pendingRoute=$pendingSosRoute")
                     navigateSingleRoute(AppRoute.RescuerEmergency.route)
                 }
             )
@@ -1427,7 +1497,12 @@ fun AppNavHost(
                 }
                 if (resolvedRssiMode == RssiFeedbackMode.OFF) return@LaunchedEffect
                 val distance = displayDistanceMeters ?: return@LaunchedEffect
-                if (displayDistanceSource != DistanceMeasurementSource.RSSI) return@LaunchedEffect
+                if (
+                    displayDistanceSource != DistanceMeasurementSource.RSSI &&
+                    displayDistanceSource != DistanceMeasurementSource.UWB
+                ) {
+                    return@LaunchedEffect
+                }
                 val now = System.currentTimeMillis()
                 val clampedDistance = distance.coerceIn(0f, 10f)
                 val normalizedProximity = (10f - clampedDistance) / 10f
@@ -1493,7 +1568,17 @@ fun AppNavHost(
                 chatRoomTitle = pttChatRoomTitle,
                 chatMessages = pttChatMessages,
                 onRequestCall = {
-                    val survivor = resolveSelectedSurvivorForCall()
+                    val resolved = resolveSelectedSurvivorForCall()
+                    val fallbackPeerId = selectedTargetPeerId
+                        ?: directPeerIds.firstOrNull().orEmpty()
+                    val survivor = resolved ?: if (fallbackPeerId.isNotBlank()) {
+                        SurvivorProfile(
+                            name = appState.peerNicknames[fallbackPeerId].orEmpty(),
+                            peerId = fallbackPeerId
+                        )
+                    } else {
+                        null
+                    }
                     if (survivor == null) {
                         Toast.makeText(context, "생존자를 먼저 선택해 주세요.", Toast.LENGTH_SHORT).show()
                         navigateSingleRoute(AppRoute.RescuerSurvivorDb.route)
@@ -1509,6 +1594,7 @@ fun AppNavHost(
                 onPanicClear = {
                     endCurrentRescuerCall()
                     resetRssiFeedbackDefaults()
+                    clearDirectSelection("ptt_panic_clear")
                     onDisconnect()
                     Toast.makeText(context, "모든 연결을 해제했습니다.", Toast.LENGTH_SHORT).show()
                 },
@@ -1606,8 +1692,18 @@ fun AppNavHost(
             }
             val dbDistanceState by distanceViewModel.uiState.collectAsState()
             val dbDistanceTargetPeerId = selectedTargetPeerId ?: targetSurvivor?.peerId ?: appState.callPeerId
+            val directPeerSet = appState.directPeerIds.toSet()
+            val directSurvivors = appState.survivors.filter { survivor ->
+                val peerId = survivor.peerId
+                peerId.isNotBlank() && directPeerSet.contains(peerId)
+            }
+            val meshSurvivors = appState.survivors.filter { survivor ->
+                val peerId = survivor.peerId
+                peerId.isNotBlank() && !directPeerSet.contains(peerId)
+            }
             RescuerSurvivorDbScreen(
-                survivors = appState.survivors,
+                survivors = directSurvivors,
+                meshSurvivors = meshSurvivors,
                 peerRssiMap = appState.peerRssi,
                 peerBatteryMap = appState.peerBatteryLevels,
                 onDisconnectClick = {
@@ -1631,6 +1727,7 @@ fun AppNavHost(
                     callingTargetPeerId = null
                     callAttemptStartedAtMs = 0L
                     resetRssiFeedbackDefaults()
+                    clearDirectSelection("db_disconnect")
                     onDisconnect()
                     navigateSingleRoute(AppRoute.RescuerStandby.route)
                 },
